@@ -1,0 +1,10 @@
+{
+  "databasePath": "./data/dnb-crate.sqlite",
+  "libraryRoots": ["./library"],
+  "outputRoot": "./output",
+  "logLevel": "info",
+  "supportedExtensions": [".wav", ".flac", ".mp3", ".m4a", ".aiff", ".aif"],
+  "loudnessTargetLufs": -14,
+  "truePeakCeilingDb": -1,
+  "renderWorkerLimit": 1
+}

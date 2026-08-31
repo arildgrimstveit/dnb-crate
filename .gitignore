@@ -1,0 +1,37 @@
+node_modules/
+dist/
+coverage/
+.turbo/
+.DS_Store
+Thumbs.db
+
+# Local runtime
+.env
+.env.local
+dnb-crate.config.json
+dnb-crate.local.config.json
+data/
+output/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Private media — never commit a real library
+library/
+private/
+*.mp3
+*.flac
+*.m4a
+*.aiff
+*.aif
+!fixtures/audio/**
+!packages/catalog/test/helpers/**
+
+# Logs and editor
+*.log
+.vscode/
+.idea/

@@ -1,0 +1,22 @@
+{
+  "name": "@dnb-crate/mcp-server",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "dnb-crate-mcp": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@dnb-crate/catalog": "workspace:*",
+    "@dnb-crate/domain": "workspace:*",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "pino": "^9.9.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.0.0"
+  }
+}

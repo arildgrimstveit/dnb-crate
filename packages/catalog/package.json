@@ -1,0 +1,22 @@
+{
+  "name": "@dnb-crate/catalog",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@dnb-crate/audio-analysis": "workspace:*",
+    "@dnb-crate/audio-renderer": "workspace:*",
+    "@dnb-crate/domain": "workspace:*",
+    "better-sqlite3": "^13.0.3",
+    "music-metadata": "^11.15.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13"
+  }
+}

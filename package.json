@@ -1,0 +1,32 @@
+{
+  "name": "dnb-crate-mcp",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first MCP server for cataloging a private drum & bass library.",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "cli": "tsx apps/cli/src/main.ts",
+    "mcp": "tsx apps/mcp-server/src/main.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@types/node": "^24.3.0",
+    "eslint": "^9.34.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.41.0",
+    "vitest": "^4.1.11"
+  }
+}

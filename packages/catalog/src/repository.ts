@@ -1,0 +1,746 @@
+import type {
+  CuePoint,
+  CuePointType,
+  LibraryStats,
+  PublicTrack,
+  SearchTracksInput,
+  SearchTracksResult,
+  Track,
+  TrackMetadataPatch,
+} from "@dnb-crate/domain";
+import {
+  DomainError,
+  SEARCH_LIMIT_DEFAULT,
+  SEARCH_LIMIT_MAX,
+  normalizeKey,
+  toPublicTrack,
+} from "@dnb-crate/domain";
+
+import type { SqliteDatabase } from "./db.ts";
+import { decodeCursor, encodeCursor, type SortDirection, type SortField } from "./pagination.ts";
+
+type TrackRow = {
+  id: string;
+  file_path: string;
+  file_fingerprint: string;
+  artist: string | null;
+  title: string;
+  album: string | null;
+  duration_ms: number;
+  sample_rate_hz: number | null;
+  channels: number | null;
+  bpm: number | null;
+  bpm_source: Track["bpmSource"];
+  musical_key: string | null;
+  camelot_key: string | null;
+  key_source: Track["keySource"];
+  energy: number | null;
+  rating: number | null;
+  notes: string | null;
+  analysis_status: Track["analysisStatus"];
+  file_missing: number;
+  created_at: string;
+  updated_at: string;
+};
+
+const SORT_COLUMNS: Record<SortField, string> = {
+  title: "tracks.title",
+  artist: "tracks.artist",
+  album: "tracks.album",
+  bpm: "tracks.bpm",
+  energy: "tracks.energy",
+  rating: "tracks.rating",
+  durationMs: "tracks.duration_ms",
+  createdAt: "tracks.created_at",
+  updatedAt: "tracks.updated_at",
+};
+
+export type UpsertTrackInput = Omit<
+  Track,
+  | "id"
+  | "subgenres"
+  | "moods"
+  | "tags"
+  | "energy"
+  | "rating"
+  | "notes"
+  | "analysisStatus"
+  | "fileMissing"
+  | "createdAt"
+  | "updatedAt"
+> & {
+  id?: string;
+};
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function likePattern(query: string): string {
+  return `%${query.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+}
+
+export class TrackRepository {
+  constructor(private readonly db: SqliteDatabase) {}
+
+  findById(id: string): Track | null {
+    const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(id) as
+      TrackRow | undefined;
+    return row ? this.hydrate(row) : null;
+  }
+
+  findByFilePath(filePath: string): Track | null {
+    const row = this.db.prepare("SELECT * FROM tracks WHERE file_path = ?").get(filePath) as
+      TrackRow | undefined;
+    return row ? this.hydrate(row) : null;
+  }
+
+  findByFingerprint(fingerprint: string): Track[] {
+    const rows = this.db
+      .prepare("SELECT * FROM tracks WHERE file_fingerprint = ?")
+      .all(fingerprint) as TrackRow[];
+    return rows.map((row) => this.hydrate(row));
+  }
+
+  listPathIndex(): Array<{ id: string; filePath: string }> {
+    const rows = this.db.prepare("SELECT id, file_path FROM tracks").all() as {
+      id: string;
+      file_path: string;
+    }[];
+    return rows.map((row) => ({ id: row.id, filePath: row.file_path }));
+  }
+
+  listAll(): Track[] {
+    const rows = this.db.prepare("SELECT * FROM tracks").all() as TrackRow[];
+    return rows.map((row) => this.hydrate(row));
+  }
+
+  listCuePoints(trackId: string): CuePoint[] {
+    const rows = this.db
+      .prepare("SELECT * FROM cue_points WHERE track_id = ? ORDER BY position_ms, id")
+      .all(trackId) as Array<{
+      id: string;
+      track_id: string;
+      type: CuePointType;
+      position_ms: number;
+      beat_index: number | null;
+      bar_index: number | null;
+      confidence: number | null;
+      source: CuePoint["source"];
+      label: string | null;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      trackId: row.track_id,
+      type: row.type,
+      positionMs: row.position_ms,
+      beatIndex: row.beat_index,
+      barIndex: row.bar_index,
+      confidence: row.confidence,
+      source: row.source,
+      label: row.label,
+    }));
+  }
+
+  replaceCuePoints(
+    trackId: string,
+    cuePoints: Array<{
+      type: CuePointType;
+      positionMs: number;
+      beatIndex?: number | null;
+      barIndex?: number | null;
+      confidence?: number | null;
+      label?: string | null;
+    }>,
+  ): CuePoint[] {
+    const existing = this.findById(trackId);
+    if (!existing) {
+      throw new DomainError("TRACK_NOT_FOUND", `No track with id ${trackId}`);
+    }
+    for (const cue of cuePoints) {
+      if (cue.positionMs > existing.durationMs) {
+        throw new DomainError(
+          "INVALID_METADATA",
+          `Cue ${cue.type} at ${cue.positionMs}ms is past track duration ${existing.durationMs}ms`,
+        );
+      }
+    }
+    const run = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM cue_points WHERE track_id = ?").run(trackId);
+      const stmt = this.db.prepare(
+        `INSERT INTO cue_points (id, track_id, type, position_ms, beat_index, bar_index, confidence, source, label)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', ?)`,
+      );
+      for (const cue of cuePoints) {
+        stmt.run(
+          crypto.randomUUID(),
+          trackId,
+          cue.type,
+          cue.positionMs,
+          cue.beatIndex ?? null,
+          cue.barIndex ?? null,
+          cue.confidence ?? null,
+          cue.label ?? null,
+        );
+      }
+    });
+    run();
+    return this.listCuePoints(trackId);
+  }
+
+  setAnalysisStatus(trackId: string, status: Track["analysisStatus"]): void {
+    const existing = this.findById(trackId);
+    if (!existing) {
+      throw new DomainError("TRACK_NOT_FOUND", `No track with id ${trackId}`);
+    }
+    this.db
+      .prepare("UPDATE tracks SET analysis_status = ?, updated_at = ? WHERE id = ?")
+      .run(status, nowIso(), trackId);
+  }
+
+  applyAnalyzedMetadata(
+    trackId: string,
+    input: { bpm: number | null; musicalKey: string | null },
+  ): Track {
+    const existing = this.findById(trackId);
+    if (!existing) {
+      throw new DomainError("TRACK_NOT_FOUND", `No track with id ${trackId}`);
+    }
+    let bpm = existing.bpm;
+    let bpmSource = existing.bpmSource;
+    let musicalKey = existing.musicalKey;
+    let camelotKey = existing.camelotKey;
+    let keySource = existing.keySource;
+    if (existing.bpmSource !== "manual" && input.bpm !== null) {
+      bpm = input.bpm;
+      bpmSource = "analyzed";
+    }
+    if (existing.keySource !== "manual" && input.musicalKey !== null) {
+      const normalized = normalizeKey(input.musicalKey);
+      musicalKey = normalized?.musicalKey ?? input.musicalKey;
+      camelotKey = normalized?.camelotKey ?? null;
+      keySource = "analyzed";
+    }
+    this.db
+      .prepare(
+        `UPDATE tracks SET bpm = ?, bpm_source = ?, musical_key = ?, camelot_key = ?, key_source = ?,
+          analysis_status = 'complete', updated_at = ? WHERE id = ?`,
+      )
+      .run(bpm, bpmSource, musicalKey, camelotKey, keySource, nowIso(), trackId);
+    return this.findById(trackId)!;
+  }
+
+  insertAnalyzedCuesIfAbsent(
+    trackId: string,
+    cues: Array<{
+      type: CuePointType;
+      positionMs: number;
+      beatIndex: number | null;
+      barIndex: number | null;
+      confidence: number;
+    }>,
+  ): void {
+    const existing = this.listCuePoints(trackId);
+    const present = new Set(existing.map((cue) => cue.type));
+    const stmt = this.db.prepare(
+      `INSERT INTO cue_points (id, track_id, type, position_ms, beat_index, bar_index, confidence, source, label)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'analyzed', NULL)`,
+    );
+    const run = this.db.transaction(() => {
+      for (const cue of cues) {
+        if (present.has(cue.type)) {
+          continue;
+        }
+        stmt.run(
+          crypto.randomUUID(),
+          trackId,
+          cue.type,
+          cue.positionMs,
+          cue.beatIndex,
+          cue.barIndex,
+          cue.confidence,
+        );
+        present.add(cue.type);
+      }
+    });
+    run();
+  }
+
+  listForResource(limit: number): PublicTrack[] {
+    const rows = this.db
+      .prepare("SELECT * FROM tracks ORDER BY updated_at DESC, id ASC LIMIT ?")
+      .all(limit) as TrackRow[];
+    return rows.map((row) => toPublicTrack(this.hydrate(row)));
+  }
+
+  upsertFromScan(input: UpsertTrackInput): { track: Track; moved: boolean } {
+    const existingByPath = this.findByFilePath(input.filePath);
+    if (existingByPath) {
+      return { track: this.updateScanFields(existingByPath.id, input), moved: false };
+    }
+
+    const fingerprintMatches = this.findByFingerprint(input.fileFingerprint);
+    const moveCandidate = fingerprintMatches.find((track) => track.fileMissing);
+    if (moveCandidate) {
+      return { track: this.updateScanFields(moveCandidate.id, input), moved: true };
+    }
+
+    const id = input.id ?? crypto.randomUUID();
+    const timestamp = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO tracks (
+          id, file_path, file_fingerprint, artist, title, album, duration_ms, sample_rate_hz, channels,
+          bpm, bpm_source, musical_key, camelot_key, key_source, analysis_status, file_missing, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_analyzed', 0, ?, ?)`,
+      )
+      .run(
+        id,
+        input.filePath,
+        input.fileFingerprint,
+        input.artist,
+        input.title,
+        input.album,
+        input.durationMs,
+        input.sampleRateHz,
+        input.channels,
+        input.bpm,
+        input.bpmSource,
+        input.musicalKey,
+        input.camelotKey,
+        input.keySource,
+        timestamp,
+        timestamp,
+      );
+    const created = this.findById(id);
+    if (!created) {
+      throw new DomainError("SCAN_FAILED", "Failed to read track after insert");
+    }
+    return { track: created, moved: false };
+  }
+
+  markMissing(ids: string[]): void {
+    if (ids.length === 0) {
+      return;
+    }
+    const timestamp = nowIso();
+    const stmt = this.db.prepare("UPDATE tracks SET file_missing = 1, updated_at = ? WHERE id = ?");
+    const run = this.db.transaction(() => {
+      for (const id of ids) {
+        stmt.run(timestamp, id);
+      }
+    });
+    run();
+  }
+
+  updateMetadata(id: string, patch: TrackMetadataPatch): Track {
+    const existing = this.findById(id);
+    if (!existing) {
+      throw new DomainError("TRACK_NOT_FOUND", `No track with id ${id}`);
+    }
+
+    const energy = patch.energy === undefined ? existing.energy : patch.energy;
+    const rating = patch.rating === undefined ? existing.rating : patch.rating;
+    const notes = patch.notes === undefined ? existing.notes : patch.notes;
+    let bpm = existing.bpm;
+    let bpmSource = existing.bpmSource;
+    let musicalKey = existing.musicalKey;
+    let camelotKey = existing.camelotKey;
+    let keySource = existing.keySource;
+    if (patch.bpm !== undefined) {
+      bpm = patch.bpm;
+      bpmSource = patch.bpm === null ? null : "manual";
+    }
+    if (patch.musicalKey !== undefined) {
+      if (patch.musicalKey === null) {
+        musicalKey = null;
+        camelotKey = null;
+        keySource = null;
+      } else {
+        const normalized = normalizeKey(patch.musicalKey);
+        musicalKey = normalized?.musicalKey ?? patch.musicalKey;
+        camelotKey = normalized?.camelotKey ?? null;
+        keySource = "manual";
+      }
+    }
+    const timestamp = nowIso();
+    const run = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `UPDATE tracks SET energy = ?, rating = ?, notes = ?, bpm = ?, bpm_source = ?,
+            musical_key = ?, camelot_key = ?, key_source = ?, updated_at = ? WHERE id = ?`,
+        )
+        .run(
+          energy,
+          rating,
+          notes,
+          bpm,
+          bpmSource,
+          musicalKey,
+          camelotKey,
+          keySource,
+          timestamp,
+          id,
+        );
+
+      if (patch.moods !== undefined) {
+        this.replaceList("track_moods", "mood", id, patch.moods);
+      }
+      if (patch.subgenres !== undefined) {
+        this.replaceList("track_subgenres", "subgenre", id, patch.subgenres);
+      }
+      if (patch.tags !== undefined) {
+        this.replaceList("track_tags", "tag", id, patch.tags);
+      }
+    });
+    run();
+
+    const updated = this.findById(id);
+    if (!updated) {
+      throw new DomainError("TRACK_NOT_FOUND", `No track with id ${id} after update`);
+    }
+    return updated;
+  }
+
+  search(input: SearchTracksInput): SearchTracksResult {
+    const sort: SortField = input.sort ?? "title";
+    const direction: SortDirection = input.direction ?? "asc";
+    const limit = Math.min(input.limit ?? SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX);
+    const column = SORT_COLUMNS[sort];
+
+    const where: string[] = [];
+    const params: unknown[] = [];
+
+    if (input.query !== undefined && input.query.trim().length > 0) {
+      const pattern = likePattern(input.query.trim());
+      where.push(`(
+        tracks.title LIKE ? ESCAPE '\\' OR
+        IFNULL(tracks.artist, '') LIKE ? ESCAPE '\\' OR
+        IFNULL(tracks.album, '') LIKE ? ESCAPE '\\' OR
+        IFNULL(tracks.notes, '') LIKE ? ESCAPE '\\' OR
+        EXISTS (SELECT 1 FROM track_tags tt WHERE tt.track_id = tracks.id AND tt.tag LIKE ? ESCAPE '\\')
+      )`);
+      params.push(pattern, pattern, pattern, pattern, pattern);
+    }
+
+    if (input.artist !== undefined) {
+      where.push("LOWER(tracks.artist) = LOWER(?)");
+      params.push(input.artist);
+    }
+    if (input.bpmMin !== undefined) {
+      where.push("tracks.bpm >= ?");
+      params.push(input.bpmMin);
+    }
+    if (input.bpmMax !== undefined) {
+      where.push("tracks.bpm <= ?");
+      params.push(input.bpmMax);
+    }
+    if (input.musicalKey !== undefined) {
+      where.push("(LOWER(tracks.musical_key) = LOWER(?) OR LOWER(tracks.camelot_key) = LOWER(?))");
+      params.push(input.musicalKey, input.musicalKey);
+    }
+    if (input.camelotKey !== undefined) {
+      where.push("LOWER(tracks.camelot_key) = LOWER(?)");
+      params.push(input.camelotKey);
+    }
+    if (input.energyMin !== undefined) {
+      where.push("tracks.energy >= ?");
+      params.push(input.energyMin);
+    }
+    if (input.energyMax !== undefined) {
+      where.push("tracks.energy <= ?");
+      params.push(input.energyMax);
+    }
+    if (input.minRating !== undefined) {
+      where.push("tracks.rating >= ?");
+      params.push(input.minRating);
+    }
+    if (input.analysisStatus !== undefined) {
+      where.push("tracks.analysis_status = ?");
+      params.push(input.analysisStatus);
+    }
+
+    this.pushListFilter(
+      where,
+      params,
+      "track_subgenres",
+      "subgenre",
+      input.subgenres,
+      input.subgenresMatch ?? "any",
+    );
+    this.pushListFilter(
+      where,
+      params,
+      "track_moods",
+      "mood",
+      input.moods,
+      input.moodsMatch ?? "any",
+    );
+    this.pushListFilter(where, params, "track_tags", "tag", input.tags, input.tagsMatch ?? "any");
+
+    if (input.cursor) {
+      const cursor = decodeCursor(input.cursor);
+      if (cursor.sort !== sort || cursor.direction !== direction) {
+        throw new DomainError(
+          "INVALID_CURSOR",
+          "Pagination cursor does not match the current sort",
+        );
+      }
+      const operator = direction === "asc" ? ">" : "<";
+      // NULLS LAST for both directions: missing values sort after present ones in asc,
+      // and still last in desc by putting IS NULL first only for the opposite of SQL default.
+      where.push(`(
+        (${column} IS NULL AND ? IS NULL AND tracks.id ${operator} ?)
+        OR (${column} IS NOT NULL AND ? IS NULL)
+        OR (${column} IS NOT NULL AND ? IS NOT NULL AND (${column} ${operator} ? OR (${column} = ? AND tracks.id ${operator} ?)))
+      )`);
+      params.push(
+        cursor.value,
+        cursor.id,
+        cursor.value,
+        cursor.value,
+        cursor.value,
+        cursor.value,
+        cursor.id,
+      );
+    }
+
+    const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+    const orderSql = `ORDER BY (${column} IS NULL), ${column} ${direction.toUpperCase()}, tracks.id ${direction.toUpperCase()}`;
+    const rows = this.db
+      .prepare(`SELECT tracks.* FROM tracks ${whereSql} ${orderSql} LIMIT ?`)
+      .all(...params, limit + 1) as TrackRow[];
+
+    const page = rows.slice(0, limit).map((row) => this.hydrate(row));
+    const last = page[page.length - 1];
+    let nextCursor: string | null = null;
+    if (rows.length > limit && last) {
+      nextCursor = encodeCursor({
+        sort,
+        direction,
+        value: this.sortValue(last, sort),
+        id: last.id,
+      });
+    }
+
+    return {
+      tracks: page.map(toPublicTrack),
+      nextCursor,
+      limit,
+      sort,
+      direction,
+    };
+  }
+
+  stats(): LibraryStats {
+    const row = this.db
+      .prepare(
+        `SELECT
+          COUNT(*) AS track_count,
+          SUM(file_missing) AS missing_file_count,
+          IFNULL(SUM(duration_ms), 0) AS total_duration_ms,
+          SUM(CASE WHEN artist IS NULL THEN 1 ELSE 0 END) AS missing_artist_count,
+          SUM(CASE WHEN bpm IS NULL THEN 1 ELSE 0 END) AS missing_bpm_count,
+          SUM(CASE WHEN musical_key IS NULL THEN 1 ELSE 0 END) AS missing_key_count,
+          SUM(CASE WHEN energy IS NULL THEN 1 ELSE 0 END) AS missing_energy_count,
+          SUM(CASE WHEN rating IS NULL THEN 1 ELSE 0 END) AS missing_rating_count
+         FROM tracks`,
+      )
+      .get() as {
+      track_count: number;
+      missing_file_count: number | null;
+      total_duration_ms: number;
+      missing_artist_count: number;
+      missing_bpm_count: number;
+      missing_key_count: number;
+      missing_energy_count: number;
+      missing_rating_count: number;
+    };
+
+    const paths = this.db.prepare("SELECT title, file_path FROM tracks").all() as {
+      title: string;
+      file_path: string;
+    }[];
+    const extensionCounts: Record<string, number> = {};
+    let missingTitleFromTagsCount = 0;
+    for (const item of paths) {
+      const ext = (/\.[^.]+$/.exec(item.file_path)?.[0] ?? "").toLowerCase();
+      if (ext.length > 0) {
+        extensionCounts[ext] = (extensionCounts[ext] ?? 0) + 1;
+      }
+      const stem = item.file_path
+        .replaceAll("\\", "/")
+        .split("/")
+        .pop()
+        ?.replace(/\.[^.]+$/, "");
+      if (stem !== undefined && stem === item.title) {
+        missingTitleFromTagsCount += 1;
+      }
+    }
+
+    return {
+      trackCount: row.track_count,
+      missingFileCount: row.missing_file_count ?? 0,
+      totalDurationMs: row.total_duration_ms,
+      extensionCounts,
+      missingTitleFromTagsCount,
+      missingArtistCount: row.missing_artist_count,
+      missingBpmCount: row.missing_bpm_count,
+      missingKeyCount: row.missing_key_count,
+      missingEnergyCount: row.missing_energy_count,
+      missingRatingCount: row.missing_rating_count,
+    };
+  }
+
+  private sortValue(track: Track, sort: SortField): string | number | null {
+    switch (sort) {
+      case "title":
+        return track.title;
+      case "artist":
+        return track.artist;
+      case "album":
+        return track.album;
+      case "bpm":
+        return track.bpm;
+      case "energy":
+        return track.energy;
+      case "rating":
+        return track.rating;
+      case "durationMs":
+        return track.durationMs;
+      case "createdAt":
+        return track.createdAt;
+      case "updatedAt":
+        return track.updatedAt;
+    }
+  }
+
+  private pushListFilter(
+    where: string[],
+    params: unknown[],
+    table: string,
+    column: string,
+    values: string[] | undefined,
+    mode: "any" | "all",
+  ): void {
+    if (values === undefined || values.length === 0) {
+      return;
+    }
+    const placeholders = values.map(() => "LOWER(?)").join(", ");
+    if (mode === "all") {
+      where.push(
+        `(SELECT COUNT(DISTINCT LOWER(${column})) FROM ${table} WHERE track_id = tracks.id AND LOWER(${column}) IN (${placeholders})) = ?`,
+      );
+      params.push(...values, values.length);
+      return;
+    }
+    where.push(
+      `EXISTS (SELECT 1 FROM ${table} WHERE track_id = tracks.id AND LOWER(${column}) IN (${placeholders}))`,
+    );
+    params.push(...values);
+  }
+
+  private replaceList(
+    table: "track_moods" | "track_subgenres" | "track_tags",
+    column: string,
+    trackId: string,
+    values: string[],
+  ): void {
+    this.db.prepare(`DELETE FROM ${table} WHERE track_id = ?`).run(trackId);
+    const stmt = this.db.prepare(`INSERT INTO ${table} (track_id, ${column}) VALUES (?, ?)`);
+    const unique = [
+      ...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)),
+    ];
+    for (const value of unique) {
+      stmt.run(trackId, value);
+    }
+  }
+
+  private updateScanFields(id: string, input: UpsertTrackInput): Track {
+    const existing = this.findById(id);
+    const keepBpm = existing?.bpmSource === "manual" || existing?.bpmSource === "analyzed";
+    const keepKey = existing?.keySource === "manual" || existing?.keySource === "analyzed";
+    const timestamp = nowIso();
+    this.db
+      .prepare(
+        `UPDATE tracks SET
+          file_path = ?,
+          file_fingerprint = ?,
+          artist = ?,
+          title = ?,
+          album = ?,
+          duration_ms = ?,
+          sample_rate_hz = ?,
+          channels = ?,
+          bpm = ?,
+          bpm_source = ?,
+          musical_key = ?,
+          camelot_key = ?,
+          key_source = ?,
+          file_missing = 0,
+          updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        input.filePath,
+        input.fileFingerprint,
+        input.artist,
+        input.title,
+        input.album,
+        input.durationMs,
+        input.sampleRateHz,
+        input.channels,
+        keepBpm && existing ? existing.bpm : input.bpm,
+        keepBpm && existing ? existing.bpmSource : input.bpmSource,
+        keepKey && existing ? existing.musicalKey : input.musicalKey,
+        keepKey && existing ? existing.camelotKey : input.camelotKey,
+        keepKey && existing ? existing.keySource : input.keySource,
+        timestamp,
+        id,
+      );
+    const updated = this.findById(id);
+    if (!updated) {
+      throw new DomainError("SCAN_FAILED", "Failed to read track after upsert");
+    }
+    return updated;
+  }
+
+  private hydrate(row: TrackRow): Track {
+    const moods = this.db
+      .prepare("SELECT mood FROM track_moods WHERE track_id = ? ORDER BY mood")
+      .all(row.id) as { mood: string }[];
+    const subgenres = this.db
+      .prepare("SELECT subgenre FROM track_subgenres WHERE track_id = ? ORDER BY subgenre")
+      .all(row.id) as { subgenre: string }[];
+    const tags = this.db
+      .prepare("SELECT tag FROM track_tags WHERE track_id = ? ORDER BY tag")
+      .all(row.id) as { tag: string }[];
+
+    return {
+      id: row.id,
+      filePath: row.file_path,
+      fileFingerprint: row.file_fingerprint,
+      artist: row.artist,
+      title: row.title,
+      album: row.album,
+      durationMs: row.duration_ms,
+      sampleRateHz: row.sample_rate_hz,
+      channels: row.channels,
+      bpm: row.bpm,
+      bpmSource: row.bpm_source,
+      musicalKey: row.musical_key,
+      camelotKey: row.camelot_key,
+      keySource: row.key_source,
+      energy: row.energy,
+      rating: row.rating,
+      subgenres: subgenres.map((item) => item.subgenre),
+      moods: moods.map((item) => item.mood),
+      tags: tags.map((item) => item.tag),
+      notes: row.notes,
+      analysisStatus: row.analysis_status,
+      fileMissing: row.file_missing === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+}

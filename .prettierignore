@@ -1,0 +1,7 @@
+node_modules
+pnpm-lock.yaml
+coverage
+data
+output
+*.sqlite
+docs/dnb-crate-mcp-implementation-spec.md
