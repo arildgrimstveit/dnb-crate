@@ -6,8 +6,10 @@ import {
   buildPhraseMixFilter,
   expectedDurationMs,
   limiterAmplitudeFromCeilingDb,
+  mixFilterArgs,
   parseEbur128,
   parseFfprobeJson,
+  parseFilterComplexScriptSupport,
   parseOutTimeMs,
   parseVersionLine,
   redactInvocation,
@@ -104,6 +106,17 @@ describe("filter graph", () => {
     expect(filter).not.toContain(".wav");
   });
 
+  it("uses -filter_complex when the script option is unavailable", () => {
+    expect(mixFilterArgs("acrossfade=d=1", "job.filter.txt", true)).toEqual([
+      "-filter_complex_script",
+      "job.filter.txt",
+    ]);
+    expect(mixFilterArgs("acrossfade=d=1", "job.filter.txt", false)).toEqual([
+      "-filter_complex",
+      "acrossfade=d=1",
+    ]);
+  });
+
   it("redacts filesystem arguments in invocation strings", () => {
     const text = redactInvocation("C:\\bin\\ffmpeg.exe", [
       "-i",
@@ -121,6 +134,12 @@ describe("filter graph", () => {
 describe("parsers", () => {
   it("parses ffmpeg version, ebur128, progress, and ffprobe json", () => {
     expect(parseVersionLine("ffmpeg version 7.1.1-full_build Copyright")).toBe("7.1.1-full_build");
+    expect(
+      parseFilterComplexScriptSupport("Missing argument for option 'filter_complex_script'"),
+    ).toBe(true);
+    expect(
+      parseFilterComplexScriptSupport("Unrecognized option 'filter_complex_script'.\r\n"),
+    ).toBe(false);
     expect(
       parseEbur128(
         "Integrated loudness:\n    I:         -14.4 LUFS\n  True peak:\n    Peak:       -1.02 dBFS",

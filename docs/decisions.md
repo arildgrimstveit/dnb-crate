@@ -1,5 +1,9 @@
 # Decisions
 
+## 2026-09-02 — `-filter_complex` fallback
+
+`-filter_complex_script` is probed at detect time (`ffmpeg -filter_complex_script` with no file). If FFmpeg reports `Unrecognized option`, mixes use inline `-filter_complex` instead. Observed on Windows nightly `N-125875` (2026-07-31), which has `acrossfade`/`atempo`/`ebur128` but not the script option. The script path stays preferred when present so long graphs do not inflate argv.
+
 ## 2026-08-31 — MCP TypeScript SDK v2 packages
 
 The implementation spec named `@modelcontextprotocol/sdk`. The stable TypeScript line for MCP revision 2026-07-28 ships as `@modelcontextprotocol/server` and `@modelcontextprotocol/client` (v2.0.0). Stage 1 uses those packages, `registerTool` / `registerResource`, `serveStdio`, and Zod 4 schemas (`zod/v4`).

@@ -14,6 +14,7 @@ import {
   estimateArgvChars,
   expectedDurationMs,
   limiterAmplitudeFromCeilingDb,
+  mixFilterArgs,
   redactInvocation,
   type FilterTrim,
   type MixTransitionSpec,
@@ -176,6 +177,7 @@ export async function renderMix(
   await mkdir(path.dirname(request.outputPath), { recursive: true });
   const partialPath = `${request.outputPath}.partial.wav`;
   const filterPath = `${request.outputPath}.filter.txt`;
+  const useScript = binaries.hasFilterComplexScript;
   const warnings: string[] = [];
   let invocation = "";
 
@@ -187,7 +189,9 @@ export async function renderMix(
   };
 
   try {
-    await writeFile(filterPath, filter, "utf8");
+    if (useScript) {
+      await writeFile(filterPath, filter, "utf8");
+    }
     const inputArgs = request.segments.flatMap((segment) => ["-i", segment.filePath]);
     const args = [
       "-nostdin",
@@ -197,8 +201,7 @@ export async function renderMix(
       "pipe:1",
       "-nostats",
       ...inputArgs,
-      "-filter_complex_script",
-      filterPath,
+      ...mixFilterArgs(filter, filterPath, useScript),
       "-map",
       "[out]",
       "-ac",

@@ -17,9 +17,16 @@ export type FfmpegBinaries = {
   hasAmix: boolean;
   hasAfade: boolean;
   hasAdelay: boolean;
+  hasFilterComplexScript: boolean;
 };
 
 const VERSION_RE = /version\s+(\S+)/i;
+const UNRECOGNIZED_FILTER_COMPLEX_SCRIPT =
+  /unrecognized option ['"]?filter_complex_script['"]?/i;
+
+export function parseFilterComplexScriptSupport(text: string): boolean {
+  return !UNRECOGNIZED_FILTER_COMPLEX_SCRIPT.test(text);
+}
 
 export function parseVersionLine(text: string): string | null {
   const match = VERSION_RE.exec(text);
@@ -58,10 +65,14 @@ export async function detectFfmpeg(
   paths: { ffmpegPath: string; ffprobePath: string },
 ): Promise<FfmpegBinaries | null> {
   try {
-    const [ffmpegVer, ffprobeVer, filters] = await Promise.all([
+    const [ffmpegVer, ffprobeVer, filters, scriptProbe] = await Promise.all([
       runner.run({ executable: paths.ffmpegPath, args: ["-hide_banner", "-version"] }),
       runner.run({ executable: paths.ffprobePath, args: ["-hide_banner", "-version"] }),
       runner.run({ executable: paths.ffmpegPath, args: ["-hide_banner", "-filters"] }),
+      runner.run({
+        executable: paths.ffmpegPath,
+        args: ["-hide_banner", "-filter_complex_script"],
+      }),
     ]);
     const ffmpegVersion = parseVersionLine(ffmpegVer.stdout + ffmpegVer.stderr);
     const ffprobeVersion = parseVersionLine(ffprobeVer.stdout + ffprobeVer.stderr);
@@ -80,6 +91,9 @@ export async function detectFfmpeg(
       ffmpegVersion,
       ffprobeVersion,
       ...caps,
+      hasFilterComplexScript: parseFilterComplexScriptSupport(
+        scriptProbe.stdout + scriptProbe.stderr,
+      ),
     };
   } catch (error) {
     if (error instanceof ProcessRunError && error.code === "ENOENT") {

@@ -104,11 +104,14 @@ describe("FFmpeg integration", () => {
     const dataOffset = wav.indexOf(Buffer.from("data"));
     const pcm = wav.subarray(dataOffset + 8);
     const sampleRate = 48_000;
-    const samples = Math.min(pcm.length / 6, sampleRate * 2);
+    const bytesPerFrame = 6; // stereo pcm_s24le
+    const samples = Math.min(Math.floor(pcm.length / bytesPerFrame), sampleRate * 2);
     let crossings = 0;
     let prev = 0;
     for (let i = 0; i < samples; i += 1) {
-      const sample = pcm.readInt16LE(i * 6);
+      const offset = i * bytesPerFrame;
+      const raw = pcm[offset]! | (pcm[offset + 1]! << 8) | (pcm[offset + 2]! << 16);
+      const sample = raw & 0x800000 ? raw | ~0xffffff : raw;
       if ((prev < 0 && sample >= 0) || (prev >= 0 && sample < 0)) {
         crossings += 1;
       }

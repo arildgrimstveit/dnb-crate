@@ -10,6 +10,8 @@ Install FFmpeg **and** ffprobe so both are on `PATH` (or set `ffmpegPath` / `ffp
 
 The server looks for `acrossfade`, `ebur128`, and `alimiter` for every mix. Phrase-mix and bass-swap also need `atempo`, `lowpass`, `highpass`, `asplit`, `amix`, and `afade`.
 
+Filter graphs prefer `-filter_complex_script` (a sidecar file, so argv stays short). Builds that do not ship that option — some Windows nightlies — fall back to inline `-filter_complex`. Pairwise mixing still applies if the inline graph would blow the argv soft limit.
+
 Tempo matching uses **`atempo`** (pitch-preserving). `asetrate` is not used.
 
 ## Loudness policy

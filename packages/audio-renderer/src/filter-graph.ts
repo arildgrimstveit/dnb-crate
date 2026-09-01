@@ -210,3 +210,18 @@ export function redactInvocation(executable: string, args: string[]): string {
 export function estimateArgvChars(args: string[]): number {
   return args.reduce((sum, arg) => sum + arg.length + 1, 0);
 }
+
+/**
+ * Prefer `-filter_complex_script` (keeps argv short). Some FFmpeg builds — including
+ * recent Windows nightlies — only ship `-filter_complex`.
+ */
+export function mixFilterArgs(
+  filter: string,
+  filterPath: string,
+  hasFilterComplexScript: boolean,
+): string[] {
+  if (hasFilterComplexScript) {
+    return ["-filter_complex_script", filterPath];
+  }
+  return ["-filter_complex", filter];
+}

@@ -60,6 +60,7 @@ export function createFakeFfmpegRunner(
           request.args.includes("-version") ||
           request.args.includes("-filters") ||
           request.args.includes("-print_format") ||
+          (request.args.includes("-filter_complex_script") && !request.args.includes("-i")) ||
           request.args.some((arg) => arg.includes("ebur128")) ||
           request.args.some((arg) => arg.includes("silencedetect"));
         if (!isMeta) {
