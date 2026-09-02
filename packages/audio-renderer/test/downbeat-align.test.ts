@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { downbeatAlignmentOffsetMs, wrapDelta } from "../src/downbeat-align.ts";
+import {
+  applyAlignmentOffset,
+  downbeatAlignmentOffsetMs,
+  wrapDelta,
+} from "../src/downbeat-align.ts";
 
 describe("downbeat alignment", () => {
   it("wraps deltas into ±half-period", () => {
@@ -9,15 +13,16 @@ describe("downbeat alignment", () => {
   });
 
   it("returns the phase difference at overlap start", () => {
-    const offset = downbeatAlignmentOffsetMs({
+    const aligned = downbeatAlignmentOffsetMs({
       outgoingDownbeatsMs: [0, 1379, 2758],
       incomingDownbeatsMs: [20, 1399, 2778],
       outgoingOverlapStartMs: 1379,
       incomingOverlapStartMs: 0,
       bpm: 174,
     });
-    expect(offset).toBeGreaterThan(0);
-    expect(Math.abs(offset - 20)).toBeLessThan(5);
+    expect(aligned.mode).toBe("beat");
+    expect(aligned.offsetMs).toBeGreaterThan(0);
+    expect(Math.abs(aligned.offsetMs - 20)).toBeLessThan(5);
   });
 
   it("converts phases to output time before wrapping when rates differ", () => {
@@ -25,7 +30,7 @@ describe("downbeat alignment", () => {
     const incomingRate = 0.99;
     const targetBpm = 174;
     const period = 60_000 / targetBpm;
-    const offset = downbeatAlignmentOffsetMs({
+    const aligned = downbeatAlignmentOffsetMs({
       outgoingDownbeatsMs: [0, 1379, 2758],
       incomingDownbeatsMs: [50, 1429, 2808],
       outgoingOverlapStartMs: 1379,
@@ -38,8 +43,94 @@ describe("downbeat alignment", () => {
     const outPhase = 0 / outgoingRate;
     const inPhase = 50 / incomingRate;
     const expected = wrapDelta(inPhase - outPhase, period) * incomingRate;
-    expect(Math.abs(offset - expected)).toBeLessThan(1);
-    expect(Math.abs(offset)).toBeLessThanOrEqual(period / 2 + 1);
-    expect(Math.sign(offset)).toBe(Math.sign(expected) || 0);
+    expect(aligned.mode).toBe("beat");
+    expect(Math.abs(aligned.offsetMs - expected)).toBeLessThan(1);
+    expect(Math.abs(aligned.offsetMs)).toBeLessThanOrEqual(period / 2 + 1);
+    expect(Math.sign(aligned.offsetMs)).toBe(Math.sign(expected) || 0);
+  });
+
+  it("keeps a 2-beat downbeat difference in bar mode", () => {
+    const beatMs = 60_000 / 174;
+    const barMs = beatMs * 4;
+    const twoBeats = beatMs * 2;
+    const aligned = downbeatAlignmentOffsetMs({
+      outgoingDownbeatsMs: [0, barMs, barMs * 2],
+      incomingDownbeatsMs: [twoBeats, twoBeats + barMs, twoBeats + barMs * 2],
+      outgoingOverlapStartMs: 0,
+      incomingOverlapStartMs: 0,
+      bpm: 174,
+      targetBpm: 174,
+      outgoingDownbeatConfidence: 0.7,
+      incomingDownbeatConfidence: 0.7,
+    });
+    expect(aligned.mode).toBe("bar");
+    expect(aligned.periodMs).toBeCloseTo(barMs, 5);
+    expect(Math.abs(Math.abs(aligned.offsetMs) - twoBeats)).toBeLessThan(5);
+  });
+
+  it("still wraps a 2-beat difference to 0 in beat mode", () => {
+    const beatMs = 60_000 / 174;
+    const barMs = beatMs * 4;
+    const twoBeats = beatMs * 2;
+    const aligned = downbeatAlignmentOffsetMs({
+      outgoingDownbeatsMs: [0, barMs, barMs * 2],
+      incomingDownbeatsMs: [twoBeats, twoBeats + barMs, twoBeats + barMs * 2],
+      outgoingOverlapStartMs: 0,
+      incomingOverlapStartMs: 0,
+      bpm: 174,
+      targetBpm: 174,
+    });
+    expect(aligned.mode).toBe("beat");
+    expect(Math.abs(aligned.offsetMs)).toBeLessThan(5);
+  });
+
+  it("keeps |offset| within half a bar when rates are 1.02/0.99", () => {
+    const outgoingRate = 1.02;
+    const incomingRate = 0.99;
+    const barMs = (4 * 60_000) / 174;
+    const aligned = downbeatAlignmentOffsetMs({
+      outgoingDownbeatsMs: [0, 1379, 2758],
+      incomingDownbeatsMs: [50, 1429, 2808],
+      outgoingOverlapStartMs: 1379,
+      incomingOverlapStartMs: 0,
+      bpm: 174,
+      outgoingRate,
+      incomingRate,
+      targetBpm: 174,
+      outgoingDownbeatConfidence: 0.8,
+      incomingDownbeatConfidence: 0.8,
+    });
+    expect(aligned.mode).toBe("bar");
+    expect(Math.abs(aligned.offsetMs)).toBeLessThanOrEqual(barMs / 2 + 1);
+  });
+
+  it("applies a negative offset at start 0 as offset plus one bar", () => {
+    const barMs = (4 * 60_000) / 174;
+    const applied = applyAlignmentOffset({
+      incomingStartMs: 0,
+      incomingEndMs: 180_000,
+      outgoingEndMs: 180_000,
+      offsetMs: -20,
+      periodMs: barMs,
+      incomingRate: 1,
+      outgoingRate: 1,
+    });
+    expect(applied.incomingStartMs).toBeCloseTo(barMs - 20, 5);
+    expect(applied.outgoingEndMs).toBe(180_000);
+    expect(applied.appliedOffsetMs).toBeCloseTo(barMs - 20, 5);
+  });
+
+  it("shifts the outgoing end when a period nudge would pass the incoming tail", () => {
+    const applied = applyAlignmentOffset({
+      incomingStartMs: 0,
+      incomingEndMs: 1500,
+      outgoingEndMs: 180_000,
+      offsetMs: -20,
+      periodMs: 1379,
+      incomingRate: 1,
+      outgoingRate: 1,
+    });
+    expect(applied.incomingStartMs).toBe(0);
+    expect(applied.outgoingEndMs).toBe(180_020);
   });
 });

@@ -37,6 +37,7 @@ import {
   requireAlignedFfmpeg,
   requireFfmpeg,
   renderMix,
+  applyAlignmentOffset,
   downbeatAlignmentOffsetMs,
   parseSilenceSpans,
   sha256File,
@@ -97,6 +98,8 @@ export type PreparedSegment = MixSegment & {
   targetBpm: number | null;
   downbeatOffsetMs: number | null;
   alignmentPeriodMs: number | null;
+  alignmentMode: "bar" | "beat" | null;
+  downbeatConfidence: number | null;
 };
 
 type RenderSettings = {
@@ -457,8 +460,8 @@ export class RenderCoordinator {
         audioEnd !== null && outgoing.sourceEndMs > audioEnd + 250;
       const barRaw = outEntry?.transitionToNext?.parameters.barCount;
       const alignmentMode =
-        outgoing.alignmentMode === "bar" || outgoing.alignmentMode === "beat"
-          ? outgoing.alignmentMode
+        incoming.alignmentMode === "bar" || incoming.alignmentMode === "beat"
+          ? incoming.alignmentMode
           : null;
       joins.push({
         order: i,
@@ -665,7 +668,7 @@ export class RenderCoordinator {
         }
         const outOverlapStart =
           outgoing.sourceEndMs - overlap * (outgoing.playbackRate > 0 ? outgoing.playbackRate : 1);
-        const offset = downbeatAlignmentOffsetMs({
+        const aligned = downbeatAlignmentOffsetMs({
           outgoingDownbeatsMs: outgoing.downbeatTimesMs,
           incomingDownbeatsMs: incoming.downbeatTimesMs,
           outgoingOverlapStartMs: outOverlapStart,
@@ -677,18 +680,23 @@ export class RenderCoordinator {
             typeof outgoing.targetBpm === "number"
               ? outgoing.targetBpm
               : (outgoing.analysisBpm ?? incoming.analysisBpm),
+          outgoingDownbeatConfidence: outgoing.downbeatConfidence,
+          incomingDownbeatConfidence: incoming.downbeatConfidence,
         });
-        incoming.downbeatOffsetMs = offset;
-        incoming.alignmentPeriodMs =
-          (typeof outgoing.targetBpm === "number" && outgoing.targetBpm > 0
-            ? 60_000 / outgoing.targetBpm
-            : outgoing.analysisBpm && outgoing.analysisBpm > 0
-              ? 60_000 / outgoing.analysisBpm
-              : null);
-        const nextStart = incoming.sourceStartMs + offset;
-        if (nextStart >= 0 && nextStart < incoming.sourceEndMs - 1000) {
-          incoming.sourceStartMs = nextStart;
-        }
+        const applied = applyAlignmentOffset({
+          incomingStartMs: incoming.sourceStartMs,
+          incomingEndMs: incoming.sourceEndMs,
+          outgoingEndMs: outgoing.sourceEndMs,
+          offsetMs: aligned.offsetMs,
+          periodMs: aligned.periodMs,
+          incomingRate: incoming.playbackRate,
+          outgoingRate: outgoing.playbackRate,
+        });
+        incoming.downbeatOffsetMs = applied.appliedOffsetMs;
+        incoming.alignmentPeriodMs = aligned.periodMs;
+        incoming.alignmentMode = aligned.mode;
+        incoming.sourceStartMs = applied.incomingStartMs;
+        outgoing.sourceEndMs = applied.outgoingEndMs;
       }
 
       await mkdir(this.config.outputRoot, { recursive: true });
@@ -985,6 +993,8 @@ export class RenderCoordinator {
           : null,
       downbeatOffsetMs: 0,
       alignmentPeriodMs: null,
+      alignmentMode: null,
+      downbeatConfidence: analysis?.downbeatConfidence ?? null,
     };
   }
 
@@ -1120,6 +1130,7 @@ function toManifestTrack(segment: PreparedSegment, mix?: MixTransitionSpec): Ren
     bpmConfidence: segment.bpmConfidence,
     downbeatOffsetMs: segment.downbeatOffsetMs,
     alignmentPeriodMs: segment.alignmentPeriodMs,
+    alignmentMode: segment.alignmentMode,
   };
 }
 

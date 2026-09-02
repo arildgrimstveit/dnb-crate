@@ -21,6 +21,13 @@ Silence bounds on descriptors; shared `planning/cues.ts`; `buildEntries` windows
 - Clone `2d733300-d0d6-48e1-8ec6-a6ec0bfda61a` “v2.2 wp1”: Turn Up mix-out **198623 ms** (breakdown), source end 220692 (was 264840)
 - Job `11f9d1d6-5a99-4dc9-91b0-c55f377674ab`, sha256 `0a3f651c…`, 53:22. `render:check` exit **0**, interior silence none. Join 6 overlap now 1414078 ms (no 27:06 dead air).
 
+## Mixing v2.2 — WP2 bar alignment (2026-09-03)
+
+`downbeatAlignmentOffsetMs` returns `{ offsetMs, periodMs, mode }`. Bar wrap when both downbeat confidences ≥ 0.5; otherwise beat. Negative nudges at start 0 add one period.
+
+- `vitest run` — 17 files, **103 passed**; `tsc --noEmit` clean
+- Re-render of WP1 plan: job `90eb6e1d-a66b-488e-873a-004a1ebbc72e`, `render:check` exit 0. Aligned joins report `alignmentMode: beat` (stored downbeatConfidence < 0.5). Bar mode is covered by unit tests (2-beat Δ no longer wraps to 0).
+
 ## Analysis v2.1 — grids to mixes (2026-09-02)
 
 What works:

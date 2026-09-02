@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { AppConfig, SetPlanV1 } from "@dnb-crate/domain";
+import { DSP_ANALYZER_NAME, DSP_ANALYZER_VERSION } from "@dnb-crate/domain";
 import { createFakeFfmpegRunner, ProcessRunError } from "@dnb-crate/audio-renderer";
 
 import { createCatalogRuntime, writeSineWav } from "../src/index.ts";
@@ -258,5 +259,61 @@ describe("render jobs", () => {
     expect(interrupted).toBeGreaterThanOrEqual(1);
     expect(catalog.service.getRenderStatus(runningId).errorCode).toBe("RENDER_INTERRUPTED");
     expect(catalog.service.getRenderStatus(runningId).retryable).toBe(true);
+  });
+
+  it("writes alignmentMode on the manifest for an aligned pair", async () => {
+    const { catalog, plan, alpha, bravo } = await seededLibrary();
+    const now = new Date().toISOString();
+    const barMs = (4 * 60_000) / 174;
+    for (const trackId of [alpha.id, bravo.id]) {
+      catalog.analyses.upsert({
+        trackId,
+        analyzerName: DSP_ANALYZER_NAME,
+        analyzerVersion: DSP_ANALYZER_VERSION,
+        bpm: 174,
+        bpmConfidence: 0.9,
+        bpmRaw: 174,
+        beatTimesMs: [0, 345, 689, 1034],
+        downbeatTimesMs: [0, barMs, barMs * 2],
+        gridRejected: false,
+        gridRejectionReason: null,
+        musicalKey: "Fm",
+        keyConfidence: 0.7,
+        keyMode: "minor",
+        camelotKey: "4A",
+        tempoStability: 0.8,
+        downbeatConfidence: 0.8,
+        integratedLufs: null,
+        truePeakDb: null,
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        waveformSummary: null,
+        beatAnchorMs: null,
+        descriptors: null,
+        engineRuntimeMs: 1,
+        analyzedAt: now,
+        suggestedCues: [],
+        sections: [],
+      });
+    }
+    catalog.service.updateSetPlan({
+      setPlanId: plan.id,
+      setTransition: {
+        entryId: plan.entries[0]!.id,
+        type: "phrase_mix",
+        durationMs: 1000,
+        parameters: { barCount: 16, targetBpm: 174 },
+      },
+    });
+    const started = await catalog.service.startSetRender({
+      setPlanId: plan.id,
+      allowLowConfidence: true,
+    });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
+    const manifest = catalog.service.getRenderManifest(done.id);
+    expect(manifest.tracks[1]?.alignmentMode).toBe("bar");
+    expect(manifest.tracks[1]?.alignmentPeriodMs).toBeCloseTo(barMs, 5);
   });
 });

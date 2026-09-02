@@ -153,7 +153,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `get_render_manifest`
 
-- `get_render_manifest` tracks include `downbeatOffsetMs` and `alignmentPeriodMs`
+- `get_render_manifest` tracks include `downbeatOffsetMs`, `alignmentPeriodMs`, and `alignmentMode` (`bar` | `beat`)
 - Errors: `RENDER_JOB_NOT_FOUND`, `RENDER_FAILED` (not finished; `retryable` while queued/running)
 
 ## Resources

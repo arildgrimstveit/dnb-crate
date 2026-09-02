@@ -35,8 +35,10 @@ export { probeAudioFile } from "./probe.ts";
 export type { ProbeResult } from "./parse.ts";
 export { renderMix, type MixRequest, type MixResult, type MixSegment } from "./mix.ts";
 export {
+  applyAlignmentOffset,
   downbeatAlignmentOffsetMs,
   nearestTime,
   wrapDelta,
 } from "./downbeat-align.ts";
+export type { DownbeatAlignment } from "./downbeat-align.ts";
 export { sha256File, sha256Json, sha256Text } from "./hash.ts";

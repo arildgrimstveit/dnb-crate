@@ -22,6 +22,7 @@ Unchanged from Stage 3: mix-wide **-14 LUFS**, true-peak **-1.0 dBTP**, no per-t
 
 - Crossfade: `acrossfade` with `c1=hsin` / `c2=hsin`.
 - Phrase mix / bass swap: pairwise graphs; overlap duration is the planned phrase (16/32 bars at target BPM).
+- Aligned joins nudge the incoming start in **output time**. When both `downbeatConfidence` values are ≥ 0.5 the wrap period is one **bar** (4 beats); otherwise one beat. A negative nudge at source start 0 adds one period instead of being dropped. Manifest fields: `downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode` (`bar` | `beat`).
 - Playback rate other than 1.0 is applied with `atempo` and bounded to ±3% unless `allowExcessiveTempo`.
 - Internal format: 48 kHz stereo PCM 24-bit WAV.
 - Output duration must match the plan within **1000 ms** (after rate-adjusted playable lengths).

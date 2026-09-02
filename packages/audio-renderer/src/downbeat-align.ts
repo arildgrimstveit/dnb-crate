@@ -15,7 +15,13 @@ export function wrapDelta(delta: number, period: number): number {
   return ((((delta + half) % period) + period) % period) - half;
 }
 
-/** Sub-beat offset to add to the incoming source start so downbeats meet at overlap. */
+export type DownbeatAlignment = {
+  offsetMs: number;
+  periodMs: number;
+  mode: "bar" | "beat";
+};
+
+/** Sub-beat/bar offset to add to the incoming source start so downbeats meet at overlap. */
 export function downbeatAlignmentOffsetMs(input: {
   outgoingDownbeatsMs: number[];
   incomingDownbeatsMs: number[];
@@ -25,10 +31,9 @@ export function downbeatAlignmentOffsetMs(input: {
   outgoingRate?: number;
   incomingRate?: number;
   targetBpm?: number | null;
-}): number {
-  if (input.outgoingDownbeatsMs.length === 0 || input.incomingDownbeatsMs.length === 0) {
-    return 0;
-  }
+  outgoingDownbeatConfidence?: number | null;
+  incomingDownbeatConfidence?: number | null;
+}): DownbeatAlignment {
   const outgoingRate = input.outgoingRate && input.outgoingRate > 0 ? input.outgoingRate : 1;
   const incomingRate = input.incomingRate && input.incomingRate > 0 ? input.incomingRate : 1;
   const targetBpm =
@@ -37,7 +42,15 @@ export function downbeatAlignmentOffsetMs(input: {
       : input.bpm && input.bpm > 0
         ? input.bpm
         : null;
-  const period = targetBpm ? 60_000 / targetBpm : 345;
+  const beatPeriod = targetBpm ? 60_000 / targetBpm : 345;
+  const barMode =
+    (input.outgoingDownbeatConfidence ?? 0) >= 0.5 &&
+    (input.incomingDownbeatConfidence ?? 0) >= 0.5;
+  const mode: "bar" | "beat" = barMode ? "bar" : "beat";
+  const periodMs = barMode ? beatPeriod * 4 : beatPeriod;
+  if (input.outgoingDownbeatsMs.length === 0 || input.incomingDownbeatsMs.length === 0) {
+    return { offsetMs: 0, periodMs, mode };
+  }
   const outPhase =
     (nearestTime(input.outgoingDownbeatsMs, input.outgoingOverlapStartMs) -
       input.outgoingOverlapStartMs) /
@@ -46,5 +59,41 @@ export function downbeatAlignmentOffsetMs(input: {
     (nearestTime(input.incomingDownbeatsMs, input.incomingOverlapStartMs) -
       input.incomingOverlapStartMs) /
     incomingRate;
-  return Math.round(wrapDelta(inPhase - outPhase, period) * incomingRate);
+  return {
+    offsetMs: Math.round(wrapDelta(inPhase - outPhase, periodMs) * incomingRate),
+    periodMs,
+    mode,
+  };
+}
+
+export function applyAlignmentOffset(input: {
+  incomingStartMs: number;
+  incomingEndMs: number;
+  outgoingEndMs: number;
+  offsetMs: number;
+  periodMs: number;
+  incomingRate: number;
+  outgoingRate: number;
+}): { incomingStartMs: number; outgoingEndMs: number; appliedOffsetMs: number } {
+  const incomingRate = input.incomingRate > 0 ? input.incomingRate : 1;
+  const outgoingRate = input.outgoingRate > 0 ? input.outgoingRate : 1;
+  const periodSource = input.periodMs * incomingRate;
+  let applied = input.offsetMs;
+  let incomingStart = input.incomingStartMs + applied;
+  if (incomingStart < 0 && periodSource > 0) {
+    applied += periodSource;
+    incomingStart = input.incomingStartMs + applied;
+  }
+  if (incomingStart >= 0 && incomingStart < input.incomingEndMs - 1000) {
+    return {
+      incomingStartMs: incomingStart,
+      outgoingEndMs: input.outgoingEndMs,
+      appliedOffsetMs: applied,
+    };
+  }
+  return {
+    incomingStartMs: input.incomingStartMs,
+    outgoingEndMs: input.outgoingEndMs - input.offsetMs * outgoingRate,
+    appliedOffsetMs: input.offsetMs,
+  };
 }
