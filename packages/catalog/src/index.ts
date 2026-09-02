@@ -95,6 +95,7 @@ export { openDatabase } from "./db.ts";
 export { runMigrations } from "./migrate.ts";
 export { TrackRepository } from "./repository.ts";
 export { CatalogService } from "./service.ts";
+export type { RenderCheckResult, RenderCheckJoin } from "./render/coordinator.ts";
 export { SetPlanRepository } from "./set-plan-repository.ts";
 export { RenderJobRepository } from "./render-job-repository.ts";
 export { AnalysisRepository } from "./analysis-repository.ts";

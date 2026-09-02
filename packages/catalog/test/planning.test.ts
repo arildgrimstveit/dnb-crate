@@ -229,6 +229,50 @@ describe("set planning", () => {
     expect(() => catalog.service.getSetPlan(created.plan.id)).toThrow();
   });
 
+  it("clones a plan and optionally replans entries", () => {
+    const catalog = runtime();
+    const a = seedTrack(catalog, {
+      title: "Left",
+      artist: "A",
+      bpm: 174,
+      camelot: "11A",
+      energy: 4,
+    });
+    const b = seedTrack(catalog, {
+      title: "Right",
+      artist: "B",
+      bpm: 176,
+      camelot: "12A",
+      energy: 8,
+    });
+    const created = catalog.service.createSetPlan({
+      name: "Original",
+      targetDurationMs: 300_000,
+      startTrackId: a,
+      endTrackId: b,
+      seed: 3,
+    });
+    const copied = catalog.service.cloneSetPlan({
+      setPlanId: created.plan.id,
+      name: "Copy",
+    });
+    expect(copied.plan.id).not.toBe(created.plan.id);
+    expect(copied.plan.name).toBe("Copy");
+    expect(copied.plan.entries.map((entry) => entry.trackId)).toEqual(
+      created.plan.entries.map((entry) => entry.trackId),
+    );
+    expect(copied.plan.entries[0]?.playbackRate).toBe(created.plan.entries[0]?.playbackRate);
+    const replanned = catalog.service.cloneSetPlan({
+      setPlanId: created.plan.id,
+      name: "Replan",
+      replan: true,
+    });
+    expect(replanned.plan.id).not.toBe(created.plan.id);
+    expect(replanned.plan.entries.map((entry) => entry.trackId)).toEqual(
+      created.plan.entries.map((entry) => entry.trackId),
+    );
+  });
+
   it("ranks compatible neighbours above distant keys", () => {
     const catalog = runtime();
     const source = seedTrack(catalog, {

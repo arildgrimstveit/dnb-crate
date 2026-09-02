@@ -146,6 +146,8 @@ export const sonicDescriptorsSchema = z.object({
   highBandEnergy: z.number().nullable(),
   chromaVector: z.array(z.number()).length(12).nullable().optional(),
   tempoEvidence: tempoEvidenceSchema.nullable().optional(),
+  audioStartMs: z.number().nullable().optional(),
+  audioEndMs: z.number().nullable().optional(),
 });
 
 export const beatGridSummarySchema = z.object({

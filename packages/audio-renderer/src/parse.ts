@@ -66,8 +66,10 @@ export function parseOutTimeMs(chunk: string): number | null {
   return null;
 }
 
-export function parseSilenceSpans(text: string): Array<{ startMs: number; endMs: number | null }> {
-  const starts: Array<{ startMs: number; endMs: number | null }> = [];
+export type SilenceSpan = { startMs: number; endMs: number | null };
+
+export function parseSilenceSpans(text: string): SilenceSpan[] {
+  const starts: SilenceSpan[] = [];
   const startRe = /silence_start:\s+([-\d.]+)/g;
   const endRe = /silence_end:\s+([-\d.]+)/g;
   const startMatches = [...text.matchAll(startRe)];

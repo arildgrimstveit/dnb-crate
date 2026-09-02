@@ -125,6 +125,10 @@ describe("render jobs", () => {
       .update(await readFile(aPath))
       .digest("hex");
     expect(after).toBe(before);
+    const checked = await catalog.service.checkRender(done.id);
+    expect(checked.ok).toBe(true);
+    expect(checked.interiorSilence).toEqual([]);
+    expect(checked.joins).toHaveLength(1);
   });
 
   it("rejects a changed fingerprint until rescan", async () => {

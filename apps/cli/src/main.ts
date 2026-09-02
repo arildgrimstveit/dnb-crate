@@ -47,6 +47,7 @@ Commands:
   transition:plan --from UUID --to UUID [--type phrase_mix|bass_swap|crossfade|any] [--bars 16|32]
   transition:validate --from UUID --to UUID --type phrase_mix|bass_swap|crossfade
   plan:create --name TEXT [--duration-ms N] [--seed N] [--end-query TEXT]
+  plan:clone --id UUID --name TEXT [--replan]
   plan:list
   plan:get --id UUID
   plan:validate --id UUID
@@ -56,6 +57,7 @@ Commands:
   render:list
   render:cancel --id UUID --confirm
   render:manifest --id UUID
+  render:check --id UUID
 
 ${APP_NAME} ${APP_VERSION}
 `;
@@ -263,6 +265,22 @@ async function main(): Promise<void> {
         printJson({ ok: true, data: created });
         break;
       }
+      case "plan:clone": {
+        const id = option(args, "--id");
+        const name = option(args, "--name");
+        if (!id || !name) {
+          throw new Error("plan:clone requires --id and --name");
+        }
+        printJson({
+          ok: true,
+          data: runtime.service.cloneSetPlan({
+            setPlanId: id,
+            name,
+            replan: flag(args, "--replan"),
+          }),
+        });
+        break;
+      }
       case "plan:list":
         printJson({ ok: true, data: runtime.service.listSetPlans() });
         break;
@@ -295,7 +313,7 @@ async function main(): Promise<void> {
           allowExcessiveTempo: flag(args, "--allow-excessive-tempo"),
         });
         if (flag(args, "--wait")) {
-          const done = await runtime.service.waitForRenderJob(started.job.id);
+          const done = await runtime.service.waitForRenderJob(started.job.id, 10 * 60_000);
           printJson({ ok: true, data: done, warnings: started.warnings });
         } else {
           printJson({ ok: true, data: started.job, warnings: started.warnings });
@@ -355,6 +373,18 @@ async function main(): Promise<void> {
           throw new Error("render:manifest requires --id");
         }
         printJson({ ok: true, data: runtime.service.getRenderManifest(id) });
+        break;
+      }
+      case "render:check": {
+        const id = option(args, "--id");
+        if (!id) {
+          throw new Error("render:check requires --id");
+        }
+        const checked = await runtime.service.checkRender(id);
+        printJson({ ok: checked.ok, data: checked });
+        if (!checked.ok) {
+          process.exitCode = 1;
+        }
         break;
       }
       default:

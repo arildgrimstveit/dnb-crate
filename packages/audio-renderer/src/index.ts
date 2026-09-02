@@ -30,6 +30,7 @@ export {
   type MixTransitionSpec,
 } from "./filter-graph.ts";
 export { parseEbur128, parseFfprobeJson, parseOutTimeMs, parseSilenceSpans } from "./parse.ts";
+export type { SilenceSpan } from "./parse.ts";
 export { probeAudioFile } from "./probe.ts";
 export type { ProbeResult } from "./parse.ts";
 export { renderMix, type MixRequest, type MixResult, type MixSegment } from "./mix.ts";

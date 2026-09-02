@@ -21,6 +21,7 @@ import type {
   ServerStatus,
   SetPlanSummary,
   SetPlanV1,
+  Track,
   TrackAnalysisView,
   TrackMetadataPatch,
   TransitionProposal,
@@ -784,6 +785,45 @@ export class CatalogService {
     return this.requirePlan(setPlanId).plan;
   }
 
+  cloneSetPlan(input: { setPlanId: string; name: string; replan?: boolean }): CreateSetPlanResult {
+    const stored = this.requirePlan(input.setPlanId);
+    const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
+    const ordered = [...stored.plan.entries].sort((a, b) => a.order - b.order);
+    const orderedTracks = ordered.map((entry) => {
+      const track = tracksById.get(entry.trackId);
+      if (!track) {
+        throw new DomainError("TRACK_NOT_FOUND", `Track ${entry.trackId} is missing`);
+      }
+      return track;
+    });
+    const now = new Date().toISOString();
+    const entries = input.replan
+      ? buildEntries(this.timelineTracksFor(orderedTracks))
+      : ordered.map((entry) => ({
+          ...entry,
+          id: crypto.randomUUID(),
+          transitionToNext: entry.transitionToNext
+            ? { ...entry.transitionToNext, id: crypto.randomUUID() }
+            : null,
+        }));
+    const plan: SetPlanV1 = {
+      ...stored.plan,
+      id: crypto.randomUUID(),
+      name: input.name,
+      entries,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const validation = validateSetPlan(plan, tracksById);
+    const saved = this.setPlans.save(plan, stored.seed, stored.explanation);
+    return {
+      plan: saved.plan,
+      explanation: saved.explanation,
+      validation,
+      partial: false,
+    };
+  }
+
   async validateSavedSetPlan(setPlanId: string): Promise<ValidateSetPlanResult> {
     return this.renders.validatePlan(setPlanId);
   }
@@ -814,6 +854,10 @@ export class CatalogService {
 
   getRenderManifest(renderJobId: string): RenderManifestV1 {
     return this.renders.getManifest(renderJobId);
+  }
+
+  checkRender(renderJobId: string) {
+    return this.renders.checkRender(renderJobId);
   }
 
   listRenderJobs(limit?: number, cursor?: string, setPlanId?: string) {
@@ -1023,6 +1067,14 @@ export class CatalogService {
       analysis: this.analyses.findByTrackId(trackId),
       cues: this.repository.listCuePoints(trackId),
     };
+  }
+
+  private timelineTracksFor(tracks: Track[]) {
+    return tracks.map((track) => {
+      const row = this.analyses.findByTrackId(track.id);
+      const canon = resolveCanonicalBpm(track, row);
+      return { ...track, analysis: analysisToTimeline(row, canon.bpm) };
+    });
   }
 
   private requireTrack(trackId: string) {

@@ -72,6 +72,8 @@ export type SonicDescriptors = {
   highBandEnergy: number | null;
   chromaVector: number[] | null;
   tempoEvidence: TempoEvidence | null;
+  audioStartMs?: number | null;
+  audioEndMs?: number | null;
 };
 
 export type TrackAnalysis = {

@@ -1,5 +1,18 @@
 # Progress
 
+## Mixing v2.2 — baseline (2026-09-03)
+
+Harness only. `plan:clone --replan` rebuilds entries from current analysis; `render:check` flags interior silence (`-50 dB`, ≥ 1 s, not the first/last 500 ms) and per-join `windowInSilence`.
+
+Reference artifacts (do not overwrite):
+
+- Liked plan `0e2b79c6-4b8e-4b49-99f0-53aa1d6f4a56` — Alone → … → Angel, seed 1
+- `output/renders/hour-mix-old.wav` — job `4385ca7f-…`, 56:09, sha256 `61ae9203…`
+- `output/renders/hour-mix-v2.1.wav` — job `165c2a73-…`, 58:58, sha256 `55e29579…`, interior silence 1626.5–1628.5 s (Turn Up the Bass → Like a Memory)
+- Liked preview `output/previews/witchcraft-tidal-wave-bass-swap.wav`
+
+WP0 proof (2026-09-03): clone `7b99c6fa-6c20-497d-9de8-5241d1d54d29` “v2.2 baseline”, job `97061c12-46d2-4dbc-801e-fb6634aa983a`, sha256 `55e29579…` (byte-identical to v2.1). `render:check` exit 1 — interior silence `1626534–1628524` ms (1990 ms) at join 6 Turn Up the Bass → Like a Memory (`bass_swap`, overlap `1626473`). After WP1 the same check must pass.
+
 ## Analysis v2.1 — grids to mixes (2026-09-02)
 
 What works:

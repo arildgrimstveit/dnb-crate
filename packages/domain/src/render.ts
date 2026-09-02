@@ -57,6 +57,7 @@ export type RenderManifestTrack = {
   bpmConfidence: number | null;
   downbeatOffsetMs: number | null;
   alignmentPeriodMs: number | null;
+  alignmentMode?: "bar" | "beat" | null;
 };
 
 export type RenderManifestV1 = {

@@ -38,6 +38,7 @@ import {
   requireFfmpeg,
   renderMix,
   downbeatAlignmentOffsetMs,
+  parseSilenceSpans,
   sha256File,
   sha256Json,
   type FfmpegBinaries,
@@ -54,6 +55,30 @@ import type { TrackRepository } from "../repository.ts";
 import type { SetPlanRepository } from "../set-plan-repository.ts";
 import type { RenderJobRepository, StoredRenderJob } from "../render-job-repository.ts";
 import type { AnalysisRepository } from "../analysis-repository.ts";
+
+export type RenderCheckJoin = {
+  order: number;
+  outgoingTitle: string;
+  incomingTitle: string;
+  template: string;
+  barCount: number | null;
+  outgoingRate: number;
+  incomingRate: number;
+  downbeatOffsetMs: number | null;
+  alignmentPeriodMs: number | null;
+  alignmentMode: "bar" | "beat" | null;
+  windowInSilence: boolean;
+  overlapAtMs: number | null;
+};
+
+export type RenderCheckResult = {
+  renderJobId: string;
+  outputPath: string;
+  durationMs: number;
+  interiorSilence: Array<{ startMs: number; endMs: number; durationMs: number }>;
+  joins: RenderCheckJoin[];
+  ok: boolean;
+};
 
 export type PreparedSegment = MixSegment & {
   trackId: string;
@@ -370,6 +395,103 @@ export class RenderCoordinator {
       );
     }
     return job.manifest;
+  }
+
+  async checkRender(renderJobId: string): Promise<RenderCheckResult> {
+    const job = this.getStatus(renderJobId);
+    if (job.status !== "succeeded" || !job.outputRootRelativePath) {
+      throw new DomainError(
+        "RENDER_FAILED",
+        `Render ${renderJobId} is ${job.status}; check needs a succeeded job`,
+      );
+    }
+    const manifest = this.getManifest(renderJobId);
+    const outputPath = path.resolve(this.config.outputRoot, job.outputRootRelativePath);
+    const binaries = requireFfmpeg(await this.detect());
+    const silenceRun = await this.runner.run({
+      executable: binaries.ffmpegPath,
+      args: [
+        "-nostdin",
+        "-hide_banner",
+        "-i",
+        outputPath,
+        "-af",
+        "silencedetect=noise=-50dB:d=1",
+        "-f",
+        "null",
+        "-",
+      ],
+    });
+    const spans = parseSilenceSpans(`${silenceRun.stderr}\n${silenceRun.stdout}`);
+    const durationMs = manifest.outputDurationMs;
+    const interiorSilence = spans
+      .filter(
+        (span) =>
+          span.startMs > 500 &&
+          span.endMs !== null &&
+          span.endMs < durationMs - 500,
+      )
+      .map((span) => ({
+        startMs: span.startMs,
+        endMs: span.endMs as number,
+        durationMs: (span.endMs as number) - span.startMs,
+      }));
+    const plan = job.setPlanId ? this.plans.findById(job.setPlanId)?.plan : null;
+    const entries = plan?.entries.slice().sort((a, b) => a.order - b.order) ?? [];
+    const joins: RenderCheckJoin[] = [];
+    for (let i = 0; i < manifest.tracks.length - 1; i += 1) {
+      const outgoing = manifest.tracks[i]!;
+      const incoming = manifest.tracks[i + 1]!;
+      const outEntry = entries.find((entry) => entry.trackId === outgoing.trackId);
+      const outTrack = this.tracks.findById(outgoing.trackId);
+      const inTrack = this.tracks.findById(incoming.trackId);
+      const analysis = this.analyses.findByTrackId(outgoing.trackId);
+      const audioEnd =
+        typeof analysis?.descriptors?.audioEndMs === "number"
+          ? analysis.descriptors.audioEndMs
+          : null;
+      const overlap = outgoing.overlapToNextMs ?? 0;
+      const windowInSilence =
+        audioEnd !== null && outgoing.sourceEndMs > audioEnd + 250;
+      const barRaw = outEntry?.transitionToNext?.parameters.barCount;
+      const alignmentMode =
+        outgoing.alignmentMode === "bar" || outgoing.alignmentMode === "beat"
+          ? outgoing.alignmentMode
+          : null;
+      joins.push({
+        order: i,
+        outgoingTitle: outTrack?.title ?? outgoing.trackId,
+        incomingTitle: inTrack?.title ?? incoming.trackId,
+        template: outgoing.transitionTemplate,
+        barCount: typeof barRaw === "number" ? barRaw : null,
+        outgoingRate: outgoing.playbackRate,
+        incomingRate: incoming.playbackRate,
+        downbeatOffsetMs: incoming.downbeatOffsetMs,
+        alignmentPeriodMs: incoming.alignmentPeriodMs ?? null,
+        alignmentMode,
+        windowInSilence,
+        overlapAtMs:
+          overlap > 0
+            ? Math.round(
+                outgoing.timelineStartMs +
+                  playableOutputMs({
+                    sourceStartMs: outgoing.sourceStartMs,
+                    sourceEndMs: outgoing.sourceEndMs,
+                    playbackRate: outgoing.playbackRate,
+                  }) -
+                  overlap,
+              )
+            : null,
+      });
+    }
+    return {
+      renderJobId,
+      outputPath,
+      durationMs,
+      interiorSilence,
+      joins,
+      ok: interiorSilence.length === 0 && joins.every((join) => !join.windowInSilence),
+    };
   }
 
   list(limit?: number, cursor?: string, setPlanId?: string) {
