@@ -45,10 +45,10 @@ describe("track analysis and aligned transitions", () => {
     const done = await catalog.service.waitForAnalysisJob(started.job.id, 60_000);
     expect(done.status).toBe("succeeded");
     const analysis = catalog.service.getTrackAnalysis(track.id);
-    expect(analysis.gridRejected).toBe(false);
-    expect(Math.abs((analysis.bpm ?? 0) - 174)).toBeLessThan(0.5);
     expect(analysis.canonicalBpm).toBe(170);
     expect(analysis.canonicalBpmSource).toBe("manual");
+    expect(analysis.gridRejected).toBe(true);
+    expect(analysis.gridRejectionReason ?? "").toMatch(/Reference tempo 170 does not fit/i);
     expect(analysis.suggestedCues.length).toBeGreaterThan(0);
   });
 

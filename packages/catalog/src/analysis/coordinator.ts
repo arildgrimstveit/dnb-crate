@@ -115,6 +115,7 @@ export class AnalysisCoordinator {
         beatAnchorMs: positionMs,
         gridRejected: false,
         gridRejectionReason: null,
+        gridSource: "anchor",
       });
     }
   }
@@ -201,9 +202,16 @@ export class AnalysisCoordinator {
     }
     const pcm = await loadPcmForAnalysis(track.filePath, this.runner, binaries);
     const anchor = this.analyses.getBeatAnchorMs(trackId);
+    const existing = this.analyses.findByTrackId(trackId);
+    const canonical = resolveCanonicalBpm(track, existing);
+    const referenceBpm =
+      (track.bpmSource === "published" || track.bpmSource === "manual") && canonical.bpm != null
+        ? canonical.bpm
+        : undefined;
     const dsp = dspAnalyzer.analyze(pcm, {
       durationMs: track.durationMs,
       beatAnchorMs: anchor,
+      referenceBpm,
     });
     let integratedLufs: number | null = null;
     let truePeakDb: number | null = null;
@@ -287,6 +295,7 @@ export class AnalysisCoordinator {
       downbeatTimesMs: result.downbeatTimesMs,
       gridRejected: result.gridRejected,
       gridRejectionReason: result.gridRejectionReason,
+      gridSource: result.gridSource,
       musicalKey: result.musicalKey,
       keyConfidence: result.keyConfidence,
       keyMode: result.keyMode,

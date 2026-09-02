@@ -240,6 +240,7 @@ export const envelopeAnalyzer: AudioAnalyzer = {
       downbeatTimesMs,
       gridRejected,
       gridRejectionReason,
+      gridSource: "analyzed",
       musicalKey: key.musicalKey,
       keyConfidence: key.keyConfidence,
       keyMode: null,

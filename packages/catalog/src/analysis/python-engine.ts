@@ -101,6 +101,7 @@ export async function runPythonAnalyzer(
     downbeatTimesMs: parsed.downbeatTimesMs ?? [],
     gridRejected: parsed.gridRejected ?? parsed.bpm == null,
     gridRejectionReason: parsed.gridRejectionReason ?? null,
+    gridSource: parsed.gridSource ?? "analyzed",
     musicalKey: null,
     keyConfidence: null,
     keyMode: null,

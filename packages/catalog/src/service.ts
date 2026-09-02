@@ -35,6 +35,7 @@ import {
   COMPATIBLE_TRACKS_LIMIT_MAX,
   DEFAULT_ANALYSIS_ENGINE,
   DomainError,
+  MIN_ANALYSIS_CONFIDENCE,
   RESOURCE_LIST_LIMIT,
   SCAN_WARNING_LIMIT,
   assertPlaybackRate,
@@ -365,7 +366,7 @@ export class CatalogService {
   getAnalysisReport(): {
     trackCount: number;
     engineCounts: Record<string, number>;
-    inRange: { count: number; withinHalf: number };
+    inRange: { count: number; withinHalf: number; accepted: number; acceptedExact: number };
     outOfRange: { count: number };
     publishedOrManualCompared: number;
     dspWithinHalfBpm: number;
@@ -376,9 +377,11 @@ export class CatalogService {
       bpm: number | null;
       bpmConfidence: number | null;
       gridRejected: boolean;
+      gridSource: "analyzed" | "reference" | "anchor" | null;
       keyAgreement: "exact" | "relative" | "none" | null;
       sectionCount: number;
     }>;
+    gridSourceCounts: { analyzed: number; reference: number; anchor: number };
     needsReview: Array<{
       trackId: string;
       title: string;
@@ -422,11 +425,15 @@ export class CatalogService {
       bpm: number | null;
       bpmConfidence: number | null;
       gridRejected: boolean;
+      gridSource: "analyzed" | "reference" | "anchor" | null;
       keyAgreement: "exact" | "relative" | "none" | null;
       sectionCount: number;
     }> = [];
+    const gridSourceCounts = { analyzed: 0, reference: 0, anchor: 0 };
     let inRangeCount = 0;
     let withinHalf = 0;
+    let accepted = 0;
+    let acceptedExact = 0;
     let outOfRangeCount = 0;
     for (const track of this.repository.listAll()) {
       const rows = this.analyses.listByTrackId(track.id);
@@ -454,9 +461,14 @@ export class CatalogService {
           bpm: row.bpm,
           bpmConfidence: row.bpmConfidence,
           gridRejected: row.gridRejected,
+          gridSource: row.gridSource ?? "analyzed",
           keyAgreement: keyAgreement(row.musicalKey, refKey),
           sectionCount: row.sections.length,
         });
+        const source = row.gridSource ?? "analyzed";
+        if (source === "reference" || source === "anchor" || source === "analyzed") {
+          gridSourceCounts[source] += 1;
+        }
       }
       const ref =
         view.canonicalBpmSource === "manual" || view.canonicalBpmSource === "published"
@@ -486,6 +498,18 @@ export class CatalogService {
       if (dsp != null && Math.abs(dsp - ref) <= 0.5) {
         withinHalf += 1;
       }
+      const dspRow = rows.find((row) => row.analyzerName === "dnb-crate-dsp");
+      const dspAccepted =
+        dspRow != null &&
+        !dspRow.gridRejected &&
+        (dspRow.bpmConfidence ?? 0) >= MIN_ANALYSIS_CONFIDENCE &&
+        dspRow.bpm != null;
+      if (dspAccepted) {
+        accepted += 1;
+        if (Math.abs(dspRow.bpm! - ref) <= 0.5) {
+          acceptedExact += 1;
+        }
+      }
       const values = Object.values(engines).filter((bpm): bpm is number => bpm != null);
       const spread = values.length >= 2 && Math.max(...values) - Math.min(...values) > 1;
       const off = dsp != null && Math.abs(dsp - ref) > 0.5;
@@ -509,10 +533,11 @@ export class CatalogService {
     return {
       trackCount: this.repository.listAll().length,
       engineCounts,
-      inRange: { count: inRangeCount, withinHalf },
+      inRange: { count: inRangeCount, withinHalf, accepted, acceptedExact },
       outOfRange: { count: outOfRangeCount },
       publishedOrManualCompared: inRangeCount + outOfRangeCount,
       dspWithinHalfBpm: withinHalf,
+      gridSourceCounts,
       engines: engineRows.slice(0, 200),
       needsReview: needsReview.slice(0, 50),
       disagreements: disagreements.slice(0, 50),

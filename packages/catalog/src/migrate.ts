@@ -5,6 +5,7 @@ import { migration003Renders } from "./migrations/003_renders.ts";
 import { migration004Analysis } from "./migrations/004_analysis.ts";
 import { migration005AnalysisV2 } from "./migrations/005_analysis_v2.ts";
 import { migration006PublishedProvenance } from "./migrations/006_published_provenance.ts";
+import { migration007GridSource } from "./migrations/007_grid_source.ts";
 
 export type Migration = {
   id: number;
@@ -20,6 +21,7 @@ const MIGRATIONS: Migration[] = [
   migration004Analysis,
   migration005AnalysisV2,
   migration006PublishedProvenance,
+  migration007GridSource,
 ];
 
 export function runMigrations(db: SqliteDatabase): void {

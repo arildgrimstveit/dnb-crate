@@ -23,6 +23,7 @@ export type AnalyzerResult = {
   downbeatTimesMs: number[];
   gridRejected: boolean;
   gridRejectionReason: string | null;
+  gridSource: "analyzed" | "reference" | "anchor";
   musicalKey: string | null;
   keyConfidence: number | null;
   keyMode: "major" | "minor" | null;
@@ -45,6 +46,8 @@ export type AnalyzeOptions = {
   beatAnchorMs?: number | null;
   dnbBpmMin?: number;
   dnbBpmMax?: number;
+  /** Published/manual canonical BPM. Fits phase only; never writes canonical values. */
+  referenceBpm?: number | null;
 };
 
 export type AudioAnalyzer = {

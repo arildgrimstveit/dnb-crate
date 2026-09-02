@@ -334,6 +334,62 @@ function estimateTempo(
   };
 }
 
+function wrapOffsetMs(offsetMs: number, periodMs: number): number {
+  if (periodMs <= 0) {
+    return 0;
+  }
+  const wrapped = offsetMs % periodMs;
+  return wrapped < 0 ? wrapped + periodMs : wrapped;
+}
+
+function scoreReferenceTempo(
+  onset: number[],
+  hopMs: number,
+  referenceBpm: number,
+): {
+  offsetMs: number;
+  confidence: number;
+  tempoEvidence: {
+    prominence: number;
+    stability: number;
+    tempoConf: number;
+    onGridRatio: number;
+  };
+} {
+  const { offsetMs, score: onGrid } = bestOffsetForBpm(onset, hopMs, referenceBpm);
+  const rivals = [referenceBpm * 1.07, referenceBpm / 1.07, referenceBpm * 1.12, referenceBpm / 1.12];
+  let rivalBest = 0;
+  for (const rival of rivals) {
+    rivalBest = Math.max(rivalBest, scoreTempoGrid(onset, hopMs, rival, offsetMs));
+  }
+  const tempoConf = clamp((onGrid - rivalBest) / (onGrid + 1e-9), 0, 1);
+  const peakOnset = onset.reduce((max, value) => Math.max(max, value), 0);
+  const onGridRatio = clamp(onGrid / (peakOnset + 1e-9), 0, 1);
+  const periodMs = 60_000 / referenceBpm;
+  const window = Math.max(Math.round(16_000 / hopMs), 64);
+  const ratios: number[] = [];
+  for (let start = 0; start + window < onset.length; start += Math.floor(window / 2)) {
+    const slice = onset.slice(start, start + window);
+    const adj = wrapOffsetMs(offsetMs - start * hopMs, periodMs);
+    const score = scoreTempoGrid(slice, hopMs, referenceBpm, adj);
+    const peak = slice.reduce((max, value) => Math.max(max, value), 0);
+    ratios.push(clamp(score / (peak + 1e-9), 0, 1));
+  }
+  const stability = ratios.length === 0 ? 0.45 : clamp(mean(ratios), 0, 1);
+  const prominence = clamp(0.65 * onGridRatio + 0.35 * tempoConf, 0, 1);
+  const confidence = clamp(logistic3(prominence, stability, tempoConf), 0, 1);
+  return {
+    offsetMs,
+    confidence,
+    tempoEvidence: {
+      prominence: Number(prominence.toFixed(4)),
+      stability: Number(stability.toFixed(4)),
+      tempoConf: Number(tempoConf.toFixed(4)),
+      onGridRatio: Number(onGridRatio.toFixed(4)),
+    },
+  };
+}
+
 function trackBeats(
   onset: number[],
   hopMs: number,
@@ -823,10 +879,13 @@ export const dspAnalyzer: AudioAnalyzer = {
     const estimated = estimateTempo(tempoOnset, tempoHopMs, minBpm, maxBpm);
     const bpmRaw = estimated?.bpmRaw ?? null;
     const folded = bpmRaw === null ? null : normalizeDnbBpm(bpmRaw, minBpm, maxBpm);
-    const bpmConfidence = Number((estimated?.confidence ?? 0).toFixed(3));
+    let bpmConfidence = Number((estimated?.confidence ?? 0).toFixed(3));
     let gridRejected = false;
     let gridRejectionReason: string | null = null;
     let bpm: number | null = folded?.bpm ?? null;
+    let gridSource: "analyzed" | "reference" | "anchor" = "analyzed";
+    let gridOffsetMs = estimated?.offsetMs ?? 0;
+    let tempoEvidence = estimated?.tempoEvidence ?? null;
     if (!folded || bpmRaw === null) {
       gridRejected = true;
       gridRejectionReason = "No plausible DnB tempo (160–190 after half/double fold)";
@@ -834,6 +893,26 @@ export const dspAnalyzer: AudioAnalyzer = {
     } else if (bpmConfidence < MIN_ANALYSIS_CONFIDENCE) {
       gridRejected = true;
       gridRejectionReason = `Beat-grid confidence ${bpmConfidence} is below ${MIN_ANALYSIS_CONFIDENCE}`;
+    }
+    const referenceBpm = options.referenceBpm;
+    const disagrees =
+      referenceBpm != null && bpm != null && Math.abs(bpm - referenceBpm) > 0.5;
+    if (referenceBpm != null && referenceBpm > 0 && (gridRejected || disagrees)) {
+      const ref = scoreReferenceTempo(tempoOnset, tempoHopMs, referenceBpm);
+      const refConf = Number(ref.confidence.toFixed(3));
+      if (refConf >= MIN_ANALYSIS_CONFIDENCE) {
+        bpm = referenceBpm;
+        bpmConfidence = refConf;
+        gridOffsetMs = ref.offsetMs;
+        gridRejected = false;
+        gridRejectionReason = null;
+        gridSource = "reference";
+        tempoEvidence = ref.tempoEvidence;
+      } else {
+        gridRejected = true;
+        gridRejectionReason = `Reference tempo ${referenceBpm} does not fit onsets (confidence ${refConf.toFixed(2)})`;
+        bpm = null;
+      }
     }
 
     let beatTimesMs: number[] = [];
@@ -845,7 +924,7 @@ export const dspAnalyzer: AudioAnalyzer = {
         tempoOnset,
         tempoHopMs,
         bpm,
-        estimated?.offsetMs ?? 0,
+        gridOffsetMs,
         durationMs,
       );
       const down = downbeatPhase(
@@ -918,6 +997,7 @@ export const dspAnalyzer: AudioAnalyzer = {
       downbeatTimesMs,
       gridRejected,
       gridRejectionReason,
+      gridSource,
       musicalKey: key.musicalKey,
       keyConfidence: key.keyConfidence,
       keyMode: key.keyMode,
@@ -943,7 +1023,7 @@ export const dspAnalyzer: AudioAnalyzer = {
         midBandEnergy: Number((midE / totalE).toFixed(4)),
         highBandEnergy: Number((highE / totalE).toFixed(4)),
         chromaVector: key.chromaVector,
-        tempoEvidence: estimated?.tempoEvidence ?? null,
+        tempoEvidence,
         audioStartMs: bounds.audioStartMs,
         audioEndMs: bounds.audioEndMs,
       },

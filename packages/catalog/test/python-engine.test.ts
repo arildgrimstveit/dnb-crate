@@ -18,6 +18,7 @@ function dspStub(): AnalyzerResult {
     downbeatTimesMs: [0],
     gridRejected: false,
     gridRejectionReason: null,
+    gridSource: "analyzed",
     musicalKey: "Fm",
     keyConfidence: 0.8,
     keyMode: "minor",

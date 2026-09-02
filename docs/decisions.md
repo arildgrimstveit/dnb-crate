@@ -77,3 +77,7 @@ Tempo confidence is a 3-feature logistic (prominence, stability, grid-vs-rival) 
 ## 2026-09-02 — Default analysis engine
 
 `dnb-crate-dsp` stays the default. The Python sidecar is optional; a `beat-this` crate comparison was not required to ship v2.1. Switch the default only if beat-this is ≥ 2 tracks better on in-range published BPM and adds < 10 s/track.
+
+## 2026-09-03 — Reference grids from canonical BPM
+
+Published/manual BPM is a **phase reference**, not a new canonical source. The analyzer still estimates freely; if that grid is rejected or disagrees by > 0.5 BPM, it fits `bestOffsetForBpm` at the reference and runs the same logistic. Features are measured on the reference comb (grid-vs-rival, on-grid ratio, windowed comb stability) so a clean free estimate cannot carry a wrong tempo over the threshold. Accept → `gridSource: "reference"`. Reject → never keep a wrong-tempo free grid. Applies to out-of-range references (125 still gets a 125 grid for cues/sections). `007_grid_source` stores the provenance.

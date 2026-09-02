@@ -159,6 +159,7 @@ export const beatGridSummarySchema = z.object({
   tempoStability: z.number().nullable(),
   gridRejected: z.boolean(),
   gridRejectionReason: z.string().nullable(),
+  gridSource: z.enum(["analyzed", "reference", "anchor"]).nullable().optional(),
 });
 
 export const trackAnalysisSchema = z.object({
@@ -170,6 +171,7 @@ export const trackAnalysisSchema = z.object({
   bpmRaw: z.number().nullable(),
   gridRejected: z.boolean(),
   gridRejectionReason: z.string().nullable(),
+  gridSource: z.enum(["analyzed", "reference", "anchor"]).nullable().optional(),
   musicalKey: z.string().nullable(),
   keyConfidence: z.number().nullable(),
   keyMode: z.enum(["major", "minor"]).nullable(),
@@ -237,6 +239,7 @@ export const analysisReportEngineRowSchema = z.object({
   bpm: z.number().nullable(),
   bpmConfidence: z.number().nullable(),
   gridRejected: z.boolean(),
+  gridSource: z.enum(["analyzed", "reference", "anchor"]).nullable().optional(),
   keyAgreement: z.enum(["exact", "relative", "none"]).nullable(),
   sectionCount: z.number().int(),
 });
@@ -247,7 +250,16 @@ export const analysisReportDataSchema = z.object({
   inRange: z.object({
     count: z.number().int(),
     withinHalf: z.number().int(),
+    accepted: z.number().int().optional(),
+    acceptedExact: z.number().int().optional(),
   }),
+  gridSourceCounts: z
+    .object({
+      analyzed: z.number().int(),
+      reference: z.number().int(),
+      anchor: z.number().int(),
+    })
+    .optional(),
   outOfRange: z.object({
     count: z.number().int(),
   }),

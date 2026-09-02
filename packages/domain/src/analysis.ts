@@ -87,6 +87,7 @@ export type TrackAnalysis = {
   downbeatTimesMs: number[];
   gridRejected: boolean;
   gridRejectionReason: string | null;
+  gridSource?: "analyzed" | "reference" | "anchor" | null;
   musicalKey: string | null;
   keyConfidence: number | null;
   keyMode: "major" | "minor" | null;
@@ -188,6 +189,7 @@ export type BeatGridSummary = {
   tempoStability: number | null;
   gridRejected: boolean;
   gridRejectionReason: string | null;
+  gridSource?: "analyzed" | "reference" | "anchor" | null;
 };
 
 export type TrackAnalysisView = TrackAnalysis & {
@@ -280,5 +282,6 @@ export function buildBeatGridSummary(analysis: TrackAnalysis): BeatGridSummary {
     tempoStability: analysis.tempoStability,
     gridRejected: analysis.gridRejected,
     gridRejectionReason: analysis.gridRejectionReason,
+    gridSource: analysis.gridSource ?? "analyzed",
   };
 }

@@ -40,6 +40,7 @@ type AnalysisRow = {
   descriptors_json: string | null;
   engine_runtime_ms: number | null;
   analyzed_at: string;
+  grid_source?: string | null;
 };
 
 export type StoredTrackAnalysis = TrackAnalysis & {
@@ -59,6 +60,10 @@ function mapAnalysis(row: AnalysisRow, sections: TrackSection[] = []): StoredTra
     downbeatTimesMs: JSON.parse(row.downbeat_times_json) as number[],
     gridRejected: row.grid_rejected === 1,
     gridRejectionReason: row.grid_rejection_reason,
+    gridSource:
+      row.grid_source === "reference" || row.grid_source === "anchor" || row.grid_source === "analyzed"
+        ? row.grid_source
+        : "analyzed",
     musicalKey: row.musical_key,
     keyConfidence: row.key_confidence,
     keyMode: row.key_mode,
@@ -175,12 +180,12 @@ export class AnalysisRepository {
       .prepare(
         `INSERT INTO track_analyses (
           track_id, analyzer_name, analyzer_version, bpm, bpm_confidence, bpm_raw,
-          beat_times_json, downbeat_times_json, grid_rejected, grid_rejection_reason,
+          beat_times_json, downbeat_times_json, grid_rejected, grid_rejection_reason, grid_source,
           musical_key, key_confidence, key_mode, camelot_key, tempo_stability, downbeat_confidence,
           integrated_lufs, true_peak_db, low_band_energy, mid_band_energy, high_band_energy,
           waveform_summary_json, beat_anchor_ms, suggested_cues_json, descriptors_json,
           engine_runtime_ms, analyzed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(track_id, analyzer_name) DO UPDATE SET
           analyzer_version = excluded.analyzer_version,
           bpm = excluded.bpm,
@@ -190,6 +195,7 @@ export class AnalysisRepository {
           downbeat_times_json = excluded.downbeat_times_json,
           grid_rejected = excluded.grid_rejected,
           grid_rejection_reason = excluded.grid_rejection_reason,
+          grid_source = excluded.grid_source,
           musical_key = excluded.musical_key,
           key_confidence = excluded.key_confidence,
           key_mode = excluded.key_mode,
@@ -219,6 +225,7 @@ export class AnalysisRepository {
         JSON.stringify(analysis.downbeatTimesMs),
         analysis.gridRejected ? 1 : 0,
         analysis.gridRejectionReason,
+        analysis.gridSource ?? "analyzed",
         analysis.musicalKey,
         analysis.keyConfidence,
         analysis.keyMode,

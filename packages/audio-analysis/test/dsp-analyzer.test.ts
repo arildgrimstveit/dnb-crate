@@ -191,6 +191,44 @@ describe("dnb-crate-dsp", () => {
     }
   });
 
+  it("accepts a reference grid when the free estimate is rejected", () => {
+    const full = buildClickTrackPcm({ bpm: 174, durationMs: 12_000, sampleRateHz: 22_050 });
+    const periodFrames = Math.round((full.sampleRateHz * 60) / 174);
+    const samples = new Float32Array(full.samples.length);
+    for (let i = 0; i < samples.length; i += 1) {
+      const beat = Math.round(i / periodFrames);
+      samples[i] = beat % 3 === 0 ? (full.samples[i] ?? 0) : 0;
+    }
+    const sparse = { ...full, samples };
+    const free = dspAnalyzer.analyze(sparse);
+    expect(free.gridRejected).toBe(true);
+    const referenced = dspAnalyzer.analyze(sparse, { referenceBpm: 174 });
+    expect(referenced.gridRejected).toBe(false);
+    expect(referenced.gridSource).toBe("reference");
+    expect(referenced.bpm).toBe(174);
+    const period = 60_000 / 174;
+    const errors = referenced.beatTimesMs.map((time) => {
+      const k = Math.round(time / period);
+      return Math.abs(time - k * period);
+    });
+    expect(median(errors)).toBeLessThan(5);
+  });
+
+  it("rejects a reference tempo that does not fit the onsets", () => {
+    const pcm = buildSyntheticDnbPcm({ bpm: 174 });
+    const result = dspAnalyzer.analyze(pcm, { referenceBpm: 150 });
+    expect(result.gridRejected).toBe(true);
+    expect(result.gridRejectionReason ?? "").toMatch(/Reference tempo 150 does not fit/i);
+    expect(result.bpm).toBeNull();
+  });
+
+  it("keeps a free-accepted click track as analyzed", () => {
+    const pcm = buildClickTrackPcm({ bpm: 174, durationMs: 12_000, sampleRateHz: 22_050 });
+    const result = dspAnalyzer.analyze(pcm);
+    expect(result.gridRejected).toBe(false);
+    expect(result.gridSource).toBe("analyzed");
+  });
+
   it("does not trim a 4s musical fade-out", () => {
     const pcm = buildSyntheticDnbPcm({ bpm: 174 });
     const fadeMs = 4000;
