@@ -176,7 +176,11 @@ async function main(): Promise<void> {
             }
           }
         }
-        printJson({ ok: true, data: runtime.service.getAnalysisReport() });
+        const report = runtime.service.getAnalysisReport();
+        process.stderr.write(
+          `analysis:gate in-range accepted ${report.inRange.accepted}/${report.inRange.count} exact ${report.inRange.acceptedExact} gridSource ${JSON.stringify(report.gridSourceCounts)}\n`,
+        );
+        printJson({ ok: true, data: report });
         break;
       }
       case "analysis:cue-preview": {

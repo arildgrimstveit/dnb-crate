@@ -30,7 +30,7 @@ essentia.js was rejected: unmaintained since 2021, AGPL, Node was the slowest en
 
 ## Planner tempo matching
 
-When both tracks have an accepted grid and their canonical BPMs are within ±3%, `create_set_plan` picks `phrase_mix` or `bass_swap` from the **join** (incoming head is a drop, or `headEnergy ≥ 0.6 ×` drop energy, or both tail/head are hot). Sections missing falls back to track energy. 32 bars when the incoming intro or outgoing outro/breakdown is ≥ 28 bars. Both `playbackRate`s move toward a shared target. If the pair cannot lock within ±3%, the join is an **8 s** `crossfade` (`tempo-out-of-range`) at the mix-out/mix-in. Missing grids keep the 30 s crossfade.
+When both tracks have an accepted grid and their canonical BPMs are within ±3%, `create_set_plan` picks `phrase_mix` or `bass_swap` from the **join** (incoming head is a drop, or `headEnergy ≥ 0.6 ×` drop energy, or both tail/head are hot). Sections missing falls back to track energy. 32 bars when the incoming intro or outgoing outro/breakdown is ≥ 28 bars. Both `playbackRate`s move toward a shared target. Tempo mismatch (`|pairRate − 1| > 3%`) is an **8 s** `crossfade` (`tempo-out-of-range`) at the mix-out/mix-in, even when grids are missing. Missing grids keep the 30 s crossfade only when the BPMs already sit within 3%.
 
 A track that is incoming from pair *i−1* keeps that rate when it is outgoing to pair *i+1*; the next target is recomputed from effective BPM (`canonicalBpm × rate`). `update_set_plan.setPlaybackRate` still wins on rebuild. Transition `parameters` record `{ targetBpm, barCount, reason }`.
 
@@ -50,11 +50,11 @@ Silence bounds come from RMS over 50 ms frames. Leading/trailing runs below **�
 
 | Template     | Behaviour |
 | ------------ | --------- |
-| `crossfade`  | Equal-power `acrossfade` (`hsin`). No grid required. |
-| `phrase_mix` | 16 or 32 bars at target BPM. Incoming mids/highs fade in through a **250 Hz** high-pass. |
-| `bass_swap`  | Split at **120–250 Hz** (default 180). Highs acrossfade; lows swap at bar 8/16. |
+| `crossfade`  | Equal-power `acrossfade` (`hsin`). No grid required. Default 30 s; 8 s on tempo mismatch. |
+| `phrase_mix` | 16 or 32 bars at target BPM. Incoming mid/high fade in over the first half; incoming low arrives at bar 12 (24 of 32). Outgoing low steps to −24 dB there, then to −inf. Outgoing mid/high fade out over the second half. |
+| `bass_swap`  | Mid/high crossfade across the overlap; outgoing mid dips −6 dB from bar 4. Lows swap at bar 8 (16 of 32) in `rampMs` (default 40). |
 
-`create_set_plan` picks `bass_swap` / `phrase_mix` / `crossfade` from grids, ±3% tempo, section lengths, and energy (including `suggestedEnergy` when manual energy is missing), then tempo-matches aligned pairs as above.
+`create_set_plan` picks `bass_swap` / `phrase_mix` / `crossfade` from the join (head/tail sections when present; track energy only as fallback), ±3% tempo, and section lengths, then tempo-matches aligned pairs as above.
 
 Tempo matching uses FFmpeg **`atempo`**. Playback rate is **±3%** unless `allowExcessiveTempo`.
 
@@ -72,4 +72,4 @@ pnpm cli analysis:cue-preview --track-id UUID --cue drop
 pnpm cli transition:plan --from UUID --to UUID --bars 32
 ```
 
-`analysis:gate` re-analyses every track with `bpmSource` `published` or `manual` and prints `get_analysis_report` (in-range vs out-of-range split). Optional `--previews` renders drop cue previews.
+`analysis:gate` re-analyses every track with `bpmSource` `published` or `manual` and prints `get_analysis_report` (in-range vs out-of-range split). Stderr also prints one line: in-range accepted/count, accepted-exact, and `gridSource` counts. Optional `--previews` renders drop cue previews.

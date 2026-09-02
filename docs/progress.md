@@ -1,5 +1,52 @@
 # Progress
 
+## Mixing v2.2 (2026-09-03)
+
+Set plans now consume analysis: mix windows from mix-in/mix-out + silence bounds, beat-or-bar alignment, reference grids, 3-band presets, and join type from head/tail energy. WP0–WP6 notes sit below.
+
+### Gate
+
+`analysis:gate in-range accepted 5/9 exact 5 gridSource {"analyzed":27,"reference":1,"anchor":0}` (DSP; stored after WP3; not re-run for this heading).
+
+- In-range accepted **5/9**, exact **5**. WP3 target ≥ 8/9 is **not** met — fixtures and MIN 0.6 win; crate-fit weights were not pasted.
+- Exact 174 accepted: Coming Down (0.947), Basic Instinct (0.748), Witchcraft (0.924), Turn Up the Bass (0.751), Tidal Wave (0.914). All `gridSource: "analyzed"`.
+- Rejected in-range: Last Jungle (0.582), Departure (0.28), It Must Be (0.467), Like a Memory (free 175 vs published 176; reference 176 did not accept; `bpm` null).
+- Complicated: **rejected** (published 125, OOR; not a folded wrong-tempo accept).
+- Alone: `gridSource: "reference"` at **124** (OOR).
+- No accepted in-range grid disagrees with published by > 0.5. Turn Up is listed as a disagreement only because the envelope row is 176 vs DSP 174.
+- `gridSourceCounts` includes envelope rows as `analyzed` (14 envelope + 13 DSP analyzed + 1 reference = 28).
+
+### Hour A/B
+
+- Plan `281f09aa-5b07-455c-94fc-efc50624de24` “DnB hour (v2.2)” — `plan:clone --replan` of liked `0e2b79c6-…`
+- Job `70606110-a320-4435-8c84-e3122bdfb422`, succeeded, **no** `--allow-low-confidence`
+- `output/renders/hour-mix-v2.2.wav` sha256 `05f97db9d1f5ebb47d442e34fd20b8d6a9042b76d0c7d139be4a4235304a7f89` (same bytes as the job wav). Do not overwrite `hour-mix-old.wav` / `hour-mix-v2.1.wav`.
+- Duration **3335606 ms** (~55:35). LUFS **−14**, true peak **−3.5**. Renderer **6.0.0**. Mix-wide −4.10 dB.
+- `render:check` exit **0**, `interiorSilence: []`, no `windowInSilence`.
+- Aligned joins report `alignmentMode: "beat"` (stored `downbeatConfidence` < 0.5). Bar mode is unit-tested, not exercised on this hour.
+
+Joins:
+
+- 0 Alone → Complicated — `crossfade` 30 s (`tempo-or-grid-mismatch`; 124 vs 125, Complicated grid rejected)
+- 1 Complicated → Tidal Wave — `crossfade` **8 s** (`tempo-out-of-range`), overlap **490753 ms**
+- 2 Tidal Wave → Coming Down — `phrase_mix` 32, beat align, offset 0, overlap 601098
+- 3 Coming Down → Witchcraft — `phrase_mix` 16, beat align, offset **1 ms**, overlap **842486**
+- 4 Witchcraft → It Must Be — `crossfade` 30 s (It Must Be grid rejected)
+- 5 It Must Be → Turn Up the Bass — `crossfade` 30 s
+- 6 Turn Up the Bass → Like a Memory — `crossfade` 30 s, mix-out **198623**, overlap **1438342** (not 27:06 / 1626 s)
+- 7 Like a Memory → Departure — `crossfade` 30 s
+- 8 Departure → Last Jungle — `crossfade` 30 s
+- 9 Last Jungle → Basic Instinct — `crossfade` 30 s
+- 10 Basic Instinct → Falling Down — `crossfade` **8 s** (`tempo-out-of-range`)
+- 11 Falling Down → Saint Angel — `crossfade` **8 s** (`tempo-out-of-range`)
+- 12 Saint Angel → Angel — `crossfade` 30 s
+
+Ear-check previews (pending user listen): `output/previews/coming-down-witchcraft-phrase-mix-v2.2.wav` (job `16fb2e60-…`, sha256 `4dbc5491…`); `output/previews/witchcraft-tidal-wave-bass-swap-v2.2.wav` (job `bd8c72e2-…`, sha256 `7bba62b0…`; planner type on this pair is `phrase_mix`, preview forced `bass_swap` 16). Did not overwrite `witchcraft-tidal-wave-bass-swap.wav`.
+
+Missing-grid + tempo-mismatch joins now use 8 s (Complicated → Tidal Wave; Basic Instinct → Falling Down; Falling Down → Saint Angel). Matching-tempo missing grids stay 30 s.
+
+- `vitest run` — 18 files, **116 passed**; `tsc --noEmit` clean
+
 ## Mixing v2.2 — baseline (2026-09-03)
 
 Harness only. `plan:clone --replan` rebuilds entries from current analysis; `render:check` flags interior silence (`-50 dB`, ≥ 1 s, not the first/last 500 ms) and per-join `windowInSilence`.
@@ -23,7 +70,7 @@ Silence bounds on descriptors; shared `planning/cues.ts`; `buildEntries` windows
 
 ## Mixing v2.2 — WP6 join type and short crossfade (2026-09-03)
 
-Type from head/tail sections (drop / head ≥ 0.6 × drop / both hot). Tempo mismatch with grids → **8 s** crossfade. Missing grids stay 30 s.
+Type from head/tail sections (drop / head ≥ 0.6 × drop / both hot). Tempo mismatch with grids → **8 s** crossfade. WP7 also shortens missing-grid + tempo-mismatch joins to 8 s; matching-tempo missing grids stay 30 s.
 
 - `vitest run` — 18 files, **115 passed**; `tsc --noEmit` clean
 

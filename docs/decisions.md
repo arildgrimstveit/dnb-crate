@@ -92,7 +92,7 @@ Unconstrained fit on the 14 labelled crate rows (2026-09-03): bias −3.4732, pr
 
 ## 2026-09-03 — Short crossfade on tempo mismatch
 
-A 125 → 174 pair cannot share a phrase. The planner now uses `SHORT_CROSSFADE_MS` (8 s) at the mix-out/mix-in instead of a 30 s full-range blend. Type still comes from the join (head/tail sections), not track-level energy, when sections exist.
+A 125 → 174 pair cannot share a phrase. The planner now uses `SHORT_CROSSFADE_MS` (8 s) at the mix-out/mix-in instead of a 30 s full-range blend, including when grids are missing. Type still comes from the join (head/tail sections), not track-level energy, when sections exist. Missing grids keep 30 s only when the BPMs already sit within 3%.
 
 ## 2026-09-03 — 3-band mix presets
 

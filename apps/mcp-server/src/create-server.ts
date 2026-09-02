@@ -833,10 +833,10 @@ ${request}
 Workflow:
 1. Call get_planning_readiness if metadata may be incomplete. Optionally start_track_analysis for selected UUIDs with engines ["dnb-crate-dsp"] (never the whole library) and poll get_analysis_status. Inspect get_track_analysis / get_track_sections.
 2. Use search_tracks to resolve named tracks to UUIDs (never filesystem paths). Filter on energy, sub-bass, and brightness when the brief is sonic.
-3. Call create_set_plan with structured fields only: name, targetDurationMs, requestedArc, preferredMoods/Subgenres/Artists, startTrackId/endTrackId, artistRepeatSpacing, seed. The planner now chooses phrase_mix/bass_swap/crossfade from grids and sections, and tempo-matches aligned pairs (both playback rates set toward a shared target BPM within ±3%).
+3. Call create_set_plan with structured fields only: name, targetDurationMs, requestedArc, preferredMoods/Subgenres/Artists, startTrackId/endTrackId, artistRepeatSpacing, seed. The planner chooses phrase_mix/bass_swap from the join (head/tail sections), tempo-matches aligned pairs within ±3%, and uses an 8s crossfade on tempo mismatch. Playable windows come from mix-in/mix-out sections, not file bounds.
 4. Call validate_set_plan. If there are errors or important warnings, call update_set_plan with explicit entry edits.
-5. For a pair you want to override: plan_transition, then update_set_plan.applyTransition. Use create_transition_preview or create_cue_preview to audition. Low-confidence grids must not be treated as facts unless the user sets allowLowConfidence.
-6. start_set_render. Poll get_render_status; read get_render_manifest when succeeded (includes downbeatOffsetMs).
+5. For a pair you want to override: plan_transition, then update_set_plan.applyTransition (keeps the outgoing start so the proposal applies). Use create_transition_preview or create_cue_preview to audition. Low-confidence grids must not be treated as facts unless the user sets allowLowConfidence.
+6. start_set_render. Poll get_render_status; read get_render_manifest when succeeded (includes downbeatOffsetMs, alignmentMode, and per-band automation).
 7. Summarize the tracklist with timeline times, why tracks were scored in, remaining warnings, and render job id.
 
 Do not invent BPM, key, energy, or cue points. Analysis is advisory. Provenance is manual > published > analyzed > tag. Playback-rate changes stay within ±3% unless allowExcessiveTempo.`,

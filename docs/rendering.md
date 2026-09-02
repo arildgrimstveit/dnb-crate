@@ -41,6 +41,8 @@ Same as Stage 3: `start_set_render` / `create_transition_preview` return a job i
 
 Aligned templates **fail closed** when a required grid is missing, rejected, or below confidence 0.6, unless `allowLowConfidence` is true.
 
+`render:check --id JOB` runs `silencedetect` (−50 dB, ≥ 1 s) and prints interior spans plus per-join template, bars, rates, `downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode`, and `windowInSilence`. Exit 1 if any interior span or window sits in silence.
+
 ## Known limitations
 
 - Envelope analysis is advisory on real music; click-track fixtures are the automated grid gate.

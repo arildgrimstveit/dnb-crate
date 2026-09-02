@@ -363,6 +363,15 @@ describe("planner tempo matching", () => {
     expect(chosen.transition.parameters.reason).toBe("tempo-out-of-range");
   });
 
+  it("uses an 8s crossfade when grids are missing and tempos disagree", () => {
+    const outgoing = gridTrack(125, 5, { gridOk: false });
+    const incoming = gridTrack(174, 5, { gridOk: false });
+    const chosen = chooseTransition(outgoing, incoming);
+    expect(chosen.transition.type).toBe("crossfade");
+    expect(chosen.transition.durationMs).toBe(8_000);
+    expect(chosen.transition.parameters.reason).toBe("tempo-out-of-range");
+  });
+
   it("picks bass_swap for a drop-headed incoming regardless of suggestedEnergy", () => {
     const outgoing = gridTrack(174, 9, {
       suggestedEnergy: 9,

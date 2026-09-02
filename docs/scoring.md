@@ -23,7 +23,7 @@ Identical catalog + constraints + seed → identical plan.
 
 ## Timing model
 
-- Default transition overlap: **30 seconds**. Tempo-mismatched pairs with accepted grids use an **8 second** `crossfade` at the mix-out/mix-in (`SHORT_CROSSFADE_MS`). Missing grids still keep the 30 s crossfade.
+- Default transition overlap: **30 seconds**. Tempo-mismatched pairs use an **8 second** `crossfade` at the mix-out/mix-in (`SHORT_CROSSFADE_MS`), whether or not both grids are accepted. Missing grids keep the 30 s crossfade only when the BPMs already sit within 3%.
 - Minimum playable window: **90 seconds** when the source is long enough
 - Duration tolerance: **90 seconds** vs `targetDurationMs` (default one hour)
 - Trims default to the full file; cue points are never invented

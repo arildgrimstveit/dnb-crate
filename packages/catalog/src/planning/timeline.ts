@@ -157,16 +157,19 @@ export function chooseTransition(
   incoming: TimelineTrack,
   options: { outgoingEffectiveBpm?: number } = {},
 ): ChosenTransition {
-  if (!gridsOk(outgoing, incoming)) {
-    return crossfade("tempo-or-grid-mismatch");
-  }
   const outCanon = options.outgoingEffectiveBpm ?? tempoBpm(outgoing);
   const inCanon = tempoBpm(incoming);
   if (outCanon == null || inCanon == null || !(outCanon > 0) || !(inCanon > 0)) {
     return crossfade("tempo-or-grid-mismatch");
   }
   const pairRate = playbackRateForBpm(inCanon, outCanon);
-  if (Math.abs(pairRate - 1) > MAX_TEMPO_DEVIATION + 1e-9) {
+  const tempoMismatch = Math.abs(pairRate - 1) > MAX_TEMPO_DEVIATION + 1e-9;
+  if (!gridsOk(outgoing, incoming)) {
+    return tempoMismatch
+      ? crossfade("tempo-out-of-range", SHORT_CROSSFADE_MS)
+      : crossfade("tempo-or-grid-mismatch");
+  }
+  if (tempoMismatch) {
     return crossfade("tempo-out-of-range", SHORT_CROSSFADE_MS);
   }
   const target =
