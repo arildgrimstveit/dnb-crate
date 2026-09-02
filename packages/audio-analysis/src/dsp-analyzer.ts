@@ -486,6 +486,58 @@ function rms(samples: Float32Array, start: number, end: number): number {
   return Math.sqrt(sum / n);
 }
 
+const SILENCE_LINEAR = 10 ** (-50 / 20);
+const SILENCE_FRAME_MS = 50;
+const SILENCE_MIN_RUN_MS = 500;
+
+function detectAudioBounds(
+  samples: Float32Array,
+  sampleRateHz: number,
+  durationMs: number,
+): { audioStartMs: number; audioEndMs: number } {
+  const frameSamples = Math.max(1, Math.round((sampleRateHz * SILENCE_FRAME_MS) / 1000));
+  const nFrames = Math.floor(samples.length / frameSamples);
+  if (nFrames === 0) {
+    return { audioStartMs: 0, audioEndMs: Math.round(durationMs) };
+  }
+  const silent: boolean[] = [];
+  for (let i = 0; i < nFrames; i += 1) {
+    const start = i * frameSamples;
+    const end = Math.min(start + frameSamples, samples.length);
+    let sum = 0;
+    let peak = 0;
+    for (let s = start; s < end; s += 1) {
+      const v = samples[s] ?? 0;
+      const a = Math.abs(v);
+      sum += v * v;
+      if (a > peak) {
+        peak = a;
+      }
+    }
+    const frameRms = Math.sqrt(sum / Math.max(1, end - start));
+    silent.push(frameRms < SILENCE_LINEAR && peak < 1e-6);
+  }
+  const minFrames = Math.ceil(SILENCE_MIN_RUN_MS / SILENCE_FRAME_MS);
+  const frameMs = (frameSamples / sampleRateHz) * 1000;
+  let lead = 0;
+  while (lead < silent.length && silent[lead]) {
+    lead += 1;
+  }
+  let trail = 0;
+  while (trail < silent.length && silent[silent.length - 1 - trail]) {
+    trail += 1;
+  }
+  const audioStartMs = lead >= minFrames ? Math.round(lead * frameMs) : 0;
+  const audioEndMs =
+    trail >= minFrames
+      ? Math.round((silent.length - trail) * frameMs)
+      : Math.round(durationMs);
+  return {
+    audioStartMs,
+    audioEndMs: Math.max(audioStartMs, Math.min(audioEndMs, Math.round(durationMs))),
+  };
+}
+
 function waveformSummary(samples: Float32Array, buckets = 128): number[] {
   const out: number[] = [];
   const size = Math.max(1, Math.floor(samples.length / buckets));
@@ -718,6 +770,9 @@ function labelSections(
   if (!merged.some((s) => s.type === "drop") && merged.length > 1) {
     merged[Math.min(1, merged.length - 1)]!.type = "drop";
   }
+  if (merged.length > 1 && (merged[merged.length - 1]?.sectionEnergy ?? 1) < 0.02) {
+    merged.pop();
+  }
   return merged;
 }
 
@@ -755,7 +810,9 @@ export const dspAnalyzer: AudioAnalyzer = {
     const started = Date.now();
     const minBpm = options.dnbBpmMin ?? DNB_BPM_MIN;
     const maxBpm = options.dnbBpmMax ?? DNB_BPM_MAX;
-    const durationMs = options.durationMs ?? pcm.durationMs;
+    const fileDurationMs = options.durationMs ?? pcm.durationMs;
+    const bounds = detectAudioBounds(pcm.samples, pcm.sampleRateHz, fileDurationMs);
+    const durationMs = bounds.audioEndMs;
     const stft = stftMagnitude(pcm.samples, pcm.sampleRateHz, NFFT, HOP);
     const { onset, low, mid } = onsetStrength(stft.mag, pcm.sampleRateHz, NFFT);
     const hopMs = stft.hopMs;
@@ -887,6 +944,8 @@ export const dspAnalyzer: AudioAnalyzer = {
         highBandEnergy: Number((highE / totalE).toFixed(4)),
         chromaVector: key.chromaVector,
         tempoEvidence: estimated?.tempoEvidence ?? null,
+        audioStartMs: bounds.audioStartMs,
+        audioEndMs: bounds.audioEndMs,
       },
       engineRuntimeMs: Date.now() - started,
     };

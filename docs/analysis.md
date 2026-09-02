@@ -41,6 +41,10 @@ Bars are anchored at the first downbeat when the grid is accepted. DSP labels `i
 
 Analyzer-inserted cues never overwrite a manual cue of the same type. The transition planner treats `source === "analyzed"` cues as **inferred** (reasons, not blockers). Outgoing mix-out never uses `drop`; incoming `drop` is only used for `bass_swap` when `allowDropIn` is true.
 
+Silence bounds come from RMS over 50 ms frames. Leading/trailing runs below **−50 dBFS** lasting ≥ **500 ms** set `descriptors.audioStartMs` / `audioEndMs`. Bars and section labels stop at `audioEndMs`. A last section with `sectionEnergy < 0.02` is dropped (not labelled `outro`).
+
+`create_set_plan` and `plan_transition` share `planning/cues.ts`: manual `outro_start` → energetic outro → last energetic breakdown → last eight downbeats → `audioEnd − overlap` (and the incoming mirror: manual intro → intro → first downbeat → `audioStart`). Candidate sections need `sectionEnergy ≥ 0.05`. If `mixOut + overlap` would pass `audioEndMs`, the mix-out snaps back to the previous downbeat. Playable windows grow toward `audioStartMs` when they would otherwise fall below 90 s; they never extend past `audioEndMs`.
+
 ## Transition templates
 
 | Template     | Behaviour |

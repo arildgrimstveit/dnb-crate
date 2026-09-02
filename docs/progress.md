@@ -13,6 +13,14 @@ Reference artifacts (do not overwrite):
 
 WP0 proof (2026-09-03): clone `7b99c6fa-6c20-497d-9de8-5241d1d54d29` “v2.2 baseline”, job `97061c12-46d2-4dbc-801e-fb6634aa983a`, sha256 `55e29579…` (byte-identical to v2.1). `render:check` exit 1 — interior silence `1626534–1628524` ms (1990 ms) at join 6 Turn Up the Bass → Like a Memory (`bass_swap`, overlap `1626473`). After WP1 the same check must pass.
 
+## Mixing v2.2 — WP1 windows (2026-09-03)
+
+Silence bounds on descriptors; shared `planning/cues.ts`; `buildEntries` windows from mix-out/mix-in; `applyTransition` keeps the outgoing start; `WINDOW_IN_SILENCE` warn/block.
+
+- `vitest run` — 17 files, **97 passed**; `tsc --noEmit` clean
+- Clone `2d733300-d0d6-48e1-8ec6-a6ec0bfda61a` “v2.2 wp1”: Turn Up mix-out **198623 ms** (breakdown), source end 220692 (was 264840)
+- Job `11f9d1d6-5a99-4dc9-91b0-c55f377674ab`, sha256 `0a3f651c…`, 53:22. `render:check` exit **0**, interior silence none. Join 6 overlap now 1414078 ms (no 27:06 dead air).
+
 ## Analysis v2.1 — grids to mixes (2026-09-02)
 
 What works:

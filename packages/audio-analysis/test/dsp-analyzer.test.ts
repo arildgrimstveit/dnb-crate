@@ -161,4 +161,50 @@ describe("dnb-crate-dsp", () => {
     expect(result.gridRejected || (result.bpmConfidence ?? 0) < 0.6).toBe(true);
     expect(result.bpmConfidence).not.toBe(0.55);
   });
+
+  it("records audioEndMs before appended digital silence and keeps cues out of it", () => {
+    const pcm = buildSyntheticDnbPcm({ bpm: 174 });
+    const silenceMs = 6000;
+    const extra = Math.round((pcm.sampleRateHz * silenceMs) / 1000);
+    const samples = new Float32Array(pcm.samples.length + extra);
+    samples.set(pcm.samples);
+    const padded = {
+      ...pcm,
+      samples,
+      durationMs: pcm.durationMs + silenceMs,
+    };
+    const result = dspAnalyzer.analyze(padded);
+    expect(result.descriptors?.audioEndMs).toBeDefined();
+    let trueEndMs = 0;
+    for (let i = pcm.samples.length - 1; i >= 0; i -= 1) {
+      if (Math.abs(pcm.samples[i] ?? 0) >= 1e-6) {
+        trueEndMs = (i / pcm.sampleRateHz) * 1000;
+        break;
+      }
+    }
+    expect(Math.abs((result.descriptors?.audioEndMs ?? 0) - trueEndMs)).toBeLessThan(100);
+    expect(result.sections.at(-1)?.endMs ?? 0).toBeLessThanOrEqual(
+      (result.descriptors?.audioEndMs ?? 0) + 1,
+    );
+    for (const cue of result.suggestedCues) {
+      expect(cue.positionMs).toBeLessThanOrEqual((result.descriptors?.audioEndMs ?? 0) + 50);
+    }
+  });
+
+  it("does not trim a 4s musical fade-out", () => {
+    const pcm = buildSyntheticDnbPcm({ bpm: 174 });
+    const fadeMs = 4000;
+    const fadeSamples = Math.round((pcm.sampleRateHz * fadeMs) / 1000);
+    const start = Math.max(0, pcm.samples.length - fadeSamples);
+    const faded = pcm.samples.slice();
+    for (let i = start; i < faded.length; i += 1) {
+      const t = (i - start) / Math.max(1, faded.length - start);
+      faded[i] = (faded[i] ?? 0) * (1 - t);
+    }
+    const result = dspAnalyzer.analyze({
+      ...pcm,
+      samples: faded,
+    });
+    expect(result.descriptors?.audioEndMs ?? 0).toBeGreaterThan(pcm.durationMs - 200);
+  });
 });

@@ -53,7 +53,7 @@ import { fingerprintFile } from "./fingerprint.ts";
 import { extractAudioMetadata } from "./metadata.ts";
 import { isPathInsideAnyRoot } from "./paths.ts";
 import { draftSetPlan } from "./planning/planner.ts";
-import { buildEntries } from "./planning/timeline.ts";
+import { analysisToTimeline, buildEntries } from "./planning/timeline.ts";
 import { validateSetPlan } from "./planning/validate.ts";
 import type { TrackRepository } from "./repository.ts";
 import { resolveLibraryRoots, walkLibrary } from "./scanner.ts";
@@ -62,7 +62,6 @@ import type { RenderCoordinator } from "./render/coordinator.ts";
 import type { AnalysisCoordinator } from "./analysis/coordinator.ts";
 import type { AnalysisRepository } from "./analysis-repository.ts";
 import { planTransition, validateTransition } from "./planning/transition-planner.ts";
-import { analysisToTimeline } from "./planning/timeline.ts";
 import { probePythonEngine } from "./analysis/python-engine.ts";
 
 export type CatalogRuntime = {
@@ -746,17 +745,14 @@ export class CatalogService {
       const analyses = new Map(
         this.repository
           .listAll()
-          .map((track) => {
-            const row = this.analyses.findByTrackId(track.id);
-            const canon = resolveCanonicalBpm(track, row);
-            return [track.id, analysisToTimeline(row, canon.bpm)] as const;
-          })
+          .map((track) => [track.id, this.toTimeline(track)] as const)
           .filter((entry): entry is readonly [string, NonNullable<ReturnType<typeof analysisToTimeline>>] => entry[1] != null),
       );
       const drafted = draftSetPlan(this.repository.listAll(), input, analyses);
       const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
       const validation = validateSetPlan(drafted.plan, tracksById, {
         artistRepeatSpacing: input.artistRepeatSpacing,
+        audioEndMsByTrackId: this.audioEndMsByTrackId(),
       });
       const stored = this.setPlans.save(
         drafted.plan,
@@ -814,7 +810,9 @@ export class CatalogService {
       createdAt: now,
       updatedAt: now,
     };
-    const validation = validateSetPlan(plan, tracksById);
+    const validation = validateSetPlan(plan, tracksById, {
+      audioEndMsByTrackId: this.audioEndMsByTrackId(),
+    });
     const saved = this.setPlans.save(plan, stored.seed, stored.explanation);
     return {
       plan: saved.plan,
@@ -988,11 +986,16 @@ export class CatalogService {
       }
       assertPlaybackRate(input.applyTransition.outgoingPlaybackRate, { allowExcessive: true });
       assertPlaybackRate(input.applyTransition.incomingPlaybackRate, { allowExcessive: true });
-      outgoing.sourceStartMs = input.applyTransition.outgoingSourceStartMs;
+      outgoing.sourceStartMs = Math.min(
+        outgoing.sourceStartMs,
+        input.applyTransition.outgoingSourceStartMs,
+      );
       outgoing.sourceEndMs = input.applyTransition.outgoingSourceEndMs;
       outgoing.playbackRate = input.applyTransition.outgoingPlaybackRate;
       incoming.sourceStartMs = input.applyTransition.incomingSourceStartMs;
-      incoming.sourceEndMs = input.applyTransition.incomingSourceEndMs;
+      if (incoming.transitionToNext === null) {
+        incoming.sourceEndMs = input.applyTransition.incomingSourceEndMs;
+      }
       incoming.playbackRate = input.applyTransition.incomingPlaybackRate;
       outgoing.transitionToNext = {
         ...outgoing.transitionToNext,
@@ -1027,11 +1030,7 @@ export class CatalogService {
       return track;
     });
     const rebuilt = buildEntries(
-      orderedTracks.map((track) => {
-        const row = this.analyses.findByTrackId(track.id);
-        const canon = resolveCanonicalBpm(track, row);
-        return { ...track, analysis: analysisToTimeline(row, canon.bpm) };
-      }),
+      orderedTracks.map((track) => ({ ...track, analysis: this.toTimeline(track) })),
       undefined,
       new Map(entries.map((entry) => [entry.trackId, entry])),
     );
@@ -1041,7 +1040,9 @@ export class CatalogService {
       entries: rebuilt,
       updatedAt: new Date().toISOString(),
     };
-    const validation = validateSetPlan(plan, tracksById);
+    const validation = validateSetPlan(plan, tracksById, {
+      audioEndMsByTrackId: this.audioEndMsByTrackId(),
+    });
     if (!validation.valid) {
       throw new DomainError(
         "INVALID_SET_PLAN",
@@ -1070,11 +1071,29 @@ export class CatalogService {
   }
 
   private timelineTracksFor(tracks: Track[]) {
-    return tracks.map((track) => {
-      const row = this.analyses.findByTrackId(track.id);
-      const canon = resolveCanonicalBpm(track, row);
-      return { ...track, analysis: analysisToTimeline(row, canon.bpm) };
-    });
+    return tracks.map((track) => ({ ...track, analysis: this.toTimeline(track) }));
+  }
+
+  private toTimeline(track: Track) {
+    const row = this.analyses.findByTrackId(track.id);
+    const canon = resolveCanonicalBpm(track, row);
+    return analysisToTimeline(
+      row,
+      canon.bpm,
+      this.repository.listCuePoints(track.id),
+      track.durationMs,
+    );
+  }
+
+  private audioEndMsByTrackId(): Map<string, number> {
+    const map = new Map<string, number>();
+    for (const track of this.repository.listAll()) {
+      const end = this.analyses.findByTrackId(track.id)?.descriptors?.audioEndMs;
+      if (typeof end === "number") {
+        map.set(track.id, end);
+      }
+    }
+    return map;
   }
 
   private requireTrack(trackId: string) {

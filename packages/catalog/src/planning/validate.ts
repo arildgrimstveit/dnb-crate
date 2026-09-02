@@ -17,7 +17,7 @@ import { planDurationMs, playableMs } from "./timeline.ts";
 export function validateSetPlan(
   plan: SetPlanV1,
   tracksById: Map<string, Track>,
-  options?: { artistRepeatSpacing?: number },
+  options?: { artistRepeatSpacing?: number; audioEndMsByTrackId?: Map<string, number> },
 ): ValidateSetPlanResult {
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
@@ -75,6 +75,15 @@ export function validateSetPlan(
       errors.push({
         code: "INVALID_TRIM",
         message: `Playable duration is below ${MIN_PLAYABLE_DURATION_MS}ms`,
+        entryId: entry.id,
+        trackId: track.id,
+      });
+    }
+    const audioEnd = options?.audioEndMsByTrackId?.get(entry.trackId);
+    if (audioEnd != null && entry.sourceEndMs > audioEnd + 250) {
+      warnings.push({
+        code: "WINDOW_IN_SILENCE",
+        message: `${track.title} source end ${entry.sourceEndMs}ms is past audio end ${audioEnd}ms`,
         entryId: entry.id,
         trackId: track.id,
       });

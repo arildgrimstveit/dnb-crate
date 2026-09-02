@@ -8,10 +8,16 @@ import {
   normalizeDnbBpm,
   phraseDurationMs,
   playbackRateForBpm,
+  snapToNearestBeat,
+  type CuePoint,
   type SetPlanEntry,
   type Track,
+  type TrackSection,
+  type TrackSectionType,
   type TransitionPlan,
 } from "@dnb-crate/domain";
+
+import { constrainMixOut, pickMixIn, pickMixOut, sectionEnergyAt } from "./cues.ts";
 
 export type TimelineAnalysis = {
   gridOk: boolean;
@@ -23,6 +29,14 @@ export type TimelineAnalysis = {
   outroEndMs: number | null;
   introLenMs: number | null;
   outroLenMs: number | null;
+  sections: TrackSection[];
+  downbeatTimesMs: number[];
+  audioStartMs: number | null;
+  audioEndMs: number | null;
+  mixInMs: number | null;
+  mixOutMs: number | null;
+  headEnergy: number | null;
+  tailEnergy: number | null;
 };
 
 export type TimelineTrack = Pick<Track, "id" | "durationMs" | "energy" | "bpm"> & {
@@ -39,15 +53,7 @@ export type ChosenTransition = {
 export function defaultPlayableWindow(
   track: TimelineTrack,
 ): { sourceStartMs: number; sourceEndMs: number } {
-  const intro = track.analysis?.introStartMs;
-  const outroEnd = track.analysis?.outroEndMs;
-  const start = intro != null && intro >= 0 ? Math.round(intro) : 0;
-  const end =
-    outroEnd != null && outroEnd > start ? Math.round(outroEnd) : track.durationMs;
-  if (end - start < MIN_PLAYABLE_DURATION_MS && track.durationMs >= MIN_PLAYABLE_DURATION_MS) {
-    return { sourceStartMs: 0, sourceEndMs: track.durationMs };
-  }
-  return { sourceStartMs: start, sourceEndMs: Math.min(end, track.durationMs) };
+  return musicalWindow(track, 0, 1, true);
 }
 
 export function playableMs(entry: Pick<SetPlanEntry, "sourceStartMs" | "sourceEndMs">): number {
@@ -146,6 +152,42 @@ export function chooseTransition(
   };
 }
 
+export function musicalWindow(
+  track: TimelineTrack,
+  overlapMs: number,
+  rate: number,
+  isLast: boolean,
+): { sourceStartMs: number; sourceEndMs: number; mixInMs: number; mixOutMs: number } {
+  const analysis = track.analysis;
+  const audioStart = analysis?.audioStartMs ?? 0;
+  const audioEnd = analysis?.audioEndMs ?? track.durationMs;
+  const downbeats = analysis?.downbeatTimesMs ?? [];
+  const overlapSource = isLast ? 0 : overlapMs * (rate > 0 ? rate : 1);
+  const rawMixIn = analysis?.mixInMs ?? audioStart;
+  const rawMixOut = analysis?.mixOutMs ?? Math.max(audioStart, audioEnd - Math.max(overlapSource, 1));
+  const snappedMixIn =
+    downbeats.length > 0
+      ? (snapToNearestBeat(rawMixIn, downbeats)?.positionMs ?? Math.round(rawMixIn))
+      : Math.round(rawMixIn);
+  const mixInMs = Math.max(audioStart, snappedMixIn);
+  const mixOutMs = constrainMixOut(rawMixOut, overlapSource, audioEnd, downbeats);
+  let sourceEndMs = isLast ? audioEnd : Math.min(Math.round(mixOutMs + overlapSource), audioEnd);
+  let sourceStartMs = mixInMs;
+  if (sourceEndMs <= sourceStartMs) {
+    sourceEndMs = Math.min(track.durationMs, Math.max(sourceStartMs + 1, audioEnd));
+  }
+  const playable = sourceEndMs - sourceStartMs;
+  if (playable < MIN_PLAYABLE_DURATION_MS && track.durationMs >= MIN_PLAYABLE_DURATION_MS) {
+    sourceStartMs = Math.max(audioStart, sourceEndMs - MIN_PLAYABLE_DURATION_MS);
+  }
+  return {
+    sourceStartMs: Math.round(sourceStartMs),
+    sourceEndMs: Math.round(sourceEndMs),
+    mixInMs: Math.round(mixInMs),
+    mixOutMs: Math.round(mixOutMs),
+  };
+}
+
 export function buildEntries(
   tracks: TimelineTrack[],
   overlapMs = DEFAULT_TRANSITION_OVERLAP_MS,
@@ -198,17 +240,31 @@ export function buildEntries(
     chosen.push(result);
   }
 
+  const windows = tracks.map((track, index) => {
+    const isLast = index === tracks.length - 1;
+    const prior = existing?.get(track.id);
+    const picked = chosen[index];
+    const transition = isLast
+      ? null
+      : (prior?.transitionToNext ?? picked?.transition ?? null);
+    const overlap = isLast ? 0 : overlapFor(transition) || overlapMs;
+    const rate =
+      prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : (rates[index] ?? 1);
+    return musicalWindow(track, overlap, rate, isLast);
+  });
+
   const entries: SetPlanEntry[] = [];
   let timeline = 0;
   for (let index = 0; index < tracks.length; index += 1) {
     const track = tracks[index]!;
     const prior = existing?.get(track.id);
-    const window = defaultPlayableWindow(track);
+    const window = windows[index]!;
+    const nextWindow = windows[index + 1];
     const sourceStartMs = prior?.sourceStartMs ?? window.sourceStartMs;
     const sourceEndMs = prior?.sourceEndMs ?? window.sourceEndMs;
     const isLast = index === tracks.length - 1;
     const picked = chosen[index];
-    const transitionToNext: TransitionPlan | null = isLast
+    const baseTransition: TransitionPlan | null = isLast
       ? null
       : (prior?.transitionToNext ??
         picked?.transition ?? {
@@ -219,6 +275,23 @@ export function buildEntries(
           incomingCuePointId: null,
           parameters: { purpose: "stage2-timing-only" },
         });
+    const transitionToNext =
+      baseTransition === null
+        ? null
+        : {
+            ...baseTransition,
+            parameters: {
+              ...baseTransition.parameters,
+              mixOutMs:
+                typeof baseTransition.parameters.mixOutMs === "number"
+                  ? baseTransition.parameters.mixOutMs
+                  : window.mixOutMs,
+              mixInMs:
+                typeof baseTransition.parameters.mixInMs === "number"
+                  ? baseTransition.parameters.mixInMs
+                  : (nextWindow?.mixInMs ?? window.mixInMs),
+            },
+          };
     const playbackRate =
       prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : (rates[index] ?? 1);
     entries.push({
@@ -268,23 +341,63 @@ export function assertPlayableWindow(
 
 export function analysisToTimeline(
   analysis: {
+    trackId?: string;
     gridRejected: boolean;
     bpm: number | null;
     bpmConfidence: number | null;
-    descriptors: { suggestedEnergy: number | null } | null;
+    downbeatTimesMs?: number[];
+    downbeatConfidence?: number | null;
+    beatTimesMs?: number[];
+    descriptors: {
+      suggestedEnergy: number | null;
+      audioStartMs?: number | null;
+      audioEndMs?: number | null;
+    } | null;
     sections: Array<{
       type: string;
       startMs: number;
       endMs: number;
+      startBar?: number | null;
+      endBar?: number | null;
+      confidence?: number;
+      sectionEnergy?: number;
     }>;
   } | null,
   canonicalBpm?: number | null,
+  cues: CuePoint[] = [],
+  durationMs?: number,
 ): TimelineAnalysis | null {
   if (!analysis) {
     return null;
   }
-  const intro = analysis.sections.find((s) => s.type === "intro");
-  const outro = analysis.sections.find((s) => s.type === "outro");
+  const sections: TrackSection[] = analysis.sections.map((section) => ({
+    type: section.type as TrackSectionType,
+    startMs: section.startMs,
+    endMs: section.endMs,
+    startBar: section.startBar ?? null,
+    endBar: section.endBar ?? null,
+    confidence: section.confidence ?? 0,
+    sectionEnergy: section.sectionEnergy ?? 0.5,
+  }));
+  const lastEnd = sections.at(-1)?.endMs;
+  const duration =
+    durationMs ?? analysis.descriptors?.audioEndMs ?? lastEnd ?? 0;
+  const intro = sections.find((section) => section.type === "intro");
+  const outro = sections.find((section) => section.type === "outro" && section.sectionEnergy >= 0.05)
+    ?? sections.find((section) => section.type === "outro");
+  const bundle = {
+    track: { id: analysis.trackId ?? "unknown", durationMs: duration },
+    analysis: {
+      sections,
+      downbeatTimesMs: analysis.downbeatTimesMs ?? [],
+      downbeatConfidence: analysis.downbeatConfidence ?? null,
+      beatTimesMs: analysis.beatTimesMs ?? [],
+      descriptors: analysis.descriptors,
+    },
+    cues,
+  };
+  const mixIn = pickMixIn(bundle);
+  const mixOut = pickMixOut(bundle);
   return {
     gridOk: !analysis.gridRejected && (analysis.bpmConfidence ?? 0) >= MIN_ANALYSIS_CONFIDENCE,
     bpm: analysis.bpm,
@@ -292,8 +405,16 @@ export function analysisToTimeline(
     suggestedEnergy: analysis.descriptors?.suggestedEnergy ?? null,
     introStartMs: intro?.startMs ?? null,
     outroStartMs: outro?.startMs ?? null,
-    outroEndMs: outro?.endMs ?? null,
+    outroEndMs: outro?.endMs ?? analysis.descriptors?.audioEndMs ?? lastEnd ?? null,
     introLenMs: intro ? intro.endMs - intro.startMs : null,
     outroLenMs: outro ? outro.endMs - outro.startMs : null,
+    sections,
+    downbeatTimesMs: analysis.downbeatTimesMs ?? [],
+    audioStartMs: analysis.descriptors?.audioStartMs ?? null,
+    audioEndMs: analysis.descriptors?.audioEndMs ?? null,
+    mixInMs: mixIn.ms,
+    mixOutMs: mixOut.ms,
+    headEnergy: sectionEnergyAt(sections, mixIn.ms),
+    tailEnergy: sectionEnergyAt(sections, mixOut.ms),
   };
 }

@@ -219,7 +219,9 @@ export class RenderCoordinator {
   ): Promise<ValidateSetPlanResult> {
     const stored = this.requirePlan(setPlanId);
     const tracksById = new Map(this.tracks.listAll().map((track) => [track.id, track]));
-    const structural = validateSetPlan(stored.plan, tracksById);
+    const structural = validateSetPlan(stored.plan, tracksById, {
+      audioEndMsByTrackId: this.audioEndMsByTrackId(),
+    });
     const renderReadiness = await this.assessReadiness(stored.plan, tracksById, options);
     return { ...structural, renderReadiness };
   }
@@ -783,6 +785,17 @@ export class RenderCoordinator {
     }
   }
 
+  private audioEndMsByTrackId(): Map<string, number> {
+    const map = new Map<string, number>();
+    for (const track of this.tracks.listAll()) {
+      const end = this.analyses.findByTrackId(track.id)?.descriptors?.audioEndMs;
+      if (typeof end === "number") {
+        map.set(track.id, end);
+      }
+    }
+    return map;
+  }
+
   private async assessReadiness(
     plan: SetPlanV1,
     tracksById: Map<string, Track>,
@@ -865,6 +878,19 @@ export class RenderCoordinator {
         }
         const overlap = entry.transitionToNext?.durationMs ?? 0;
         const playable = playableOutputMs(entry);
+        const audioEnd = this.analyses.findByTrackId(track.id)?.descriptors?.audioEndMs;
+        if (typeof audioEnd === "number" && overlap > 0) {
+          const overlapSource = overlap * (entry.playbackRate > 0 ? entry.playbackRate : 1);
+          const overlapStart = entry.sourceEndMs - overlapSource;
+          if (overlapStart > audioEnd) {
+            issues.push({
+              code: "WINDOW_IN_SILENCE",
+              message: `${track.title} overlap sits entirely past audio end ${audioEnd}ms`,
+              entryId: entry.id,
+              trackId: track.id,
+            });
+          }
+        }
         if (overlap > 0 && playable <= overlap) {
           issues.push({
             code: "INVALID_TRIM",

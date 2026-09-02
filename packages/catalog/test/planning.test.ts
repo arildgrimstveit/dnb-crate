@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createCatalogRuntime } from "../src/index.ts";
 import type { AppConfig } from "@dnb-crate/domain";
-import { analysisToTimeline, buildEntries, chooseTransition, type TimelineTrack } from "../src/planning/timeline.ts";
+import { validateSetPlan } from "../src/planning/validate.ts";
+import { analysisToTimeline, buildEntries, chooseTransition, type TimelineAnalysis, type TimelineTrack } from "../src/planning/timeline.ts";
 import { planTransition } from "../src/planning/transition-planner.ts";
+import type { SetPlanV1, Track, TrackSection } from "@dnb-crate/domain";
 
 function testConfig(root: string): AppConfig {
   return {
@@ -299,6 +301,7 @@ describe("planner tempo matching", () => {
   function gridTrack(
     bpm: number,
     energy = 5,
+    extra: Partial<TimelineAnalysis> = {},
   ): TimelineTrack {
     return {
       id: crypto.randomUUID(),
@@ -315,6 +318,15 @@ describe("planner tempo matching", () => {
         outroEndMs: 180_000,
         introLenMs: 30_000,
         outroLenMs: 40_000,
+        sections: [],
+        downbeatTimesMs: [],
+        audioStartMs: 0,
+        audioEndMs: 180_000,
+        mixInMs: 0,
+        mixOutMs: 140_000,
+        headEnergy: 0.3,
+        tailEnergy: 0.4,
+        ...extra,
       },
     };
   }
@@ -387,6 +399,85 @@ describe("planner tempo matching", () => {
     expect(timeline?.introLenMs).toBe(20_000);
     expect(timeline?.outroLenMs).toBe(40_000);
     expect(timeline?.gridOk).toBe(true);
+    expect(timeline?.mixOutMs).toBe(140_000);
+    expect(timeline?.mixInMs).toBe(0);
+  });
+
+  it("skips a silent outro and mixes out of the last energetic breakdown", () => {
+    const timeline = analysisToTimeline(
+      {
+        gridRejected: false,
+        bpm: 174,
+        bpmConfidence: 0.8,
+        descriptors: { suggestedEnergy: 7, audioStartMs: 0, audioEndMs: 242_800 },
+        sections: [
+          { type: "intro", startMs: 0, endMs: 20_000, sectionEnergy: 0.3 },
+          { type: "drop", startMs: 20_000, endMs: 180_000, sectionEnergy: 0.9 },
+          { type: "breakdown", startMs: 198_600, endMs: 242_000, sectionEnergy: 0.4 },
+          { type: "outro", startMs: 242_000, endMs: 264_840, sectionEnergy: 0 },
+        ],
+      },
+      174,
+      [],
+      264_840,
+    );
+    expect(timeline?.mixOutMs).toBe(198_600);
+    expect(timeline?.tailEnergy).toBe(0.4);
+  });
+
+  it("builds windows from outro/intro and extends the start to keep 90s playable", () => {
+    const section = (
+      type: TrackSection["type"],
+      startMs: number,
+      endMs: number,
+      sectionEnergy: number,
+    ): TrackSection => ({
+      type,
+      startMs,
+      endMs,
+      startBar: null,
+      endBar: null,
+      confidence: 0.7,
+      sectionEnergy,
+    });
+    const outgoing = gridTrack(174, 5, {
+      audioStartMs: 0,
+      audioEndMs: 240_000,
+      mixInMs: 150_000,
+      mixOutMs: 200_000,
+      introStartMs: 150_000,
+      introLenMs: 16_000,
+      outroStartMs: 200_000,
+      outroEndMs: 240_000,
+      outroLenMs: 16_000,
+      sections: [
+        section("intro", 150_000, 170_000, 0.3),
+        section("drop", 170_000, 200_000, 0.9),
+        section("outro", 200_000, 240_000, 0.4),
+      ],
+    });
+    outgoing.durationMs = 240_000;
+    const incoming = gridTrack(174, 5, {
+      audioStartMs: 0,
+      audioEndMs: 240_000,
+      mixInMs: 16_000,
+      mixOutMs: 200_000,
+      introStartMs: 16_000,
+      introLenMs: 16_000,
+      sections: [
+        section("intro", 16_000, 32_000, 0.3),
+        section("drop", 32_000, 200_000, 0.9),
+      ],
+    });
+    incoming.durationMs = 240_000;
+    const entries = buildEntries([outgoing, incoming]);
+    const overlap = entries[0]!.transitionToNext!.durationMs;
+    expect(entries[0]!.sourceEndMs).toBe(Math.min(200_000 + overlap, 240_000));
+    expect(entries[1]!.sourceStartMs).toBe(16_000);
+    expect(entries[0]!.sourceEndMs - entries[0]!.sourceStartMs).toBeGreaterThanOrEqual(90_000);
+    expect(entries[0]!.sourceStartMs).toBeLessThan(150_000);
+    expect(entries[0]!.transitionToNext?.parameters.mixOutMs).toBe(200_000);
+    expect(entries[0]!.transitionToNext?.parameters.mixInMs).toBe(16_000);
   });
 });
 
@@ -559,6 +650,133 @@ describe("analyzed cue provenance", () => {
     });
     const proposal = planned.proposals.find((item) => item.type === "crossfade")!;
     expect(proposal.reasons.some((reason) => /analyzer-derived/i.test(reason))).toBe(false);
+  });
+});
+
+describe("applyTransition and silence windows", () => {
+  it("applies a phrase-length proposal without collapsing the outgoing start", () => {
+    const catalog = runtime();
+    const a = seedTrack(catalog, {
+      title: "LongOut",
+      artist: "A",
+      bpm: 174,
+      camelot: "11A",
+      energy: 5,
+      durationMs: 240_000,
+    });
+    const b = seedTrack(catalog, {
+      title: "LongIn",
+      artist: "B",
+      bpm: 174,
+      camelot: "12A",
+      energy: 6,
+      durationMs: 240_000,
+    });
+    const c = seedTrack(catalog, {
+      title: "LongLast",
+      artist: "C",
+      bpm: 174,
+      camelot: "1A",
+      energy: 5,
+      durationMs: 240_000,
+    });
+    const created = catalog.service.createSetPlan({
+      name: "Apply",
+      targetDurationMs: 600_000,
+      requiredTrackIds: [a, b, c],
+      startTrackId: a,
+      endTrackId: c,
+      seed: 1,
+    });
+    const outgoingStart = created.plan.entries[0]!.sourceStartMs;
+    const middleEnd = created.plan.entries[1]!.sourceEndMs;
+    const planned = catalog.service.planTransition({
+      outgoingTrackId: a,
+      incomingTrackId: b,
+      preferredType: "phrase_mix",
+    });
+    const proposal = planned.proposals.find((item) => item.type === "phrase_mix")!;
+    expect(proposal.outgoingSourceEndMs - proposal.outgoingSourceStartMs).toBeLessThan(90_000);
+    const updated = catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      applyTransition: {
+        entryId: created.plan.entries[0]!.id,
+        type: proposal.type,
+        durationMs: proposal.durationMs,
+        outgoingPlaybackRate: proposal.outgoingPlaybackRate,
+        incomingPlaybackRate: proposal.incomingPlaybackRate,
+        outgoingSourceStartMs: proposal.outgoingSourceStartMs,
+        outgoingSourceEndMs: proposal.outgoingSourceEndMs,
+        incomingSourceStartMs: proposal.incomingSourceStartMs,
+        incomingSourceEndMs: proposal.incomingSourceEndMs,
+      },
+    });
+    expect(updated.plan.entries[0]!.sourceStartMs).toBe(outgoingStart);
+    expect(updated.plan.entries[0]!.sourceEndMs).toBe(proposal.outgoingSourceEndMs);
+    expect(updated.plan.entries[1]!.sourceEndMs).toBe(middleEnd);
+    expect(updated.plan.entries[0]!.sourceEndMs - updated.plan.entries[0]!.sourceStartMs).toBeGreaterThanOrEqual(
+      90_000,
+    );
+  });
+
+  it("warns WINDOW_IN_SILENCE when the source end sits in digital silence", () => {
+    const now = new Date().toISOString();
+    const track: Track = {
+      id: "t1",
+      filePath: "t1.wav",
+      fileFingerprint: "t1",
+      artist: "A",
+      title: "Silent End",
+      album: null,
+      durationMs: 264_840,
+      sampleRateHz: 44100,
+      channels: 2,
+      bpm: 174,
+      bpmSource: "manual",
+      musicalKey: "Fm",
+      camelotKey: "4A",
+      keySource: "manual",
+      energy: 7,
+      rating: 4,
+      subgenres: [],
+      moods: [],
+      tags: [],
+      notes: null,
+      analysisStatus: "complete",
+      fileMissing: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const plan: SetPlanV1 = {
+      schemaVersion: 1,
+      id: crypto.randomUUID(),
+      name: "silence",
+      targetDurationMs: 180_000,
+      targetBpm: 174,
+      requestedArc: [
+        { atFraction: 0, targetEnergy: 5 },
+        { atFraction: 1, targetEnergy: 5 },
+      ],
+      entries: [
+        {
+          id: "e1",
+          trackId: track.id,
+          order: 0,
+          sourceStartMs: 0,
+          sourceEndMs: 264_840,
+          timelineStartMs: 0,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: null,
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const result = validateSetPlan(plan, new Map([[track.id, track]]), {
+      audioEndMsByTrackId: new Map([[track.id, 242_800]]),
+    });
+    expect(result.warnings.some((issue) => issue.code === "WINDOW_IN_SILENCE")).toBe(true);
   });
 });
 
