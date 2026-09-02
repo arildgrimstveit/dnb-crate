@@ -21,6 +21,15 @@ Silence bounds on descriptors; shared `planning/cues.ts`; `buildEntries` windows
 - Clone `2d733300-d0d6-48e1-8ec6-a6ec0bfda61a` “v2.2 wp1”: Turn Up mix-out **198623 ms** (breakdown), source end 220692 (was 264840)
 - Job `11f9d1d6-5a99-4dc9-91b0-c55f377674ab`, sha256 `0a3f651c…`, 53:22. `render:check` exit **0**, interior silence none. Join 6 overlap now 1414078 ms (no 27:06 dead air).
 
+## Mixing v2.2 — WP3–WP4 reference grids and calibration (2026-09-03)
+
+WP3: published/manual BPM is a phase reference. Free grids that miss or disagree by > 0.5 are replaced only when the reference comb clears the logistic. `gridSource` is `analyzed` | `reference` | `anchor`. Migration `007_grid_source`.
+
+- `vitest run` — 17 files, **106 passed**; `tsc --noEmit` clean
+- Wrong reference (150 on 174, 170 on a 174 click) rejected; sparse 174 clicks recover via `gridSource: "reference"`
+
+WP4: crate calibration script reads stored `tempoEvidence` (14 published/manual rows). Unconstrained MIN 0.795 would drop accepted-correct 5→1 (Like a Memory 175 vs 176). **Kept MIN 0.6 and existing weights.**
+
 ## Mixing v2.2 — WP2 bar alignment (2026-09-03)
 
 `downbeatAlignmentOffsetMs` returns `{ offsetMs, periodMs, mode }`. Bar wrap when both downbeat confidences ≥ 0.5; otherwise beat. Negative nudges at start 0 add one period.

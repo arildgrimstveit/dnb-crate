@@ -81,3 +81,11 @@ Tempo confidence is a 3-feature logistic (prominence, stability, grid-vs-rival) 
 ## 2026-09-03 — Reference grids from canonical BPM
 
 Published/manual BPM is a **phase reference**, not a new canonical source. The analyzer still estimates freely; if that grid is rejected or disagrees by > 0.5 BPM, it fits `bestOffsetForBpm` at the reference and runs the same logistic. Features are measured on the reference comb (grid-vs-rival, on-grid ratio, windowed comb stability) so a clean free estimate cannot carry a wrong tempo over the threshold. Accept → `gridSource: "reference"`. Reject → never keep a wrong-tempo free grid. Applies to out-of-range references (125 still gets a 125 grid for cues/sections). `007_grid_source` stores the provenance.
+
+## 2026-09-03 — Confidence calibration on the crate
+
+`calibrate-confidence.mts --config` now loads stored `tempoEvidence` for published/manual tracks (no re-analysis), labels `|bpmRaw − canonical| ≤ 0.5` (out-of-range refs = 0), and fits with those rows at weight 2 plus the synthetic click/DnB/sine/noise rows.
+
+Unconstrained fit on the 14 labelled crate rows (2026-09-03): bias −3.4732, prominence 4.0339, stability 0.2045, tempoConf 4.3950. Zero-false-accept MIN would be **0.795**, but that drops in-range accepted-correct from **5 → 1**. Fitted weights at MIN 0.6 drop it to **3**. The driver is Like a Memory (free 175 vs published 176) scoring as a false accept alongside true 174s. Last Jungle (160 vs 174) is already rejected at 0.582.
+
+**Kept** the 2026-09-02 synthetic weights and **MIN 0.6**. Fixtures stay green; accepted-correct does not drop. Re-run after a reference-grid re-analysis if Like a Memory locks to 176.

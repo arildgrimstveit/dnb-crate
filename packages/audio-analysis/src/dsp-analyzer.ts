@@ -16,7 +16,7 @@ import { emptyDescriptors } from "./types.ts";
 
 const NFFT = 2048;
 const HOP = 512;
-/** Fitted 2026-09-02 on synthetic click/DnB/sine/noise. Re-run tools/scripts/calibrate-confidence.mts after onset/tempo changes. */
+/** Fitted 2026-09-02 on synthetic click/DnB/sine/noise. Crate review 2026-09-03 kept these weights (see docs/decisions.md). Re-run tools/scripts/calibrate-confidence.mts after onset/tempo changes. */
 const TEMPO_LOGISTIC_BIAS = -1.6;
 const TEMPO_LOGISTIC_W_PROMINENCE = 1.0;
 const TEMPO_LOGISTIC_W_STABILITY = 3.2;
