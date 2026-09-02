@@ -6,6 +6,7 @@ import {
   DEFAULT_PHRASE_BARS,
   DEFAULT_TRANSITION_OVERLAP_MS,
   MAX_TEMPO_DEVIATION,
+  SHORT_CROSSFADE_MS,
   MIN_ANALYSIS_CONFIDENCE,
   MIN_PLAYABLE_DURATION_MS,
   assertPlaybackRate,
@@ -84,12 +85,12 @@ function gridsOk(outgoing: TimelineTrack, incoming: TimelineTrack): boolean {
   return Boolean(outgoing.analysis?.gridOk && incoming.analysis?.gridOk);
 }
 
-function crossfade(reason: string): ChosenTransition {
+function crossfade(reason: string, durationMs = DEFAULT_TRANSITION_OVERLAP_MS): ChosenTransition {
   return {
     transition: {
       id: crypto.randomUUID(),
       type: "crossfade",
-      durationMs: DEFAULT_TRANSITION_OVERLAP_MS,
+      durationMs,
       outgoingCuePointId: null,
       incomingCuePointId: null,
       parameters: { reason },
@@ -98,6 +99,57 @@ function crossfade(reason: string): ChosenTransition {
     incomingRate: 1,
     targetBpm: null,
   };
+}
+
+function longestSectionMs(sections: TrackSection[], types: TrackSectionType[]): number {
+  let longest = 0;
+  for (const section of sections) {
+    if (types.includes(section.type)) {
+      longest = Math.max(longest, section.endMs - section.startMs);
+    }
+  }
+  return longest;
+}
+
+function sectionAt(sections: TrackSection[], atMs: number | null): TrackSection | undefined {
+  if (atMs == null) {
+    return sections[0];
+  }
+  return (
+    sections.find((section) => atMs >= section.startMs && atMs < section.endMs) ??
+    sections.find((section) => atMs >= section.startMs && atMs <= section.endMs)
+  );
+}
+
+function chooseAlignedType(outgoing: TimelineTrack, incoming: TimelineTrack): {
+  type: "phrase_mix" | "bass_swap";
+  reason: string;
+} {
+  const outSections = outgoing.analysis?.sections ?? [];
+  const inSections = incoming.analysis?.sections ?? [];
+  if (outSections.length === 0 && inSections.length === 0) {
+    const outEnergy = outgoing.energy ?? outgoing.analysis?.suggestedEnergy ?? 5;
+    const inEnergy = incoming.energy ?? incoming.analysis?.suggestedEnergy ?? 5;
+    const bassSwap = inEnergy > outEnergy || (outEnergy >= 7 && inEnergy >= 7);
+    return {
+      type: bassSwap ? "bass_swap" : "phrase_mix",
+      reason: bassSwap ? "energy-up-or-both-hot" : "matched-grid-phrase",
+    };
+  }
+  const head = sectionAt(inSections, incoming.analysis?.mixInMs ?? null);
+  const dropEnergy = Math.max(
+    0,
+    ...inSections.filter((section) => section.type === "drop").map((section) => section.sectionEnergy),
+  );
+  const headEnergy = incoming.analysis?.headEnergy ?? head?.sectionEnergy ?? 0;
+  const tailEnergy = outgoing.analysis?.tailEnergy ?? 0;
+  const headIsDrop = head?.type === "drop";
+  const headNearDrop = dropEnergy > 0 && headEnergy >= 0.6 * dropEnergy;
+  const bothHot = tailEnergy >= 0.6 && headEnergy >= 0.6;
+  if (headIsDrop || headNearDrop || bothHot) {
+    return { type: "bass_swap", reason: headIsDrop ? "incoming-drop" : bothHot ? "hot-join" : "head-near-drop" };
+  }
+  return { type: "phrase_mix", reason: "matched-grid-phrase" };
 }
 
 export function chooseTransition(
@@ -115,7 +167,7 @@ export function chooseTransition(
   }
   const pairRate = playbackRateForBpm(inCanon, outCanon);
   if (Math.abs(pairRate - 1) > MAX_TEMPO_DEVIATION + 1e-9) {
-    return crossfade("tempo-out-of-range");
+    return crossfade("tempo-out-of-range", SHORT_CROSSFADE_MS);
   }
   const target =
     options.outgoingEffectiveBpm != null
@@ -127,26 +179,27 @@ export function chooseTransition(
     assertPlaybackRate(outgoingRate, { allowExcessive: false });
     assertPlaybackRate(incomingRate, { allowExcessive: false });
   } catch {
-    return crossfade("tempo-out-of-range");
+    return crossfade("tempo-out-of-range", SHORT_CROSSFADE_MS);
   }
-  const outEnergy = outgoing.energy ?? outgoing.analysis?.suggestedEnergy ?? 5;
-  const inEnergy = incoming.energy ?? incoming.analysis?.suggestedEnergy ?? 5;
-  const bassSwap = inEnergy > outEnergy || (outEnergy >= 7 && inEnergy >= 7);
-  const introLen = incoming.analysis?.introLenMs ?? 0;
-  const outroLen = outgoing.analysis?.outroLenMs ?? 0;
+  const aligned = chooseAlignedType(outgoing, incoming);
   const barMs = phraseDurationMs(1, target);
+  const introMs = incoming.analysis?.introLenMs
+    ?? longestSectionMs(incoming.analysis?.sections ?? [], ["intro"]);
+  const outroMs = Math.max(
+    outgoing.analysis?.outroLenMs ?? 0,
+    longestSectionMs(outgoing.analysis?.sections ?? [], ["outro", "breakdown"]),
+  );
   const phraseBars: 16 | 32 =
-    introLen >= barMs * 28 || outroLen >= barMs * 28 ? 32 : DEFAULT_PHRASE_BARS;
-  const type = bassSwap ? "bass_swap" : "phrase_mix";
+    introMs >= barMs * 28 || outroMs >= barMs * 28 ? 32 : DEFAULT_PHRASE_BARS;
   return {
     transition: {
       id: crypto.randomUUID(),
-      type,
+      type: aligned.type,
       durationMs: Math.round(phraseDurationMs(phraseBars, target)),
       outgoingCuePointId: null,
       incomingCuePointId: null,
       parameters: {
-        reason: bassSwap ? "energy-up-or-both-hot" : "matched-grid-phrase",
+        reason: aligned.reason,
         barCount: phraseBars,
         targetBpm: Number(target.toFixed(3)),
         crossoverHz: DEFAULT_BASS_CROSSOVER_HZ,

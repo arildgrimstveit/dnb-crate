@@ -90,6 +90,10 @@ Unconstrained fit on the 14 labelled crate rows (2026-09-03): bias −3.4732, pr
 
 **Kept** the 2026-09-02 synthetic weights and **MIN 0.6**. Fixtures stay green; accepted-correct does not drop. Re-run after a reference-grid re-analysis if Like a Memory locks to 176.
 
+## 2026-09-03 — Short crossfade on tempo mismatch
+
+A 125 → 174 pair cannot share a phrase. The planner now uses `SHORT_CROSSFADE_MS` (8 s) at the mix-out/mix-in instead of a 30 s full-range blend. Type still comes from the join (head/tail sections), not track-level energy, when sections exist.
+
 ## 2026-09-03 — 3-band mix presets
 
 Phrase-mix and bass-swap are no longer two hard-coded graphs. `expandPreset` builds per-band automation (low / mid / high) that both the planner and the renderer compile. The graph is `asplit=3` → band filters → chained `afade` → `amix=inputs=6`. Crossfade stays `acrossfade`. `RENDERER_VERSION` is **6.0.0** so preview cache keys change. Partial fades need FFmpeg `afade` `unity`/`silence`; the local build has them, and the fake runner advertises them.

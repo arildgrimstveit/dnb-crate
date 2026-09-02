@@ -21,6 +21,12 @@ Silence bounds on descriptors; shared `planning/cues.ts`; `buildEntries` windows
 - Clone `2d733300-d0d6-48e1-8ec6-a6ec0bfda61a` “v2.2 wp1”: Turn Up mix-out **198623 ms** (breakdown), source end 220692 (was 264840)
 - Job `11f9d1d6-5a99-4dc9-91b0-c55f377674ab`, sha256 `0a3f651c…`, 53:22. `render:check` exit **0**, interior silence none. Join 6 overlap now 1414078 ms (no 27:06 dead air).
 
+## Mixing v2.2 — WP6 join type and short crossfade (2026-09-03)
+
+Type from head/tail sections (drop / head ≥ 0.6 × drop / both hot). Tempo mismatch with grids → **8 s** crossfade. Missing grids stay 30 s.
+
+- `vitest run` — 18 files, **115 passed**; `tsc --noEmit` clean
+
 ## Mixing v2.2 — WP5 3-band mixer (2026-09-03)
 
 `expandPreset` + `buildBandMixFilter` (`asplit=3`, `amix=inputs=6`, `afade` unity/silence). `RENDERER_VERSION` **6.0.0**.

@@ -30,7 +30,7 @@ essentia.js was rejected: unmaintained since 2021, AGPL, Node was the slowest en
 
 ## Planner tempo matching
 
-When both tracks have an accepted grid and their canonical BPMs are within ±3%, `create_set_plan` picks `phrase_mix` or `bass_swap` and sets **both** `playbackRate`s toward a shared target (`normalizeDnbBpm` of the pair average, or the outgoing effective BPM later in a chain). Rates are checked with `assertPlaybackRate` (no excessive override). If either rate is out of range, the pair falls back to `crossfade` with `parameters.reason = "tempo-out-of-range"`.
+When both tracks have an accepted grid and their canonical BPMs are within ±3%, `create_set_plan` picks `phrase_mix` or `bass_swap` from the **join** (incoming head is a drop, or `headEnergy ≥ 0.6 ×` drop energy, or both tail/head are hot). Sections missing falls back to track energy. 32 bars when the incoming intro or outgoing outro/breakdown is ≥ 28 bars. Both `playbackRate`s move toward a shared target. If the pair cannot lock within ±3%, the join is an **8 s** `crossfade` (`tempo-out-of-range`) at the mix-out/mix-in. Missing grids keep the 30 s crossfade.
 
 A track that is incoming from pair *i−1* keeps that rate when it is outgoing to pair *i+1*; the next target is recomputed from effective BPM (`canonicalBpm × rate`). `update_set_plan.setPlaybackRate` still wins on rebuild. Transition `parameters` record `{ targetBpm, barCount, reason }`.
 

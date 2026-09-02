@@ -347,12 +347,144 @@ describe("planner tempo matching", () => {
     expect(entries[1]?.playbackRate).toBeCloseTo(175 / 176, 5);
   });
 
-  it("falls back to crossfade when 174/182 cannot lock within 3%", () => {
+  it("falls back to an 8s crossfade when 174/182 cannot lock within 3%", () => {
     const chosen = chooseTransition(gridTrack(174), gridTrack(182));
     expect(chosen.transition.type).toBe("crossfade");
     expect(chosen.outgoingRate).toBe(1);
     expect(chosen.incomingRate).toBe(1);
     expect(chosen.transition.parameters.reason).toBe("tempo-out-of-range");
+    expect(chosen.transition.durationMs).toBe(8_000);
+  });
+
+  it("uses an 8s crossfade for a 125/174 pair", () => {
+    const chosen = chooseTransition(gridTrack(125), gridTrack(174));
+    expect(chosen.transition.type).toBe("crossfade");
+    expect(chosen.transition.durationMs).toBe(8_000);
+    expect(chosen.transition.parameters.reason).toBe("tempo-out-of-range");
+  });
+
+  it("picks bass_swap for a drop-headed incoming regardless of suggestedEnergy", () => {
+    const outgoing = gridTrack(174, 9, {
+      suggestedEnergy: 9,
+      tailEnergy: 0.3,
+      sections: [
+        {
+          type: "drop",
+          startMs: 20_000,
+          endMs: 140_000,
+          startBar: null,
+          endBar: null,
+          confidence: 0.8,
+          sectionEnergy: 0.9,
+        },
+      ],
+    });
+    const incoming = gridTrack(174, 2, {
+      suggestedEnergy: 2,
+      mixInMs: 16_000,
+      headEnergy: 0.85,
+      sections: [
+        {
+          type: "intro",
+          startMs: 0,
+          endMs: 16_000,
+          startBar: null,
+          endBar: null,
+          confidence: 0.7,
+          sectionEnergy: 0.15,
+        },
+        {
+          type: "drop",
+          startMs: 16_000,
+          endMs: 80_000,
+          startBar: null,
+          endBar: null,
+          confidence: 0.8,
+          sectionEnergy: 0.85,
+        },
+      ],
+    });
+    expect(chooseTransition(outgoing, incoming).transition.type).toBe("bass_swap");
+  });
+
+  it("picks phrase_mix for a quiet intro even when both tracks are energy 9", () => {
+    const outgoing = gridTrack(174, 9, {
+      suggestedEnergy: 9,
+      tailEnergy: 0.25,
+      mixOutMs: 140_000,
+      sections: [
+        {
+          type: "outro",
+          startMs: 140_000,
+          endMs: 180_000,
+          startBar: null,
+          endBar: null,
+          confidence: 0.7,
+          sectionEnergy: 0.25,
+        },
+      ],
+    });
+    const incoming = gridTrack(174, 9, {
+      suggestedEnergy: 9,
+      mixInMs: 0,
+      headEnergy: 0.2,
+      sections: [
+        {
+          type: "intro",
+          startMs: 0,
+          endMs: 40_000,
+          startBar: null,
+          endBar: null,
+          confidence: 0.7,
+          sectionEnergy: 0.2,
+        },
+        {
+          type: "drop",
+          startMs: 40_000,
+          endMs: 120_000,
+          startBar: null,
+          endBar: null,
+          confidence: 0.8,
+          sectionEnergy: 0.9,
+        },
+      ],
+    });
+    expect(chooseTransition(outgoing, incoming).transition.type).toBe("phrase_mix");
+  });
+
+  it("picks bass_swap when both tail and head are hot", () => {
+    const outgoing = gridTrack(174, 4, {
+      suggestedEnergy: 4,
+      tailEnergy: 0.72,
+      sections: [
+        {
+          type: "breakdown",
+          startMs: 120_000,
+          endMs: 160_000,
+          startBar: null,
+          endBar: null,
+          confidence: 0.7,
+          sectionEnergy: 0.72,
+        },
+      ],
+    });
+    const incoming = gridTrack(174, 4, {
+      suggestedEnergy: 4,
+      mixInMs: 8_000,
+      headEnergy: 0.7,
+      sections: [
+        {
+          type: "build",
+          startMs: 0,
+          endMs: 20_000,
+          startBar: null,
+          endBar: null,
+          confidence: 0.7,
+          sectionEnergy: 0.7,
+        },
+      ],
+    });
+    expect(chooseTransition(outgoing, incoming).transition.type).toBe("bass_swap");
   });
 
   it("keeps a 174/175/176 chain monotone and within 3%", () => {
@@ -453,7 +585,7 @@ describe("planner tempo matching", () => {
       sections: [
         section("intro", 150_000, 170_000, 0.3),
         section("drop", 170_000, 200_000, 0.9),
-        section("outro", 200_000, 240_000, 0.4),
+        section("outro", 200_000, 216_000, 0.4),
       ],
     });
     outgoing.durationMs = 240_000;
