@@ -6,6 +6,7 @@ export {
   detectFfmpeg,
   ffmpegAlignedReady,
   ffmpegMixReady,
+  parseAfadeUnitySupport,
   parseFilterComplexScriptSupport,
   parseFilterList,
   parseVersionLine,
@@ -15,6 +16,7 @@ export {
 } from "./detect.ts";
 export {
   buildAcrossfadeFilter,
+  buildBandMixFilter,
   buildBassSwapFilter,
   buildMixFilter,
   buildPhraseMixFilter,

@@ -15,10 +15,13 @@ import {
   MIN_ANALYSIS_CONFIDENCE,
   RENDERER_VERSION,
   assertPlaybackRate,
+  clampMixPresetParams,
+  expandPreset,
   isDomainError,
   type AppConfig,
   type AutomationEvent,
   type Logger,
+  type MixPresetParams,
   type RenderJob,
   type RenderManifestTrack,
   type RenderManifestV1,
@@ -100,6 +103,7 @@ export type PreparedSegment = MixSegment & {
   alignmentPeriodMs: number | null;
   alignmentMode: "bar" | "beat" | null;
   downbeatConfidence: number | null;
+  mixParams: Partial<MixPresetParams> | null;
 };
 
 type RenderSettings = {
@@ -650,6 +654,7 @@ export class RenderCoordinator {
             ? (job.params.template ?? segments[index]?.requestedTransitionType)
             : segments[index]?.requestedTransitionType,
           job.params.barCount,
+          segments[index]?.mixParams,
         ),
       );
       if (mixTypes.some((item) => item.type !== "crossfade")) {
@@ -995,6 +1000,7 @@ export class RenderCoordinator {
       alignmentPeriodMs: null,
       alignmentMode: null,
       downbeatConfidence: analysis?.downbeatConfidence ?? null,
+      mixParams: mixParamsFromEntry(entry),
     };
   }
 
@@ -1142,15 +1148,38 @@ function planHasAlignedTransition(plan: SetPlanV1): boolean {
   return plan.entries.some((entry) => isAlignedType(entry.transitionToNext?.type));
 }
 
+function mixParamsFromEntry(entry: SetPlanEntry): Partial<MixPresetParams> | null {
+  const raw = entry.transitionToNext?.parameters;
+  if (!raw) {
+    return null;
+  }
+  const num = (key: string): number | undefined =>
+    typeof raw[key] === "number" ? raw[key] : undefined;
+  return {
+    barCount: raw.barCount === 32 ? 32 : raw.barCount === 16 ? 16 : undefined,
+    targetBpm: num("targetBpm") ?? null,
+    crossoverHz: num("crossoverHz"),
+    swapAtBar: num("swapAtBar"),
+    lowHandoverBar: num("lowHandoverBar"),
+    rampMs: num("rampMs"),
+    lowAttenuationDb: num("lowAttenuationDb"),
+    midDipDb: num("midDipDb"),
+  };
+}
+
 function toMixSpec(
   type: TransitionType | "crossfade" | "phrase_mix" | "bass_swap" | null | undefined,
   barCount?: 16 | 32,
+  params?: Partial<MixPresetParams> | null,
 ): MixTransitionSpec {
+  const bars = barCount ?? (params?.barCount === 32 ? 32 : 16);
   if (type === "phrase_mix") {
-    return { type: "phrase_mix", barCount: barCount ?? 16 };
+    const clamped = clampMixPresetParams({ ...params, barCount: bars }, bars);
+    return { type: "phrase_mix", barCount: bars, params: clamped };
   }
   if (type === "bass_swap" || type === "double_drop") {
-    return { type: "bass_swap", barCount: barCount ?? 16 };
+    const clamped = clampMixPresetParams({ ...params, barCount: bars }, bars);
+    return { type: "bass_swap", barCount: bars, bassSwap: clamped, params: clamped };
   }
   return { type: "crossfade" };
 }
@@ -1168,36 +1197,14 @@ function collectAutomation(
     }
     const start = outgoing.timelineStartMs + playableOutputMs(outgoing) - overlap;
     const spec = mixTypes[i]!;
-    events.push({
-      atMs: start,
-      durationMs: overlap,
-      target: "outgoing_high",
-      action: "fade_out",
-      value: 0,
-    });
-    events.push({
-      atMs: start,
-      durationMs: overlap,
-      target: "incoming_high",
-      action: "fade_in",
-      value: 1,
-    });
-    if (spec.type === "bass_swap") {
-      const bars = spec.barCount ?? 16;
-      const swapAt = start + Math.round(((spec.bassSwap?.swapAtBar ?? bars / 2) / bars) * overlap);
+    const bars = spec.barCount === 32 ? 32 : 16;
+    const barMs = overlap / bars;
+    const expanded = expandPreset(spec.type, spec.params ?? spec.bassSwap, bars, barMs);
+    for (const ev of expanded) {
       events.push({
-        atMs: swapAt,
-        durationMs: spec.bassSwap?.rampMs ?? 40,
-        target: "outgoing_low",
-        action: "fade_out",
-        value: 0,
-      });
-      events.push({
-        atMs: swapAt,
-        durationMs: spec.bassSwap?.rampMs ?? 40,
-        target: "incoming_low",
-        action: "fade_in",
-        value: 1,
+        ...ev,
+        atMs: start + (ev.atMs ?? 0),
+        durationMs: ev.durationMs ?? 0,
       });
     }
   }

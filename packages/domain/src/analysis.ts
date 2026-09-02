@@ -2,6 +2,7 @@ import {
   DEFAULT_BASS_CROSSOVER_HZ,
   DEFAULT_BASS_LOW_ATTENUATION_DB,
   DEFAULT_BASS_SWAP_RAMP_MS,
+  DEFAULT_MID_DIP_DB,
   MAX_BASS_CROSSOVER_HZ,
   MAX_BASS_SWAP_RAMP_MS,
   MIN_BASS_CROSSOVER_HZ,
@@ -132,12 +133,24 @@ export type AnalysisJob = {
   completedAt: string | null;
 };
 
+export type AutomationTarget =
+  | "outgoing_low"
+  | "outgoing_mid"
+  | "outgoing_high"
+  | "incoming_low"
+  | "incoming_mid"
+  | "incoming_high"
+  | "playback_rate";
+
 export type AutomationEvent = {
-  atMs: number;
-  durationMs: number;
-  target: "outgoing_low" | "incoming_low" | "outgoing_high" | "incoming_high" | "playback_rate";
-  action: "fade_in" | "fade_out" | "set";
-  value: number;
+  target: AutomationTarget;
+  action: "ramp" | "set";
+  atBar?: number;
+  durationBars?: number;
+  atMs?: number;
+  durationMs?: number;
+  fromDb: number | null;
+  toDb: number | null;
 };
 
 export type BassSwapParams = {
@@ -145,6 +158,8 @@ export type BassSwapParams = {
   swapAtBar: number;
   rampMs: number;
   lowAttenuationDb: number;
+  midDipDb?: number;
+  lowHandoverBar?: number;
 };
 
 export type TransitionProposal = {
@@ -229,6 +244,8 @@ export function clampBassSwapParams(
       ),
     ),
     lowAttenuationDb: clamp(input?.lowAttenuationDb ?? DEFAULT_BASS_LOW_ATTENUATION_DB, -36, 0),
+    midDipDb: clamp(input?.midDipDb ?? DEFAULT_MID_DIP_DB, -24, 0),
+    lowHandoverBar: input?.lowHandoverBar,
   };
 }
 

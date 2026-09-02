@@ -1,6 +1,6 @@
 export const APP_NAME = "dnb-crate-mcp";
 export const APP_VERSION = "0.5.0";
-export const RENDERER_VERSION = "5.0.0";
+export const RENDERER_VERSION = "6.0.0";
 /** @deprecated Prefer DSP_ANALYZER_NAME; kept for migrated Stage 4 rows. */
 export const ANALYZER_NAME = "dnb-crate-envelope";
 export const ANALYZER_VERSION = "1.0.0";
@@ -86,5 +86,7 @@ export const DEFAULT_BASS_SWAP_RAMP_MS = 40;
 export const MIN_BASS_SWAP_RAMP_MS = 20;
 export const MAX_BASS_SWAP_RAMP_MS = 80;
 export const DEFAULT_BASS_LOW_ATTENUATION_DB = -24;
+export const DEFAULT_MID_DIP_DB = -6;
+export const BAND_HIGH_CROSSOVER_HZ = 2500;
 export const PHRASE_MIX_HIGHPASS_HZ = 250;
 export const ANALYSIS_JOB_LIST_LIMIT_MAX = 50;

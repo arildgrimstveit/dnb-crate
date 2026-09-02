@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildAcrossfadeFilter,
+  buildBandMixFilter,
   buildBassSwapFilter,
   buildPhraseMixFilter,
   expectedDurationMs,
@@ -66,7 +67,37 @@ describe("filter graph", () => {
     expect(expected).toBe(Math.round((8 / 1.03 + 8 / 0.97 - 2) * 1000));
   });
 
-  it("builds a phrase-mix graph with incoming high-pass fade-in", () => {
+  it("builds a 3-band bass_swap graph with unity fades and no file paths", () => {
+    const overlap = (16 * 4 * 60) / 174;
+    const filter = buildBandMixFilter({
+      trims: [
+        { startSec: 0, endSec: 40, gainDb: 0 },
+        { startSec: 0, endSec: 40, gainDb: 0 },
+      ],
+      overlapSeconds: [overlap],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+      hasAfadeUnity: true,
+      transitions: [
+        {
+          type: "bass_swap",
+          barCount: 16,
+          params: { targetBpm: 174, crossoverHz: 180, swapAtBar: 8, rampMs: 40 },
+        },
+      ],
+    });
+    expect(filter).toContain("asplit=3");
+    expect(filter).toContain("lowpass=f=180");
+    expect(filter).toContain("highpass=f=180");
+    expect(filter).toContain("highpass=f=2500");
+    expect(filter).toContain("silence=0.063");
+    expect(filter).toContain("st=11.034");
+    expect(filter).toContain("amix=inputs=6");
+    expect(filter).not.toMatch(/[A-Za-z]:\\/);
+    expect(filter).not.toContain(".wav");
+  });
+
+  it("builds a phrase-mix graph as a 3-band split", () => {
     const filter = buildPhraseMixFilter({
       trims: [
         { startSec: 10, endSec: 30, gainDb: 0, playbackRate: 1 },
@@ -75,16 +106,16 @@ describe("filter graph", () => {
       overlapSeconds: [8],
       limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
       sampleRateHz: 48_000,
+      hasAfadeUnity: true,
     });
-    expect(filter).toContain("highpass=f=250");
+    expect(filter).toContain("asplit=3");
     expect(filter).toContain("afade=t=in");
     expect(filter).toContain("afade=t=out");
-    expect(filter).toContain("amix=inputs=2");
-    expect(filter).not.toContain("lowpass");
+    expect(filter).toContain("amix=inputs=6");
     expect(filter).not.toMatch(/[A-Za-z]:\\/);
   });
 
-  it("builds a bass-swap graph that splits lows and never uses model filter strings", () => {
+  it("builds a bass-swap graph that splits three bands", () => {
     const filter = buildBassSwapFilter({
       trims: [
         { startSec: 0, endSec: 20, gainDb: 0 },
@@ -93,16 +124,15 @@ describe("filter graph", () => {
       overlapSeconds: [8],
       limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
       sampleRateHz: 48_000,
+      hasAfadeUnity: true,
       transitions: [
         { type: "bass_swap", barCount: 16, bassSwap: { crossoverHz: 180, rampMs: 40 } },
       ],
     });
     expect(filter).toContain("lowpass=f=180");
-    expect(filter).toContain("highpass=f=180");
-    expect(filter).toContain("asplit=2");
+    expect(filter).toContain("asplit=3");
     expect(filter).toContain("afade=t=out");
     expect(filter).toContain("afade=t=in");
-    expect(filter).toContain("c1=hsin");
     expect(filter).not.toContain(".wav");
   });
 

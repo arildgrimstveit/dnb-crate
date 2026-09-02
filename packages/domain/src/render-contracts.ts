@@ -1,5 +1,6 @@
 import * as z from "zod/v4";
 
+import { automationEventSchema } from "./analysis-contracts.ts";
 import {
   MAX_PREVIEW_WINDOW_MS,
   MAX_RENDER_EDGE_FADE_MS,
@@ -98,23 +99,7 @@ export const renderManifestV1Schema = z.object({
   ffprobeVersion: z.string(),
   invocation: z.string(),
   tracks: z.array(renderManifestTrackSchema),
-  automation: z
-    .array(
-      z.object({
-        atMs: z.number(),
-        durationMs: z.number(),
-        target: z.enum([
-          "outgoing_low",
-          "incoming_low",
-          "outgoing_high",
-          "incoming_high",
-          "playback_rate",
-        ]),
-        action: z.enum(["fade_in", "fade_out", "set"]),
-        value: z.number(),
-      }),
-    )
-    .optional(),
+  automation: z.array(automationEventSchema).optional(),
   warnings: z.array(z.string()),
   createdAt: z.string(),
 });

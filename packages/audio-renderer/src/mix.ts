@@ -165,6 +165,7 @@ export async function renderMix(
   const expectedMs = expectedDurationMs(trims, overlapSeconds);
   const limiterAmplitude = limiterAmplitudeFromCeilingDb(request.truePeakCeilingDb);
   const edge = request.edgeFadeMs ?? 0;
+  const warnings: string[] = [];
   const filter = buildMixFilter({
     trims,
     overlapSeconds,
@@ -172,13 +173,14 @@ export async function renderMix(
     sampleRateHz,
     edgeFadeSeconds: edge > 0 ? { fadeIn: edge / 1000, fadeOut: edge / 1000 } : undefined,
     transitions: request.transitions,
+    hasAfadeUnity: binaries.hasAfadeUnity,
+    warnings,
   });
 
   await mkdir(path.dirname(request.outputPath), { recursive: true });
   const partialPath = `${request.outputPath}.partial.wav`;
   const filterPath = `${request.outputPath}.filter.txt`;
   const useScript = binaries.hasFilterComplexScript;
-  const warnings: string[] = [];
   let invocation = "";
 
   const reportProgress = (outMs: number) => {

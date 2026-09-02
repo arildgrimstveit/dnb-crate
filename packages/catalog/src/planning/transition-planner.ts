@@ -3,7 +3,8 @@ import {
   DEFAULT_PHRASE_BARS,
   MIN_ANALYSIS_CONFIDENCE,
   assertPlaybackRate,
-  clampBassSwapParams,
+  clampMixPresetParams,
+  expandPreset,
   normalizeDnbBpm,
   phraseDurationMs,
   playbackRateForBpm,
@@ -68,27 +69,9 @@ function automationFor(
   durationMs: number,
   barCount: 16 | 32 | null,
 ): AutomationEvent[] {
-  if (type === "crossfade") {
-    return [
-      { atMs: 0, durationMs, target: "outgoing_high", action: "fade_out", value: 0 },
-      { atMs: 0, durationMs, target: "incoming_high", action: "fade_in", value: 1 },
-    ];
-  }
-  if (type === "phrase_mix") {
-    return [
-      { atMs: 0, durationMs, target: "outgoing_high", action: "fade_out", value: 0 },
-      { atMs: 0, durationMs, target: "incoming_high", action: "fade_in", value: 1 },
-    ];
-  }
   const bars = barCount ?? 16;
-  const swap = clampBassSwapParams(null, bars);
-  const swapAt = Math.round((swap.swapAtBar / bars) * durationMs);
-  return [
-    { atMs: 0, durationMs, target: "outgoing_high", action: "fade_out", value: 0 },
-    { atMs: 0, durationMs, target: "incoming_high", action: "fade_in", value: 1 },
-    { atMs: swapAt, durationMs: swap.rampMs, target: "outgoing_low", action: "fade_out", value: 0 },
-    { atMs: swapAt, durationMs: swap.rampMs, target: "incoming_low", action: "fade_in", value: 1 },
-  ];
+  const barMs = durationMs / bars;
+  return expandPreset(type, null, bars, barMs);
 }
 
 function propose(
@@ -227,7 +210,7 @@ function propose(
     incomingSourceEndMs: incomingPlayableEnd,
     bassSwap:
       type === "bass_swap"
-        ? clampBassSwapParams({ crossoverHz: DEFAULT_BASS_CROSSOVER_HZ }, barCount ?? 16)
+        ? clampMixPresetParams({ crossoverHz: DEFAULT_BASS_CROSSOVER_HZ }, barCount ?? 16)
         : null,
     automation: automationFor(type, durationMs, barCount),
     score: Number(Math.max(0, score).toFixed(3)),

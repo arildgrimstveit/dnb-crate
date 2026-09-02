@@ -89,3 +89,7 @@ Published/manual BPM is a **phase reference**, not a new canonical source. The a
 Unconstrained fit on the 14 labelled crate rows (2026-09-03): bias −3.4732, prominence 4.0339, stability 0.2045, tempoConf 4.3950. Zero-false-accept MIN would be **0.795**, but that drops in-range accepted-correct from **5 → 1**. Fitted weights at MIN 0.6 drop it to **3**. The driver is Like a Memory (free 175 vs published 176) scoring as a false accept alongside true 174s. Last Jungle (160 vs 174) is already rejected at 0.582.
 
 **Kept** the 2026-09-02 synthetic weights and **MIN 0.6**. Fixtures stay green; accepted-correct does not drop. Re-run after a reference-grid re-analysis if Like a Memory locks to 176.
+
+## 2026-09-03 — 3-band mix presets
+
+Phrase-mix and bass-swap are no longer two hard-coded graphs. `expandPreset` builds per-band automation (low / mid / high) that both the planner and the renderer compile. The graph is `asplit=3` → band filters → chained `afade` → `amix=inputs=6`. Crossfade stays `acrossfade`. `RENDERER_VERSION` is **6.0.0** so preview cache keys change. Partial fades need FFmpeg `afade` `unity`/`silence`; the local build has them, and the fake runner advertises them.

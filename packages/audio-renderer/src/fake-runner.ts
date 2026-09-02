@@ -59,6 +59,7 @@ export function createFakeFfmpegRunner(
         const isMeta =
           request.args.includes("-version") ||
           request.args.includes("-filters") ||
+          request.args.includes("-h") ||
           request.args.includes("-print_format") ||
           (request.args.includes("-filter_complex_script") && !request.args.includes("-i")) ||
           request.args.some((arg) => arg.includes("ebur128")) ||
@@ -90,6 +91,7 @@ export function createFakeFfmpegRunner(
       const isProbe = /ffprobe/i.test(request.executable) || request.args.includes("-print_format");
       const isVersion = request.args.includes("-version");
       const isFilters = request.args.includes("-filters");
+      const isAfadeHelp = request.args.includes("-h") && request.args.some((arg) => arg.includes("afade"));
       const isEbur = request.args.some((arg) => arg.includes("ebur128"));
       const isSilence = request.args.some((arg) => arg.includes("silencedetect"));
 
@@ -99,6 +101,14 @@ export function createFakeFfmpegRunner(
           exitCode: 0,
           signal: null,
           stdout: `${name} version 7.0.2-test Copyright (c) fake\n`,
+          stderr: "",
+        };
+      }
+      if (isAfadeHelp) {
+        return {
+          exitCode: 0,
+          signal: null,
+          stdout: "Filter afade\n  silence, unity — start/end gain for partial fades\n",
           stderr: "",
         };
       }

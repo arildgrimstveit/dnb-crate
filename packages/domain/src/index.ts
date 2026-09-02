@@ -55,6 +55,8 @@ export {
   MIN_BASS_SWAP_RAMP_MS,
   MAX_BASS_SWAP_RAMP_MS,
   DEFAULT_BASS_LOW_ATTENUATION_DB,
+  DEFAULT_MID_DIP_DB,
+  BAND_HIGH_CROSSOVER_HZ,
   PHRASE_MIX_HIGHPASS_HZ,
   ANALYSIS_JOB_LIST_LIMIT_MAX,
 } from "./constants.ts";
@@ -86,6 +88,7 @@ export type {
   AnalysisJob,
   AnalysisJobStatus,
   AutomationEvent,
+  AutomationTarget,
   BassSwapParams,
   BeatGrid,
   BeatGridSummary,
@@ -106,6 +109,14 @@ export {
   resolveCanonicalBpm,
   resolveCanonicalKey,
 } from "./analysis.ts";
+export {
+  clampMixPresetParams,
+  defaultLowHandoverBar,
+  expandPreset,
+  isMonotoneBand,
+  type MixPresetParams,
+  type MixPresetType,
+} from "./mix-presets.ts";
 export {
   analysisJobSchema,
   analysisReportDataSchema,

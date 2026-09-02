@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { AppConfig, SetPlanV1 } from "@dnb-crate/domain";
-import { DSP_ANALYZER_NAME, DSP_ANALYZER_VERSION } from "@dnb-crate/domain";
+import { DSP_ANALYZER_NAME, DSP_ANALYZER_VERSION, RENDERER_VERSION } from "@dnb-crate/domain";
 import { createFakeFfmpegRunner, ProcessRunError } from "@dnb-crate/audio-renderer";
 
 import { createCatalogRuntime, writeSineWav } from "../src/index.ts";
@@ -315,5 +315,7 @@ describe("render jobs", () => {
     const manifest = catalog.service.getRenderManifest(done.id);
     expect(manifest.tracks[1]?.alignmentMode).toBe("bar");
     expect(manifest.tracks[1]?.alignmentPeriodMs).toBeCloseTo(barMs, 5);
+    expect(manifest.automation?.some((event) => event.target === "outgoing_mid")).toBe(true);
+    expect(manifest.rendererVersion).toBe(RENDERER_VERSION);
   });
 });

@@ -1,8 +1,11 @@
 import {
+  BAND_HIGH_CROSSOVER_HZ,
   CROSSFADE_CURVE,
-  PHRASE_MIX_HIGHPASS_HZ,
-  clampBassSwapParams,
+  clampMixPresetParams,
+  expandPreset,
+  type AutomationEvent,
   type BassSwapParams,
+  type MixPresetParams,
 } from "@dnb-crate/domain";
 
 export type FilterTrim = {
@@ -18,6 +21,7 @@ export type MixTransitionSpec = {
   type: MixTransitionKind;
   barCount?: 16 | 32;
   bassSwap?: Partial<BassSwapParams> | null;
+  params?: Partial<MixPresetParams> | null;
 };
 
 export type FilterGraphOptions = {
@@ -27,6 +31,8 @@ export type FilterGraphOptions = {
   sampleRateHz: number;
   edgeFadeSeconds?: { fadeIn: number; fadeOut: number };
   transitions?: MixTransitionSpec[];
+  hasAfadeUnity?: boolean;
+  warnings?: string[];
 };
 
 export function limiterAmplitudeFromCeilingDb(ceilingDb: number): number {
@@ -113,82 +119,174 @@ export function buildAcrossfadeFilter(options: FilterGraphOptions): string {
   return parts.join(";");
 }
 
+function dbToGain(db: number | null | undefined): number {
+  if (db == null || !Number.isFinite(db)) {
+    return 0;
+  }
+  return 10 ** (db / 20);
+}
+
+function compileBandAfades(
+  events: AutomationEvent[],
+  originSec: number,
+  hasUnity: boolean,
+  warnings: string[],
+): string {
+  const parts: string[] = [];
+  let usedPartial = false;
+  const ordered = [...events].sort((a, b) => (a.atMs ?? 0) - (b.atMs ?? 0));
+  for (const ev of ordered) {
+    let fromG = dbToGain(ev.fromDb);
+    let toG = dbToGain(ev.toDb);
+    if (!hasUnity) {
+      const collapse = (gain: number) => (gain > 0.5 ? 1 : 0);
+      const nextFrom = collapse(fromG);
+      const nextTo = collapse(toG);
+      if (nextFrom !== fromG || nextTo !== toG) {
+        usedPartial = true;
+      }
+      fromG = nextFrom;
+      toG = nextTo;
+      if (fromG === toG) {
+        continue;
+      }
+    }
+    const st = Math.max(0, originSec + (ev.atMs ?? 0) / 1000);
+    const d = Math.max((ev.durationMs ?? 0) / 1000, 0.001);
+    if (toG < fromG - 1e-9) {
+      const silence = fromG <= 1e-9 ? 0 : toG / fromG;
+      const extra =
+        hasUnity && silence > 1e-6
+          ? `:unity=1:silence=${silence.toFixed(3)}`
+          : hasUnity
+            ? ":unity=1:silence=0"
+            : "";
+      parts.push(`afade=t=out:st=${st.toFixed(3)}:d=${d.toFixed(3)}${extra}`);
+    } else if (toG > fromG + 1e-9) {
+      const silence = toG <= 1e-9 ? 0 : fromG / toG;
+      const extra =
+        hasUnity && silence > 1e-6
+          ? `:silence=${silence.toFixed(3)}:unity=1`
+          : hasUnity
+            ? ":silence=0:unity=1"
+            : "";
+      parts.push(`afade=t=in:st=${st.toFixed(3)}:d=${d.toFixed(3)}${extra}`);
+    }
+  }
+  if (
+    usedPartial &&
+    !warnings.includes("FFmpeg afade lacks unity/silence; partial band levels collapsed to full fades.")
+  ) {
+    warnings.push(
+      "FFmpeg afade lacks unity/silence; partial band levels collapsed to full fades.",
+    );
+  }
+  return parts.join(",");
+}
+
 /**
- * 16/32-bar phrase mix: outgoing fades out over the overlap; incoming mids/highs fade in
- * through a high-pass (~250 Hz) so the incoming sub stays out of the early overlap.
+ * 3-band phrase-mix / bass-swap: each stream is split into low/mid/high, each band
+ * is faded from the preset curve, incoming bands are delayed, then six streams mix.
  */
-export function buildPhraseMixFilter(options: FilterGraphOptions): string {
+export function buildBandMixFilter(options: FilterGraphOptions): string {
   const { trims, overlapSeconds, limiterAmplitude, sampleRateHz, edgeFadeSeconds } = options;
   assertGraphShape(trims, overlapSeconds);
   if (trims.length !== 2 || overlapSeconds.length !== 1) {
-    throw new Error("phrase_mix graphs are pairwise (exactly two segments)");
+    throw new Error("band-mix graphs are pairwise (exactly two segments)");
   }
+  const spec = options.transitions?.[0];
+  const type = spec?.type === "phrase_mix" ? "phrase_mix" : "bass_swap";
+  const barCount = spec?.barCount === 32 ? 32 : 16;
+  const params = clampMixPresetParams(
+    { ...spec?.bassSwap, ...spec?.params, barCount, targetBpm: spec?.params?.targetBpm ?? null },
+    barCount,
+  );
   const t0 = outputDurationSec(trims[0]!);
   const overlap = overlapSeconds[0]!;
   const delayMs = Math.max(0, Math.round((t0 - overlap) * 1000));
-  const highpassHz = PHRASE_MIX_HIGHPASS_HZ;
-  const incoming =
-    delayMs > 0
-      ? `[s1]highpass=f=${highpassHz},afade=t=in:st=0:d=${overlap},adelay=${delayMs}|${delayMs}[i]`
-      : `[s1]highpass=f=${highpassHz},afade=t=in:st=0:d=${overlap}[i]`;
+  const barMs =
+    params.targetBpm != null && params.targetBpm > 0
+      ? (4 * 60_000) / params.targetBpm
+      : (overlap * 1000) / barCount;
+  const events = expandPreset(type, params, barCount, barMs);
+  const hasUnity = options.hasAfadeUnity !== false;
+  const warnings = options.warnings ?? [];
+  const outgoingOrigin = Math.max(0, t0 - overlap);
+  const byTarget = (target: AutomationEvent["target"]) =>
+    events.filter((ev) => ev.target === target);
+  const incomingDelay = delayMs > 0 ? `,adelay=${delayMs}|${delayMs}` : "";
+  const band = (
+    target: AutomationEvent["target"],
+    origin: number,
+    suffix: string,
+  ): string => {
+    const fades = compileBandAfades(byTarget(target), origin, hasUnity, warnings);
+    return fades.length > 0 ? `${fades}${suffix}` : suffix.replace(/^,/, "") || "anull";
+  };
+  const lowHz = params.crossoverHz;
+  const highHz = BAND_HIGH_CROSSOVER_HZ;
+  const oL = band("outgoing_low", outgoingOrigin, "");
+  const oM = band("outgoing_mid", outgoingOrigin, "");
+  const oH = band("outgoing_high", outgoingOrigin, "");
+  const iL = band("incoming_low", 0, incomingDelay);
+  const iM = band("incoming_mid", 0, incomingDelay);
+  const iH = band("incoming_high", 0, incomingDelay);
+  const withFade = (src: string, chain: string, out: string): string => {
+    if (!chain || chain === "anull") {
+      return `[${src}]anull[${out}]`;
+    }
+    return `[${src}]${chain}[${out}]`;
+  };
   const parts = [
     segmentPrep(0, trims[0]!, sampleRateHz),
     segmentPrep(1, trims[1]!, sampleRateHz),
-    `[s0]afade=t=out:st=${Math.max(0, t0 - overlap)}:d=${overlap}[o]`,
-    incoming,
-    `[o][i]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[mixed]`,
+    `[s0]asplit=3[oRawL][oRawM][oRawH]`,
+    `[oRawL]lowpass=f=${lowHz}[oL0]`,
+    `[oRawM]highpass=f=${lowHz},lowpass=f=${highHz}[oM0]`,
+    `[oRawH]highpass=f=${highHz}[oH0]`,
+    `[s1]asplit=3[iRawL][iRawM][iRawH]`,
+    `[iRawL]lowpass=f=${lowHz}[iL0]`,
+    `[iRawM]highpass=f=${lowHz},lowpass=f=${highHz}[iM0]`,
+    `[iRawH]highpass=f=${highHz}[iH0]`,
+    withFade("oL0", oL, "oL"),
+    withFade("oM0", oM, "oM"),
+    withFade("oH0", oH, "oH"),
+    withFade("iL0", iL, "iL"),
+    withFade("iM0", iM, "iM"),
+    withFade("iH0", iH, "iH"),
+    `[oL][oM][oH][iL][iM][iH]amix=inputs=6:normalize=0:dropout_transition=0[mixed]`,
     `[mixed]${limiterChain(trims, overlapSeconds, limiterAmplitude, edgeFadeSeconds)}[out]`,
   ];
   return parts.join(";");
 }
 
 /**
- * Bass swap: split each stream at a bounded crossover. Highs equal-power acrossfade.
- * Outgoing lows fade out at the swap bar; incoming lows fade in there. Both lows are
- * never at full strength through the overlap.
+ * 16/32-bar phrase mix via the 3-band preset graph.
+ */
+export function buildPhraseMixFilter(options: FilterGraphOptions): string {
+  const transitions = options.transitions ?? [{ type: "phrase_mix" as const, barCount: 16 }];
+  return buildBandMixFilter({
+    ...options,
+    transitions: [{ ...transitions[0]!, type: "phrase_mix" }],
+  });
+}
+
+/**
+ * Bass swap via the 3-band preset graph.
  */
 export function buildBassSwapFilter(options: FilterGraphOptions): string {
-  const { trims, overlapSeconds, limiterAmplitude, sampleRateHz, edgeFadeSeconds } = options;
-  assertGraphShape(trims, overlapSeconds);
-  if (trims.length !== 2 || overlapSeconds.length !== 1) {
-    throw new Error("bass_swap graphs are pairwise (exactly two segments)");
-  }
-  const barCount = options.transitions?.[0]?.barCount === 32 ? 32 : 16;
-  const bass = clampBassSwapParams(options.transitions?.[0]?.bassSwap, barCount);
-  const t0 = outputDurationSec(trims[0]!);
-  const overlap = overlapSeconds[0]!;
-  const delayMs = Math.max(0, Math.round((t0 - overlap) * 1000));
-  const swapTime = (bass.swapAtBar / barCount) * overlap;
-  const rampSec = bass.rampMs / 1000;
-  const outgoingSwap = Math.max(0, t0 - overlap + swapTime);
-  const incomingDelay = delayMs > 0 ? `,adelay=${delayMs}|${delayMs}` : "";
-  const parts = [
-    segmentPrep(0, trims[0]!, sampleRateHz),
-    segmentPrep(1, trims[1]!, sampleRateHz),
-    `[s0]asplit=2[oSrcL][oSrcH]`,
-    `[oSrcL]lowpass=f=${bass.crossoverHz}[oL]`,
-    `[oSrcH]highpass=f=${bass.crossoverHz}[oH]`,
-    `[s1]asplit=2[iSrcL][iSrcH]`,
-    `[iSrcL]lowpass=f=${bass.crossoverHz}[iL]`,
-    `[iSrcH]highpass=f=${bass.crossoverHz}[iH]`,
-    `[oH][iH]acrossfade=d=${overlap}:o=1:c1=${CROSSFADE_CURVE}:c2=${CROSSFADE_CURVE}[hMix]`,
-    `[oL]afade=t=out:st=${outgoingSwap}:d=${rampSec}[oLfade]`,
-    `[iL]afade=t=in:st=${swapTime}:d=${rampSec}${incomingDelay}[iLfade]`,
-    `[oLfade][iLfade]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[lMix]`,
-    `[hMix][lMix]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[mixed]`,
-    `[mixed]${limiterChain(trims, overlapSeconds, limiterAmplitude, edgeFadeSeconds)}[out]`,
-  ];
-  return parts.join(";");
+  const transitions = options.transitions ?? [{ type: "bass_swap" as const, barCount: 16 }];
+  return buildBandMixFilter({
+    ...options,
+    transitions: [{ ...transitions[0]!, type: "bass_swap" }],
+  });
 }
 
 export function buildMixFilter(options: FilterGraphOptions): string {
   const types =
     options.transitions ?? options.overlapSeconds.map(() => ({ type: "crossfade" as const }));
-  if (options.trims.length === 2 && types[0]?.type === "phrase_mix") {
-    return buildPhraseMixFilter(options);
-  }
-  if (options.trims.length === 2 && types[0]?.type === "bass_swap") {
-    return buildBassSwapFilter(options);
+  if (options.trims.length === 2 && (types[0]?.type === "phrase_mix" || types[0]?.type === "bass_swap")) {
+    return buildBandMixFilter(options);
   }
   return buildAcrossfadeFilter(options);
 }

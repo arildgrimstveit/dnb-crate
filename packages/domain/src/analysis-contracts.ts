@@ -305,6 +305,27 @@ export const bassSwapParamsSchema = z.object({
   swapAtBar: z.number().int(),
   rampMs: z.number().int(),
   lowAttenuationDb: z.number(),
+  midDipDb: z.number().optional(),
+  lowHandoverBar: z.number().int().optional(),
+});
+
+export const automationEventSchema = z.object({
+  target: z.enum([
+    "outgoing_low",
+    "outgoing_mid",
+    "outgoing_high",
+    "incoming_low",
+    "incoming_mid",
+    "incoming_high",
+    "playback_rate",
+  ]),
+  action: z.enum(["ramp", "set"]),
+  atBar: z.number().optional(),
+  durationBars: z.number().optional(),
+  atMs: z.number().optional(),
+  durationMs: z.number().optional(),
+  fromDb: z.number().nullable(),
+  toDb: z.number().nullable(),
 });
 
 export const transitionProposalSchema = z.object({
@@ -325,21 +346,7 @@ export const transitionProposalSchema = z.object({
   incomingSourceStartMs: z.number().int(),
   incomingSourceEndMs: z.number().int(),
   bassSwap: bassSwapParamsSchema.nullable(),
-  automation: z.array(
-    z.object({
-      atMs: z.number(),
-      durationMs: z.number(),
-      target: z.enum([
-        "outgoing_low",
-        "incoming_low",
-        "outgoing_high",
-        "incoming_high",
-        "playback_rate",
-      ]),
-      action: z.enum(["fade_in", "fade_out", "set"]),
-      value: z.number(),
-    }),
-  ),
+  automation: z.array(automationEventSchema),
   score: z.number(),
   confidence: z.number(),
   feasible: z.boolean(),

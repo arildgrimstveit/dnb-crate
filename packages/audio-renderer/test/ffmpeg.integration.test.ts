@@ -120,4 +120,113 @@ describe("FFmpeg integration", () => {
     const freq = crossings / 2 / (samples / sampleRate);
     expect(Math.abs(freq - 440)).toBeLessThan(20);
   }, 60_000);
+
+  it("drops outgoing low band after a bass_swap and sums bands within 0.5 LU", async (ctx) => {
+    const binaries = await detectFfmpeg(runner, { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" });
+    if (!binaries) {
+      ctx.skip();
+      return;
+    }
+    requireFfmpeg(binaries);
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-band-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    await mkdir(root, { recursive: true });
+    const outgoing = path.join(root, "low.wav");
+    const incoming = path.join(root, "high.wav");
+    const mixed = path.join(root, "swap.wav");
+    const original = path.join(root, "orig.wav");
+    const summed = path.join(root, "sum.wav");
+    await writeFile(outgoing, buildSineWav(40_000, 80));
+    await writeFile(incoming, buildSineWav(40_000, 2000));
+    await writeFile(original, buildSineWav(8_000, 440));
+    const overlapMs = Math.round((16 * 4 * 60_000) / 174);
+    const result = await renderMix(runner, binaries, {
+      segments: [
+        { filePath: outgoing, sourceStartMs: 0, sourceEndMs: 40_000, gainDb: 0 },
+        { filePath: incoming, sourceStartMs: 0, sourceEndMs: 40_000, gainDb: 0 },
+      ],
+      overlapMs: [overlapMs],
+      outputPath: mixed,
+      truePeakCeilingDb: -1,
+      loudnessTargetLufs: -14,
+      postProcess: false,
+      transitions: [{ type: "bass_swap", barCount: 16, params: { targetBpm: 174, swapAtBar: 8 } }],
+    });
+    expect(result.invocation).toBeTruthy();
+    expect(Math.abs(result.durationMs - (80_000 - overlapMs))).toBeLessThan(1000);
+
+    const overlapStartMs = 40_000 - overlapMs;
+    const swapMs = overlapStartMs + Math.round((8 * 4 * 60_000) / 174);
+    const before = await measureMeanVolume(runner, binaries, mixed, swapMs - 4000, swapMs - 1500);
+    const after = await measureMeanVolume(runner, binaries, mixed, swapMs + 2000, swapMs + 4500);
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    expect((before ?? 0) - (after ?? 0)).toBeGreaterThanOrEqual(12);
+
+    const splitArgs = [
+      "-nostdin",
+      "-hide_banner",
+      "-y",
+      "-i",
+      original,
+      "-filter_complex",
+      "[0:a]asplit=3[a][b][c];[a]lowpass=f=180[l];[b]highpass=f=180,lowpass=f=2500[m];[c]highpass=f=2500[h];[l][m][h]amix=inputs=3:normalize=0[out]",
+      "-map",
+      "[out]",
+      summed,
+    ];
+    const splitRun = await runner.run({ executable: binaries.ffmpegPath, args: splitArgs });
+    expect(splitRun.exitCode).toBe(0);
+    const origLoud = await measureIntegrated(runner, binaries, original);
+    const sumLoud = await measureIntegrated(runner, binaries, summed);
+    expect(origLoud).not.toBeNull();
+    expect(sumLoud).not.toBeNull();
+    expect(Math.abs((origLoud ?? 0) - (sumLoud ?? 0))).toBeLessThan(0.5);
+  }, 90_000);
 });
+
+async function measureMeanVolume(
+  runner: ReturnType<typeof createNodeProcessRunner>,
+  binaries: NonNullable<Awaited<ReturnType<typeof detectFfmpeg>>>,
+  filePath: string,
+  startMs: number,
+  endMs: number,
+): Promise<number | null> {
+  const args = [
+    "-nostdin",
+    "-hide_banner",
+    "-i",
+    filePath,
+    "-af",
+    `atrim=start=${startMs / 1000}:end=${endMs / 1000},asetpts=PTS-STARTPTS,lowpass=f=180,volumedetect`,
+    "-f",
+    "null",
+    "-",
+  ];
+  const run = await runner.run({ executable: binaries.ffmpegPath, args });
+  const match = /mean_volume:\s*(-?[\d.]+)\s*dB/i.exec(run.stderr);
+  return match ? Number(match[1]) : null;
+}
+
+async function measureIntegrated(
+  runner: ReturnType<typeof createNodeProcessRunner>,
+  binaries: NonNullable<Awaited<ReturnType<typeof detectFfmpeg>>>,
+  filePath: string,
+): Promise<number | null> {
+  const args = [
+    "-nostdin",
+    "-hide_banner",
+    "-i",
+    filePath,
+    "-filter_complex",
+    "ebur128",
+    "-f",
+    "null",
+    "-",
+  ];
+  const run = await runner.run({ executable: binaries.ffmpegPath, args });
+  const match = /I:\s*(-?[\d.]+)\s*LUFS/i.exec(run.stderr);
+  return match ? Number(match[1]) : null;
+}

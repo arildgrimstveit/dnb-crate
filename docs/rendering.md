@@ -21,7 +21,15 @@ Unchanged from Stage 3: mix-wide **-14 LUFS**, true-peak **-1.0 dBTP**, no per-t
 ## Timing
 
 - Crossfade: `acrossfade` with `c1=hsin` / `c2=hsin`.
-- Phrase mix / bass swap: pairwise graphs; overlap duration is the planned phrase (16/32 bars at target BPM).
+- Phrase mix / bass swap: pairwise **3-band** graphs (`asplit=3`, low/mid/high, `amix=inputs=6`). Overlap duration is the planned phrase (16/32 bars at target BPM). Presets:
+
+  | Preset | What moves |
+  | --- | --- |
+  | `phrase_mix` | Incoming mid/high fade in over the first half; incoming low arrives at bar 12 (24 of 32). Outgoing low steps to −24 dB there, then to −inf at the end. Outgoing mid/high fade out over the second half. |
+  | `bass_swap` | Mid/high crossfade across the overlap; outgoing mid dips −6 dB from bar 4. Lows swap at bar 8 (16 of 32) in `rampMs`, then outgoing low goes to −inf at bar 12. |
+  | `crossfade` | Single `acrossfade` with `hsin` (WP6 may shorten this on tempo mismatch). |
+
+  Band fades use `afade` `unity`/`silence` when FFmpeg has them (`hasAfadeUnity`). Otherwise partial levels collapse to full fades and a warning is recorded. `double_drop` still renders as `bass_swap`.
 - Aligned joins nudge the incoming start in **output time**. When both `downbeatConfidence` values are ≥ 0.5 the wrap period is one **bar** (4 beats); otherwise one beat. A negative nudge at source start 0 adds one period instead of being dropped. Manifest fields: `downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode` (`bar` | `beat`).
 - Playback rate other than 1.0 is applied with `atempo` and bounded to ±3% unless `allowExcessiveTempo`.
 - Internal format: 48 kHz stereo PCM 24-bit WAV.

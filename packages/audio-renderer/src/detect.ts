@@ -17,6 +17,7 @@ export type FfmpegBinaries = {
   hasAmix: boolean;
   hasAfade: boolean;
   hasAdelay: boolean;
+  hasAfadeUnity: boolean;
   hasFilterComplexScript: boolean;
 };
 
@@ -26,6 +27,11 @@ const UNRECOGNIZED_FILTER_COMPLEX_SCRIPT =
 
 export function parseFilterComplexScriptSupport(text: string): boolean {
   return !UNRECOGNIZED_FILTER_COMPLEX_SCRIPT.test(text);
+}
+
+export function parseAfadeUnitySupport(text: string): boolean {
+  const lower = text.toLowerCase();
+  return lower.includes("unity") && lower.includes("silence");
 }
 
 export function parseVersionLine(text: string): string | null {
@@ -65,13 +71,17 @@ export async function detectFfmpeg(
   paths: { ffmpegPath: string; ffprobePath: string },
 ): Promise<FfmpegBinaries | null> {
   try {
-    const [ffmpegVer, ffprobeVer, filters, scriptProbe] = await Promise.all([
+    const [ffmpegVer, ffprobeVer, filters, scriptProbe, afadeHelp] = await Promise.all([
       runner.run({ executable: paths.ffmpegPath, args: ["-hide_banner", "-version"] }),
       runner.run({ executable: paths.ffprobePath, args: ["-hide_banner", "-version"] }),
       runner.run({ executable: paths.ffmpegPath, args: ["-hide_banner", "-filters"] }),
       runner.run({
         executable: paths.ffmpegPath,
         args: ["-hide_banner", "-filter_complex_script"],
+      }),
+      runner.run({
+        executable: paths.ffmpegPath,
+        args: ["-hide_banner", "-h", "filter=afade"],
       }),
     ]);
     const ffmpegVersion = parseVersionLine(ffmpegVer.stdout + ffmpegVer.stderr);
@@ -91,6 +101,7 @@ export async function detectFfmpeg(
       ffmpegVersion,
       ffprobeVersion,
       ...caps,
+      hasAfadeUnity: parseAfadeUnitySupport(afadeHelp.stdout + afadeHelp.stderr),
       hasFilterComplexScript: parseFilterComplexScriptSupport(
         scriptProbe.stdout + scriptProbe.stderr,
       ),
