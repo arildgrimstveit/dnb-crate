@@ -30,7 +30,7 @@ Unchanged from Stage 3: mix-wide **-14 LUFS**, true-peak **-1.0 dBTP**, no per-t
 
 Same as Stage 3: `start_set_render` / `create_transition_preview` return a job id immediately. Poll `get_render_status`. Manifest after `succeeded`. Preview cache keys include template, bar count, and playback rates.
 
-Aligned templates **fail closed** when a required grid is missing, rejected, or below confidence 0.5, unless `allowLowConfidence` is true.
+Aligned templates **fail closed** when a required grid is missing, rejected, or below confidence 0.6, unless `allowLowConfidence` is true.
 
 ## Known limitations
 

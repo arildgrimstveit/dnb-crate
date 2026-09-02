@@ -53,6 +53,7 @@ export type ScoreComponents = {
   repeatedArtist: number;
   recentlyUsed: number;
   missingMetadata: number;
+  structure: number;
 };
 
 export type ScoreBreakdown = {

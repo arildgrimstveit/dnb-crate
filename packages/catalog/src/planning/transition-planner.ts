@@ -28,6 +28,7 @@ export type PlanTransitionInput = {
   targetBpm?: number;
   allowExcessiveTempo?: boolean;
   allowLowConfidence?: boolean;
+  allowDropIn?: boolean;
 };
 
 export type ValidateTransitionInput = {
@@ -50,8 +51,12 @@ type TrackBundle = {
   cues: CuePoint[];
 };
 
-function cueByType(cues: CuePoint[], type: CuePointType): CuePoint | undefined {
-  return cues.find((cue) => cue.type === type);
+function cueByType(
+  cues: CuePoint[],
+  type: CuePointType,
+  source?: CuePoint["source"],
+): CuePoint | undefined {
+  return cues.find((cue) => cue.type === type && (source === undefined || cue.source === source));
 }
 
 function snappedPosition(ms: number, beats: number[]): number {
@@ -71,20 +76,163 @@ function gridOk(analysis: TrackAnalysis | null, allowLow: boolean): boolean {
   return true;
 }
 
-function pickOutgoingCue(bundle: TrackBundle): { type: CuePointType | null; ms: number } {
-  const outro = cueByType(bundle.cues, "outro_start") ?? cueByType(bundle.cues, "drop");
-  if (outro) {
-    return { type: outro.type, ms: outro.positionMs };
+function lastSection(
+  bundle: TrackBundle,
+  type: "intro" | "outro" | "breakdown" | "drop",
+): CuePoint | undefined {
+  const matches = (bundle.analysis?.sections ?? []).filter((item) => item.type === type);
+  const section = matches.at(-1);
+  if (!section) {
+    return undefined;
   }
-  return { type: null, ms: Math.max(0, bundle.track.durationMs - 1) };
+  return {
+    id: `${type}-section`,
+    trackId: bundle.track.id,
+    type: type === "intro" ? "intro_start" : type === "outro" ? "outro_start" : type,
+    positionMs: section.startMs,
+    beatIndex: null,
+    barIndex: section.startBar,
+    confidence: section.confidence,
+    source: "analyzed",
+    label: null,
+  };
 }
 
-function pickIncomingCue(bundle: TrackBundle): { type: CuePointType | null; ms: number } {
-  const intro = cueByType(bundle.cues, "intro_start") ?? cueByType(bundle.cues, "drop");
-  if (intro) {
-    return { type: intro.type, ms: intro.positionMs };
+function firstSection(
+  bundle: TrackBundle,
+  type: "intro" | "outro" | "breakdown" | "drop",
+): CuePoint | undefined {
+  const section = bundle.analysis?.sections?.find((item) => item.type === type);
+  if (!section) {
+    return undefined;
   }
-  return { type: null, ms: 0 };
+  return {
+    id: `${type}-section`,
+    trackId: bundle.track.id,
+    type: type === "intro" ? "intro_start" : type === "outro" ? "outro_start" : type,
+    positionMs: section.startMs,
+    beatIndex: null,
+    barIndex: section.startBar,
+    confidence: section.confidence,
+    source: "analyzed",
+    label: null,
+  };
+}
+
+function pickOutgoingCue(
+  bundle: TrackBundle,
+): { type: CuePointType | null; ms: number; inferred: boolean; reason: string | null; confidence: number | null } {
+  const manualOutro = cueByType(bundle.cues, "outro_start", "manual");
+  if (manualOutro) {
+    return {
+      type: manualOutro.type,
+      ms: manualOutro.positionMs,
+      inferred: false,
+      reason: null,
+      confidence: manualOutro.confidence,
+    };
+  }
+  const outro = firstSection(bundle, "outro") ?? lastSection(bundle, "breakdown");
+  if (outro) {
+    return {
+      type: outro.type,
+      ms: outro.positionMs,
+      inferred: true,
+      reason: `Outgoing ${outro.type} cue is analyzer-derived (confidence ${(outro.confidence ?? 0).toFixed(2)})`,
+      confidence: outro.confidence,
+    };
+  }
+  const analyzedOutro = cueByType(bundle.cues, "outro_start", "analyzed");
+  if (analyzedOutro) {
+    return {
+      type: analyzedOutro.type,
+      ms: analyzedOutro.positionMs,
+      inferred: true,
+      reason: `Outgoing outro cue is analyzer-derived (confidence ${(analyzedOutro.confidence ?? 0).toFixed(2)})`,
+      confidence: analyzedOutro.confidence,
+    };
+  }
+  const downbeats = bundle.analysis?.downbeatTimesMs ?? [];
+  if (downbeats.length > 4) {
+    return {
+      type: null,
+      ms: downbeats[Math.max(0, downbeats.length - 8)] ?? 0,
+      inferred: true,
+      reason: "Outgoing mix-out inferred from the last eight downbeats",
+      confidence: bundle.analysis?.downbeatConfidence ?? null,
+    };
+  }
+  const overlapGuess = 30_000;
+  return {
+    type: null,
+    ms: Math.max(0, bundle.track.durationMs - overlapGuess),
+    inferred: true,
+    reason: "Outgoing mix-out inferred from duration minus overlap",
+    confidence: null,
+  };
+}
+
+function pickIncomingCue(
+  bundle: TrackBundle,
+  options: { preferredType?: PlanTransitionInput["preferredType"]; allowDropIn?: boolean },
+): { type: CuePointType | null; ms: number; inferred: boolean; reason: string | null; confidence: number | null } {
+  const allowDrop = options.preferredType === "bass_swap" && options.allowDropIn === true;
+  const manualIntro = cueByType(bundle.cues, "intro_start", "manual");
+  if (manualIntro) {
+    return {
+      type: manualIntro.type,
+      ms: manualIntro.positionMs,
+      inferred: false,
+      reason: null,
+      confidence: manualIntro.confidence,
+    };
+  }
+  if (allowDrop) {
+    const drop = cueByType(bundle.cues, "drop", "manual") ?? firstSection(bundle, "drop");
+    if (drop) {
+      return {
+        type: drop.type,
+        ms: drop.positionMs,
+        inferred: drop.source !== "manual",
+        reason:
+          drop.source === "manual"
+            ? null
+            : `Incoming drop cue is analyzer-derived (confidence ${(drop.confidence ?? 0).toFixed(2)})`,
+        confidence: drop.confidence,
+      };
+    }
+  }
+  const intro = firstSection(bundle, "intro");
+  if (intro) {
+    return {
+      type: intro.type,
+      ms: intro.positionMs,
+      inferred: true,
+      reason: `Incoming intro cue is analyzer-derived (confidence ${(intro.confidence ?? 0).toFixed(2)})`,
+      confidence: intro.confidence,
+    };
+  }
+  const analyzedIntro = cueByType(bundle.cues, "intro_start", "analyzed");
+  if (analyzedIntro) {
+    return {
+      type: analyzedIntro.type,
+      ms: analyzedIntro.positionMs,
+      inferred: true,
+      reason: `Incoming intro cue is analyzer-derived (confidence ${(analyzedIntro.confidence ?? 0).toFixed(2)})`,
+      confidence: analyzedIntro.confidence,
+    };
+  }
+  const downbeats = bundle.analysis?.downbeatTimesMs ?? [];
+  if (downbeats.length > 0) {
+    return {
+      type: null,
+      ms: downbeats[0] ?? 0,
+      inferred: true,
+      reason: "Incoming mix-in inferred from the first downbeat",
+      confidence: bundle.analysis?.downbeatConfidence ?? null,
+    };
+  }
+  return { type: null, ms: 0, inferred: true, reason: "Incoming mix-in inferred at 0ms", confidence: null };
 }
 
 function automationFor(
@@ -121,7 +269,12 @@ function propose(
   outgoing: TrackBundle,
   incoming: TrackBundle,
   targetBpm: number | null,
-  options: { allowExcessiveTempo?: boolean; allowLowConfidence?: boolean },
+  options: {
+    allowExcessiveTempo?: boolean;
+    allowLowConfidence?: boolean;
+    preferredType?: PlanTransitionInput["preferredType"];
+    allowDropIn?: boolean;
+  },
 ): TransitionProposal {
   const reasons: string[] = [];
   const blockers: string[] = [];
@@ -152,9 +305,16 @@ function propose(
   const outBeats = outgoing.analysis?.beatTimesMs ?? [];
   const inBeats = incoming.analysis?.beatTimesMs ?? [];
   const outCue = pickOutgoingCue(outgoing);
-  const inCue = pickIncomingCue(incoming);
-  const outCueMs = outBeats.length > 0 ? snappedPosition(outCue.ms, outBeats) : outCue.ms;
+  const inCue = pickIncomingCue(incoming, {
+    preferredType: options.preferredType ?? type,
+    allowDropIn: options.allowDropIn,
+  });
+  let outCueMs = outBeats.length > 0 ? snappedPosition(outCue.ms, outBeats) : outCue.ms;
   const inCueMs = inBeats.length > 0 ? snappedPosition(inCue.ms, inBeats) : inCue.ms;
+  const firstDrop = outgoing.analysis?.sections?.find((section) => section.type === "drop");
+  if (firstDrop && outCueMs < firstDrop.endMs) {
+    outCueMs = firstDrop.endMs;
+  }
 
   const outSourceOverlap = durationMs * outgoingRate;
   const inSourceOverlap = durationMs * incomingRate;
@@ -172,7 +332,7 @@ function propose(
   );
 
   if (
-    outgoingEnd - outgoingStart <= outSourceOverlap &&
+    outgoingEnd - outgoingStart < outSourceOverlap &&
     outgoing.track.durationMs > outSourceOverlap
   ) {
     blockers.push("Outgoing window cannot fit the phrase overlap");
@@ -184,11 +344,11 @@ function propose(
     if (!gridOk(incoming.analysis, options.allowLowConfidence === true)) {
       blockers.push("Incoming beat grid is missing, rejected, or low-confidence");
     }
-    if (!outCue.type && !options.allowLowConfidence) {
-      blockers.push("Outgoing intro/drop/outro cue is missing");
+    if (outCue.inferred) {
+      reasons.push(outCue.reason ?? "Outgoing mix-out cue is inferred");
     }
-    if (!inCue.type && !options.allowLowConfidence) {
-      blockers.push("Incoming intro/drop cue is missing");
+    if (inCue.inferred) {
+      reasons.push(inCue.reason ?? "Incoming mix-in cue is inferred");
     }
   } else {
     reasons.push("Equal-power crossfade does not require a validated beat grid");
@@ -206,9 +366,13 @@ function propose(
   const scoreBase = type === "crossfade" ? 0.4 : type === "phrase_mix" ? 0.75 : 0.7;
   const score =
     scoreBase + (type === "bass_swap" && (energyUp || bothHot) ? 0.2 : 0) - blockers.length * 0.3;
+  const cueConfidences = [outCue.confidence, inCue.confidence].filter(
+    (value): value is number => value != null,
+  );
   const confidence = Math.min(
     outgoing.analysis?.bpmConfidence ?? (type === "crossfade" ? 0.8 : 0.2),
     incoming.analysis?.bpmConfidence ?? (type === "crossfade" ? 0.8 : 0.2),
+    ...cueConfidences,
   );
 
   return {
@@ -264,6 +428,8 @@ export function planTransition(
   const allow = {
     allowExcessiveTempo: input.allowExcessiveTempo,
     allowLowConfidence: input.allowLowConfidence,
+    preferredType: input.preferredType,
+    allowDropIn: input.allowDropIn,
   };
   const energyUp = (incoming.track.energy ?? 0) > (outgoing.track.energy ?? 0);
   const bothHot = (outgoing.track.energy ?? 0) >= 7 && (incoming.track.energy ?? 0) >= 7;

@@ -35,3 +35,16 @@ private/
 *.log
 .vscode/
 .idea/
+
+# Optional Python sidecar
+tools/analyzer-py/.venv/
+__pycache__/
+
+# Emitted JS next to TypeScript sources (tsx runs .ts)
+*.tsbuildinfo
+node_modules/.vite/
+packages/*/src/**/*.js
+packages/*/test/**/*.js
+apps/*/src/**/*.js
+apps/*/test/**/*.js
+

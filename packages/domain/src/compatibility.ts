@@ -18,6 +18,10 @@ export type ScoreContext = {
   explorationWeight: number;
   seed: number;
   alreadyUsed: boolean;
+  suggestedEnergy?: number | null;
+  sourceSuggestedEnergy?: number | null;
+  outgoingOutroMs?: number | null;
+  incomingIntroMs?: number | null;
 };
 
 function overlapScore(left: string[], right: string[]): number {
@@ -108,18 +112,27 @@ export function scoreCandidate(
   const mood = overlapScore(candidate.moods, ctx.preferredMoods);
   const subgenre = overlapScore(candidate.subgenres, ctx.preferredSubgenres);
   const tagBonus = overlapScore(candidate.tags, ctx.preferredTags);
+  const candidateEnergy = candidate.energy ?? ctx.suggestedEnergy ?? null;
+  const sourceEnergy = source?.energy ?? ctx.sourceSuggestedEnergy ?? null;
   const energy = energyScore(
-    candidate.energy,
+    candidateEnergy,
     ctx.targetEnergy,
-    source?.energy ?? null,
+    sourceEnergy,
     ctx.direction,
   );
+  const energyWeightScale = candidate.energy === null && ctx.suggestedEnergy != null ? 0.6 : 1;
   const bpm = bpmScore(source?.bpm ?? null, candidate.bpm, null);
   const harmonic = harmonicScore(
     source?.camelotKey ?? null,
     candidate.camelotKey,
     ctx.harmonicImportance,
   );
+  const outro = ctx.outgoingOutroMs;
+  const intro = ctx.incomingIntroMs;
+  let structureRaw = 0;
+  if (outro != null && intro != null && outro > 0 && intro > 0) {
+    structureRaw = clamp01(1 - Math.abs(outro - intro) / Math.max(outro, intro, 1));
+  }
   const rating = candidate.rating === null ? 0 : (candidate.rating - 1) / 4;
   const preferredArtist =
     candidate.artist !== null &&
@@ -138,7 +151,7 @@ export function scoreCandidate(
   const missingMetadata =
     (candidate.bpm === null ? 0.34 : 0) +
     (candidate.camelotKey === null ? 0.33 : 0) +
-    (candidate.energy === null ? 0.33 : 0);
+    (candidate.energy === null && ctx.suggestedEnergy == null ? 0.33 : 0);
 
   if (mood > 0) {
     reasons.push("MOOD_MATCH");
@@ -160,8 +173,11 @@ export function scoreCandidate(
   if (candidate.camelotKey === null) {
     reasons.push("MISSING_KEY");
   }
-  if (candidate.energy === null) {
+  if (candidate.energy === null && ctx.suggestedEnergy == null) {
     reasons.push("MISSING_ENERGY");
+  }
+  if (structureRaw >= 0.7) {
+    reasons.push("STRUCTURE_COMPATIBLE");
   }
   if (repeatedArtist) {
     reasons.push("REPEATED_ARTIST");
@@ -170,7 +186,7 @@ export function scoreCandidate(
   const components: ScoreComponents = {
     mood: mood * weights.mood + tagBonus * (weights.mood / 2),
     subgenre: subgenre * weights.subgenre,
-    energy: energy * weights.energy,
+    energy: energy * weights.energy * energyWeightScale,
     bpm: bpm * weights.bpm,
     harmonic: harmonic * weights.harmonic,
     rating: rating * weights.rating,
@@ -179,6 +195,7 @@ export function scoreCandidate(
     repeatedArtist: -(repeatedArtist * weights.repeatedArtist),
     recentlyUsed: -(recentlyUsed * weights.recentlyUsed),
     missingMetadata: -(missingMetadata * weights.missingMetadata),
+    structure: structureRaw * weights.structure,
   };
 
   const total = Object.values(components).reduce((sum, value) => sum + value, 0);

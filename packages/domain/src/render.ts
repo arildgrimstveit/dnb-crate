@@ -55,6 +55,8 @@ export type RenderManifestTrack = {
   requestedTransitionType: TransitionType | null;
   analysisVersion: string | null;
   bpmConfidence: number | null;
+  downbeatOffsetMs: number | null;
+  alignmentPeriodMs: number | null;
 };
 
 export type RenderManifestV1 = {

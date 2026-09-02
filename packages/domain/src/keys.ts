@@ -155,6 +155,32 @@ export function parseCamelot(code: string): ParsedCamelot | null {
  * Wheel distance: 0 = identical, 1 = relative major/minor or ±1 number,
  * then number-steps plus a letter change.
  */
+export type KeyAgreement = "exact" | "relative" | "none";
+
+/** Exact Camelot match, or relative major/minor (same number, A↔B). */
+export function keyAgreement(
+  analyzed: string | null | undefined,
+  reference: string | null | undefined,
+): KeyAgreement | null {
+  if (!analyzed || !reference) {
+    return null;
+  }
+  const left = normalizeKey(analyzed);
+  const right = normalizeKey(reference);
+  if (!left || !right) {
+    return null;
+  }
+  if (left.musicalKey === right.musicalKey || left.camelotKey === right.camelotKey) {
+    return "exact";
+  }
+  const a = parseCamelot(left.camelotKey);
+  const b = parseCamelot(right.camelotKey);
+  if (a && b && a.number === b.number) {
+    return "relative";
+  }
+  return "none";
+}
+
 export function camelotDistance(left: string | null, right: string | null): number | null {
   if (left === null || right === null) {
     return null;

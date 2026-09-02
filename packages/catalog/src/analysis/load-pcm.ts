@@ -40,7 +40,7 @@ export async function loadPcmForAnalysis(
         "-ac",
         "1",
         "-ar",
-        "44100",
+        "22050",
         "-c:a",
         "pcm_s16le",
         tmp,

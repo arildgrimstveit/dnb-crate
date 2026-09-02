@@ -55,3 +55,25 @@ Beat grids come from a TypeScript onset-envelope analyzer (`dnb-crate-envelope`)
 Pitch-preserving stretch uses FFmpeg `atempo` after `atrim`/`asetpts`. `asetrate` is not used because it would shift pitch.
 
 Bass-swap EQ frequencies, swap bar, and ramp are clamped template parameters (crossover 120–250 Hz, ramp 20–80 ms). The model cannot pass raw filter expressions.
+
+## 2026-09-02 — Analysis v2 engines
+
+Stage 4's envelope analyzer stays as `dnb-crate-envelope` for migrated rows. The default engine is in-process TypeScript DSP (`dnb-crate-dsp` 2.0): STFT spectral flux, tempogram, Ellis-style DP beat tracking, chroma key with mode, novelty sections, descriptors.
+
+essentia.js was evaluated and rejected (last release 0.1.3 in 2021, AGPL-3.0, Node slowest in the authors' benchmarks, WASM heap OOM on full-length files, mood models need native `@tensorflow/tfjs-node`).
+
+An optional Python sidecar (`beat-this`, `allin1`) is allowed behind the same `AudioAnalyzer` JSON shape when `analysis.engines.python.enabled` is true. The TypeScript engine remains the always-available default so the product never depends on Python. Sidecar rhythm is merged with DSP key/descriptors. Python 3.12 is pinned because torch wheels lag 3.14.
+
+Provenance for BPM/key is **manual > published > analyzed > tag**. `update_track_metadata` accepts `bpmSource: "published"` for store/label lookups.
+
+The 2026-08-31 wording "No Python worker and no native aubio" is superseded for the *optional adapter only*; native aubio remains rejected.
+
+## 2026-09-02 — Key estimation v2 and confidence calibration
+
+DSP key uses HPCP-style chroma in **165–3520 Hz** (spectral peaks rather than every FFT bin, global tuning histogram, suppression of energy explained as the 2nd/3rd harmonic of a lower note), median of L1-normalised frames after dropping the quietest 20 %, and the average of Krumhansl–Kessler and Temperley rank scores. The low cutoff is 165 Hz so a kick's 2nd harmonic (~110 Hz) cannot alias into a neighbouring pitch class. `chromaVector` is stored on descriptors for inspection.
+
+Tempo confidence is a 3-feature logistic (prominence, stability, grid-vs-rival) fitted on synthetic click/DnB/sine/noise. The **0.55 clamp is gone**. After the v2.1 onset/tempo path, Last Jungle was a false accept at 0.58 (160 vs published 174), so `MIN_ANALYSIS_CONFIDENCE` is **0.6**. `allowLowConfidence` remains the override. Re-run `tools/scripts/calibrate-confidence.mts` when the onset/tempo path changes.
+
+## 2026-09-02 — Default analysis engine
+
+`dnb-crate-dsp` stays the default. The Python sidecar is optional; a `beat-this` crate comparison was not required to ship v2.1. Switch the default only if beat-this is ≥ 2 tracks better on in-range published BPM and adds < 10 s/track.

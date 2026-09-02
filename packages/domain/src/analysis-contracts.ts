@@ -1,7 +1,9 @@
 import * as z from "zod/v4";
 
-import { ANALYSIS_JOB_LIST_LIMIT_MAX, MAX_TEMPO_DEVIATION } from "./constants.ts";
+import { ANALYSIS_ENGINE_IDS, ANALYSIS_JOB_LIST_LIMIT_MAX, MAX_TEMPO_DEVIATION } from "./constants.ts";
 import { cuePointTypeSchema, trackIdSchema } from "./contracts.ts";
+
+export const analysisEngineIdSchema = z.enum(ANALYSIS_ENGINE_IDS);
 
 export const analysisJobStatusSchema = z.enum([
   "queued",
@@ -18,6 +20,12 @@ export const startTrackAnalysisInputSchema = z
       .boolean()
       .optional()
       .describe("If true, analyze the planning-ready subset (BPM, key, energy, file present)."),
+    engines: z
+      .array(z.enum(["dnb-crate-dsp", "beat-this", "allin1"]))
+      .min(1)
+      .max(3)
+      .optional()
+      .describe("Analysis engines to run. Default is config analysis.defaultEngine."),
   })
   .refine((value) => (value.trackIds?.length ?? 0) > 0 || value.planningReadyOnly === true, {
     message: "Pass trackIds or planningReadyOnly=true",
@@ -29,6 +37,24 @@ export const getAnalysisStatusInputSchema = z.object({
 
 export const getTrackAnalysisInputSchema = z.object({
   trackId: trackIdSchema,
+  engine: analysisEngineIdSchema.optional(),
+});
+
+export const compareTrackAnalysesInputSchema = z.object({
+  trackId: trackIdSchema,
+});
+
+export const getTrackSectionsInputSchema = z.object({
+  trackId: trackIdSchema,
+  engine: analysisEngineIdSchema.optional(),
+});
+
+export const cuePreviewCueSchema = z.enum(["intro_start", "drop", "breakdown", "outro_start"]);
+
+export const createCuePreviewInputSchema = z.object({
+  trackId: trackIdSchema,
+  cue: cuePreviewCueSchema.optional().describe("Default drop"),
+  windowMs: z.number().int().min(2000).max(16_000).optional().describe("Default 8000"),
 });
 
 export const setBeatAnchorInputSchema = z.object({
@@ -48,6 +74,7 @@ export const planTransitionInputSchema = z.object({
   targetBpm: z.number().positive().max(400).optional(),
   allowExcessiveTempo: z.boolean().optional(),
   allowLowConfidence: z.boolean().optional(),
+  allowDropIn: z.boolean().optional(),
 });
 
 export const validateTransitionInputSchema = z.object({
@@ -74,6 +101,7 @@ export const analysisJobSchema = z.object({
   status: analysisJobStatusSchema,
   progress: z.number().min(0).max(1),
   trackIds: z.array(z.string()),
+  engines: z.array(z.string()),
   completedTrackIds: z.array(z.string()),
   failedTrackIds: z.array(z.string()),
   errorCode: z.string().nullable(),
@@ -84,6 +112,53 @@ export const analysisJobSchema = z.object({
   completedAt: z.string().nullable(),
 });
 
+export const trackSectionSchema = z.object({
+  type: z.enum(["intro", "build", "drop", "breakdown", "bridge", "outro"]),
+  startMs: z.number(),
+  endMs: z.number(),
+  startBar: z.number().int().nullable(),
+  endBar: z.number().int().nullable(),
+  confidence: z.number(),
+  sectionEnergy: z.number(),
+});
+
+export const tempoEvidenceSchema = z.object({
+  prominence: z.number(),
+  stability: z.number(),
+  tempoConf: z.number(),
+  onGridRatio: z.number(),
+});
+
+export const sonicDescriptorsSchema = z.object({
+  integratedLufs: z.number().nullable(),
+  shortTermLufsMean: z.number().nullable(),
+  shortTermLufsMax: z.number().nullable(),
+  truePeakDb: z.number().nullable(),
+  subBassRatio: z.number().nullable(),
+  brightness: z.number().nullable(),
+  onsetDensity: z.number().nullable(),
+  dynamicRange: z.number().nullable(),
+  dropIntensity: z.number().nullable(),
+  suggestedEnergy: z.number().int().min(1).max(10).nullable(),
+  waveformSummary: z.array(z.number()),
+  lowBandEnergy: z.number().nullable(),
+  midBandEnergy: z.number().nullable(),
+  highBandEnergy: z.number().nullable(),
+  chromaVector: z.array(z.number()).length(12).nullable().optional(),
+  tempoEvidence: tempoEvidenceSchema.nullable().optional(),
+});
+
+export const beatGridSummarySchema = z.object({
+  bpm: z.number().nullable(),
+  bpmConfidence: z.number().nullable(),
+  beatCount: z.number().int(),
+  firstDownbeatMs: z.number().nullable(),
+  downbeatConfidence: z.number().nullable(),
+  tempoStability: z.number().nullable(),
+  gridRejected: z.boolean(),
+  gridRejectionReason: z.string().nullable(),
+});
+
 export const trackAnalysisSchema = z.object({
   trackId: z.string(),
   analyzerName: z.string(),
@@ -91,12 +166,14 @@ export const trackAnalysisSchema = z.object({
   bpm: z.number().nullable(),
   bpmConfidence: z.number().nullable(),
   bpmRaw: z.number().nullable(),
-  beatTimesMs: z.array(z.number()),
-  downbeatTimesMs: z.array(z.number()),
   gridRejected: z.boolean(),
   gridRejectionReason: z.string().nullable(),
   musicalKey: z.string().nullable(),
   keyConfidence: z.number().nullable(),
+  keyMode: z.enum(["major", "minor"]).nullable(),
+  camelotKey: z.string().nullable(),
+  tempoStability: z.number().nullable(),
+  downbeatConfidence: z.number().nullable(),
   integratedLufs: z.number().nullable(),
   truePeakDb: z.number().nullable(),
   lowBandEnergy: z.number().nullable(),
@@ -104,11 +181,13 @@ export const trackAnalysisSchema = z.object({
   highBandEnergy: z.number().nullable(),
   waveformSummary: z.array(z.number()).nullable(),
   beatAnchorMs: z.number().nullable(),
+  descriptors: sonicDescriptorsSchema.nullable(),
+  engineRuntimeMs: z.number().nullable(),
   analyzedAt: z.string(),
   canonicalBpm: z.number().nullable(),
-  canonicalBpmSource: z.enum(["tag", "manual", "analyzed"]).nullable(),
+  canonicalBpmSource: z.enum(["tag", "manual", "analyzed", "published"]).nullable(),
   canonicalKey: z.string().nullable(),
-  canonicalKeySource: z.enum(["tag", "manual", "analyzed"]).nullable(),
+  canonicalKeySource: z.enum(["tag", "manual", "analyzed", "published"]).nullable(),
   suggestedCues: z.array(
     z.object({
       type: cuePointTypeSchema,
@@ -118,6 +197,89 @@ export const trackAnalysisSchema = z.object({
       confidence: z.number(),
     }),
   ),
+  sections: z.array(trackSectionSchema),
+  availableEngines: z.array(z.string()),
+  gridSummary: beatGridSummarySchema,
+});
+
+export const compareTrackAnalysesDataSchema = z.object({
+  trackId: z.string(),
+  engines: z.array(
+    z.object({
+      analyzerName: z.string(),
+      analyzerVersion: z.string(),
+      bpm: z.number().nullable(),
+      bpmConfidence: z.number().nullable(),
+      gridRejected: z.boolean(),
+      musicalKey: z.string().nullable(),
+      keyConfidence: z.number().nullable(),
+      downbeatConfidence: z.number().nullable(),
+      sectionCount: z.number().int(),
+      engineRuntimeMs: z.number().nullable(),
+      analyzedAt: z.string(),
+      chromaVector: z.array(z.number()).length(12).nullable().optional(),
+    }),
+  ),
+});
+
+export const getTrackSectionsDataSchema = z.object({
+  trackId: z.string(),
+  analyzerName: z.string(),
+  sections: z.array(trackSectionSchema),
+});
+
+export const analysisReportEngineRowSchema = z.object({
+  trackId: z.string(),
+  title: z.string(),
+  analyzerName: z.string(),
+  bpm: z.number().nullable(),
+  bpmConfidence: z.number().nullable(),
+  gridRejected: z.boolean(),
+  keyAgreement: z.enum(["exact", "relative", "none"]).nullable(),
+  sectionCount: z.number().int(),
+});
+
+export const analysisReportDataSchema = z.object({
+  trackCount: z.number().int(),
+  engineCounts: z.record(z.string(), z.number()),
+  inRange: z.object({
+    count: z.number().int(),
+    withinHalf: z.number().int(),
+  }),
+  outOfRange: z.object({
+    count: z.number().int(),
+  }),
+  publishedOrManualCompared: z.number().int(),
+  dspWithinHalfBpm: z.number().int(),
+  engines: z.array(analysisReportEngineRowSchema),
+  needsReview: z.array(
+    z.object({
+      trackId: z.string(),
+      title: z.string(),
+      reason: z.enum(["out-of-range", "disagreement"]),
+      canonicalBpm: z.number().nullable(),
+      canonicalSource: z.string().nullable(),
+      publishedFolded: z.number().nullable(),
+      dspBpm: z.number().nullable(),
+      engines: z.record(z.string(), z.number().nullable()),
+    }),
+  ),
+  disagreements: z.array(
+    z.object({
+      trackId: z.string(),
+      title: z.string(),
+      canonicalBpm: z.number().nullable(),
+      canonicalSource: z.string().nullable(),
+      engines: z.record(z.string(), z.number().nullable()),
+    }),
+  ),
+});
+
+export const createCuePreviewDataSchema = z.object({
+  trackId: z.string(),
+  cue: cuePreviewCueSchema,
+  positionMs: z.number(),
+  outputRelpath: z.string(),
 });
 
 export const listAnalysisJobsInputSchema = z.object({

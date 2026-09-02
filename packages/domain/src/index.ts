@@ -37,6 +37,11 @@ export {
   RENDERER_VERSION,
   ANALYZER_NAME,
   ANALYZER_VERSION,
+  DSP_ANALYZER_NAME,
+  DSP_ANALYZER_VERSION,
+  ANALYSIS_ENGINE_IDS,
+  DEFAULT_ANALYSIS_ENGINE,
+  ANALYSIS_SAMPLE_RATE_HZ,
   DNB_BPM_MIN,
   DNB_BPM_MAX,
   MAX_TEMPO_DEVIATION,
@@ -53,13 +58,15 @@ export {
   PHRASE_MIX_HIGHPASS_HZ,
   ANALYSIS_JOB_LIST_LIMIT_MAX,
 } from "./constants.ts";
-export { type AppConfig, appConfigSchema, type LogLevel, logLevelSchema } from "./config.ts";
+export { type AppConfig, appConfigSchema, type LogLevel, logLevelSchema, analysisEngineIdSchema } from "./config.ts";
 export { loadConfig, type ConfigLoadOptions } from "./load-config.ts";
 export { DomainError, type DomainErrorCode, isDomainError } from "./errors.ts";
 export {
   camelotDistance,
+  keyAgreement,
   normalizeKey,
   parseCamelot,
+  type KeyAgreement,
   type NormalizedKey,
   type ParsedCamelot,
 } from "./keys.ts";
@@ -80,17 +87,36 @@ export type {
   AnalysisJobStatus,
   AutomationEvent,
   BassSwapParams,
+  BeatGrid,
+  BeatGridSummary,
+  MusicalKeyEstimate,
+  SonicDescriptors,
+  TempoEvidence,
   SuggestedCue,
   TrackAnalysis,
   TrackAnalysisView,
+  TrackSection,
+  TrackSectionType,
   TransitionProposal,
   TransitionValidation,
 } from "./analysis.ts";
-export { clampBassSwapParams, resolveCanonicalBpm, resolveCanonicalKey } from "./analysis.ts";
+export {
+  buildBeatGridSummary,
+  clampBassSwapParams,
+  resolveCanonicalBpm,
+  resolveCanonicalKey,
+} from "./analysis.ts";
 export {
   analysisJobSchema,
+  analysisReportDataSchema,
+  compareTrackAnalysesDataSchema,
+  compareTrackAnalysesInputSchema,
+  createCuePreviewDataSchema,
+  createCuePreviewInputSchema,
   getAnalysisStatusInputSchema,
   getTrackAnalysisInputSchema,
+  getTrackSectionsDataSchema,
+  getTrackSectionsInputSchema,
   listAnalysisJobsDataSchema,
   listAnalysisJobsInputSchema,
   planTransitionDataSchema,
@@ -98,6 +124,7 @@ export {
   setBeatAnchorInputSchema,
   startTrackAnalysisInputSchema,
   trackAnalysisSchema,
+  trackSectionSchema,
   transitionProposalSchema,
   validateTransitionDataSchema,
   validateTransitionInputSchema,
@@ -106,6 +133,7 @@ export { silentLogger, type Logger } from "./logger.ts";
 export { fail, ok, type ToolErrorBody, type ToolResult } from "./tool-result.ts";
 export { interpolateEnergy, scoreCandidate, hashSeed, type ScoreContext } from "./compatibility.ts";
 export {
+  type AnalysisEngineId,
   type AnalysisStatus,
   type BpmSource,
   type CuePoint,

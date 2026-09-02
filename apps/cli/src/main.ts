@@ -1,5 +1,5 @@
 import { createCatalogRuntime } from "@dnb-crate/catalog";
-import { APP_NAME, APP_VERSION, loadConfig, type Logger } from "@dnb-crate/domain";
+import { APP_NAME, APP_VERSION, loadConfig, type AnalysisEngineId, type Logger } from "@dnb-crate/domain";
 import pino from "pino";
 
 function createLogger(level: string): Logger {
@@ -37,9 +37,13 @@ Commands:
   library:scan [--dry-run]
   library:stats
   track:search [--query TEXT] [--artist TEXT] [--limit N]
-  analysis:start --track-id UUID [--wait]
+  analysis:start --track-id UUID [--engine dsp|beat-this|allin1] [--wait]
   analysis:status [--id UUID]
   analysis:get --track-id UUID
+  analysis:compare --track-id UUID
+  analysis:report
+  analysis:gate [--engine dsp|beat-this] [--previews]
+  analysis:cue-preview --track-id UUID [--cue drop]
   transition:plan --from UUID --to UUID [--type phrase_mix|bass_swap|crossfade|any] [--bars 16|32]
   transition:validate --from UUID --to UUID --type phrase_mix|bass_swap|crossfade
   plan:create --name TEXT [--duration-ms N] [--seed N] [--end-query TEXT]
@@ -96,9 +100,17 @@ async function main(): Promise<void> {
         if (!trackId && !planningReady) {
           throw new Error("analysis:start requires --track-id or --planning-ready");
         }
+        const enginesRaw = option(args, "--engine");
+        let engines: AnalysisEngineId[] | undefined;
+        if (enginesRaw === "beat-this" || enginesRaw === "allin1") {
+          engines = [enginesRaw];
+        } else if (enginesRaw === "dsp" || enginesRaw === "dnb-crate-dsp") {
+          engines = ["dnb-crate-dsp"];
+        }
         const started = runtime.service.startTrackAnalysis({
           trackIds: trackId ? [trackId] : undefined,
           planningReadyOnly: planningReady,
+          engines,
         });
         if (flag(args, "--wait")) {
           const done = await runtime.service.waitForAnalysisJob(started.job.id);
@@ -119,6 +131,69 @@ async function main(): Promise<void> {
           throw new Error("analysis:get requires --track-id");
         }
         printJson({ ok: true, data: runtime.service.getTrackAnalysis(trackId) });
+        break;
+      }
+      case "analysis:compare": {
+        const trackId = option(args, "--track-id");
+        if (!trackId) {
+          throw new Error("analysis:compare requires --track-id");
+        }
+        printJson({ ok: true, data: runtime.service.compareTrackAnalyses(trackId) });
+        break;
+      }
+      case "analysis:report":
+        printJson({ ok: true, data: runtime.service.getAnalysisReport() });
+        break;
+      case "analysis:gate": {
+        const enginesRaw = option(args, "--engine");
+        let engines: AnalysisEngineId[] | undefined;
+        if (enginesRaw === "beat-this" || enginesRaw === "allin1") {
+          engines = [enginesRaw];
+        } else if (enginesRaw === "dsp" || enginesRaw === "dnb-crate-dsp" || enginesRaw === undefined) {
+          engines = ["dnb-crate-dsp"];
+        }
+        const ids = runtime.repository
+          .listAll()
+          .filter((track) => track.bpmSource === "published" || track.bpmSource === "manual")
+          .map((track) => track.id);
+        if (ids.length > 0) {
+          const started = runtime.service.startTrackAnalysis({ trackIds: ids, engines });
+          const done = await runtime.service.waitForAnalysisJob(started.job.id, 30 * 60_000);
+          if (done.status !== "succeeded") {
+            throw new Error(`analysis:gate job ${done.status}: ${done.errorMessage ?? done.id}`);
+          }
+        }
+        if (flag(args, "--previews")) {
+          for (const trackId of ids) {
+            try {
+              await runtime.service.createCuePreview({ trackId, cue: "drop" });
+            } catch (error) {
+              process.stderr.write(
+                `cue preview failed for ${trackId}: ${error instanceof Error ? error.message : String(error)}\n`,
+              );
+            }
+          }
+        }
+        printJson({ ok: true, data: runtime.service.getAnalysisReport() });
+        break;
+      }
+      case "analysis:cue-preview": {
+        const trackId = option(args, "--track-id");
+        if (!trackId) {
+          throw new Error("analysis:cue-preview requires --track-id");
+        }
+        const cueRaw = option(args, "--cue") ?? "drop";
+        const cue =
+          cueRaw === "intro_start" ||
+          cueRaw === "drop" ||
+          cueRaw === "breakdown" ||
+          cueRaw === "outro_start"
+            ? cueRaw
+            : "drop";
+        printJson({
+          ok: true,
+          data: await runtime.service.createCuePreview({ trackId, cue }),
+        });
         break;
       }
       case "transition:plan": {

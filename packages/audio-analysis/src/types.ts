@@ -1,4 +1,4 @@
-import type { CuePointType } from "@dnb-crate/domain";
+import type { CuePointType, TrackSection, SonicDescriptors, MusicalKeyEstimate } from "@dnb-crate/domain";
 
 export type PcmAudio = {
   samples: Float32Array;
@@ -25,11 +25,19 @@ export type AnalyzerResult = {
   gridRejectionReason: string | null;
   musicalKey: string | null;
   keyConfidence: number | null;
+  keyMode: "major" | "minor" | null;
+  camelotKey: string | null;
+  keyRunnerUp: string | null;
+  tempoStability: number | null;
+  downbeatConfidence: number | null;
   lowBandEnergy: number | null;
   midBandEnergy: number | null;
   highBandEnergy: number | null;
   waveformSummary: number[];
   suggestedCues: AnalyzerCue[];
+  sections: TrackSection[];
+  descriptors: SonicDescriptors | null;
+  engineRuntimeMs: number | null;
 };
 
 export type AnalyzeOptions = {
@@ -44,3 +52,24 @@ export type AudioAnalyzer = {
   readonly version: string;
   analyze: (pcm: PcmAudio, options?: AnalyzeOptions) => AnalyzerResult;
 };
+
+export const emptyDescriptors = (waveform: number[] = []): SonicDescriptors => ({
+  integratedLufs: null,
+  shortTermLufsMean: null,
+  shortTermLufsMax: null,
+  truePeakDb: null,
+  subBassRatio: null,
+  brightness: null,
+  onsetDensity: null,
+  dynamicRange: null,
+  dropIntensity: null,
+  suggestedEnergy: null,
+  waveformSummary: waveform,
+  lowBandEnergy: null,
+  midBandEnergy: null,
+  highBandEnergy: null,
+  chromaVector: null,
+  tempoEvidence: null,
+});
+
+export type { TrackSection, SonicDescriptors, MusicalKeyEstimate };

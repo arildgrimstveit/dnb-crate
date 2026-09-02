@@ -1,8 +1,19 @@
 export const APP_NAME = "dnb-crate-mcp";
-export const APP_VERSION = "0.4.0";
-export const RENDERER_VERSION = "4.0.0";
+export const APP_VERSION = "0.5.0";
+export const RENDERER_VERSION = "5.0.0";
+/** @deprecated Prefer DSP_ANALYZER_NAME; kept for migrated Stage 4 rows. */
 export const ANALYZER_NAME = "dnb-crate-envelope";
 export const ANALYZER_VERSION = "1.0.0";
+export const DSP_ANALYZER_NAME = "dnb-crate-dsp";
+export const DSP_ANALYZER_VERSION = "2.1.0";
+export const ANALYSIS_ENGINE_IDS = [
+  "dnb-crate-dsp",
+  "dnb-crate-envelope",
+  "beat-this",
+  "allin1",
+] as const;
+export const DEFAULT_ANALYSIS_ENGINE = "dnb-crate-dsp" as const;
+export const ANALYSIS_SAMPLE_RATE_HZ = 22_050;
 
 export const DEFAULT_SUPPORTED_EXTENSIONS = [
   ".wav",
@@ -43,6 +54,7 @@ export const DEFAULT_SCORE_WEIGHTS = {
   repeatedArtist: 20,
   recentlyUsed: 8,
   missingMetadata: 10,
+  structure: 6,
 } as const;
 
 export const DEFAULT_LOUDNESS_TARGET_LUFS = -14;
@@ -64,7 +76,7 @@ export const CROSSFADE_CURVE = "hsin";
 export const DNB_BPM_MIN = 160;
 export const DNB_BPM_MAX = 190;
 export const MAX_TEMPO_DEVIATION = 0.03;
-export const MIN_ANALYSIS_CONFIDENCE = 0.5;
+export const MIN_ANALYSIS_CONFIDENCE = 0.6;
 export const DEFAULT_PHRASE_BARS = 16;
 export const PHRASE_BAR_OPTIONS = [16, 32] as const;
 export const DEFAULT_BASS_CROSSOVER_HZ = 180;

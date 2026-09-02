@@ -60,13 +60,33 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `get_track_analysis`
 
-- Output: grid, BPM/key with confidence, bands, suggested cues, canonical vs analyzed provenance
+- Output: grid, BPM/key with confidence, bands, suggested cues, canonical vs analyzed provenance, descriptors (`chromaVector`, `tempoEvidence`)
 - Errors: `TRACK_NOT_FOUND`, `ANALYSIS_FAILED` (not yet analyzed; retryable)
+
+## `compare_track_analyses`
+
+- Input: `{ trackId, engine? }`
+- Output: per-engine BPM/key/sections plus `chromaVector` when the DSP row has one
+
+## `get_track_sections`
+
+- Input: `{ trackId, engine? }`
+
+## `get_analysis_report`
+
+- Input: `{}`
+- Output: `{ inRange: { count, withinHalf }, outOfRange: { count }, engines[], needsReview[], disagreements[] }`
+- `withinHalf` is computed only on published/manual BPM inside 160–190. Out-of-range published values are `needsReview` with `publishedFolded`.
+
+## `create_cue_preview`
+
+- Input: `{ trackId, cue?: intro_start|drop|breakdown|outro_start, windowMs? }`
+- Output: `{ trackId, cue, positionMs, outputRelpath }`
 
 ## `plan_transition`
 
-- Input: `{ outgoingTrackId, incomingTrackId, preferredType?, barCount?, targetBpm?, allowExcessiveTempo?, allowLowConfidence? }`
-- Output: `{ proposals: TransitionProposal[] }` ranked; infeasible proposals include `blockers`
+- Input: `{ outgoingTrackId, incomingTrackId, preferredType?, barCount?, targetBpm?, allowExcessiveTempo?, allowLowConfidence?, allowDropIn? }`
+- Output: `{ proposals: TransitionProposal[] }` ranked; analyzer-derived cues are reasons, not blockers; incoming `drop` only when `preferredType=bass_swap` and `allowDropIn`
 
 ## `validate_transition`
 
@@ -131,7 +151,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `get_render_manifest`
 
-- Available after `succeeded`
+- `get_render_manifest` tracks include `downbeatOffsetMs` and `alignmentPeriodMs`
 - Errors: `RENDER_JOB_NOT_FOUND`, `RENDER_FAILED` (not finished; `retryable` while queued/running)
 
 ## Resources

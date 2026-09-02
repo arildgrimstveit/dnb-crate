@@ -1,45 +1,70 @@
-# Analysis and aligned transitions (Stage 4)
+# Analysis and aligned transitions (Stage 5 / v2.1)
 
-Automatic analysis is **advisory**. Every BPM, key, downbeat, and suggested cue has confidence and provenance. Manual values always win without deleting the analysis row.
+Automatic analysis is **advisory**. Every BPM, key, downbeat, section, and suggested cue has confidence and provenance. Manual values always win without deleting the analysis row.
 
-## Analyzer
+Canonical BPM/key precedence: **manual > published > analyzed > tag**.
 
-Stage 4 uses an in-process TypeScript envelope analyzer (`dnb-crate-envelope` 1.0.0) in `@dnb-crate/audio-analysis`. WAV is decoded in-process (16-bit PCM). Other formats are decoded to PCM with FFmpeg when it is available.
+## Engines
 
-Rejected alternatives (native aubio, Python/librosa worker) are recorded in `docs/decisions.md`. Click-track fixtures are the automated accuracy gate; real-library quality is advisory.
+| Engine | Runtime | What it produces |
+| --- | --- | --- |
+| `dnb-crate-dsp` 2.1 (default) | TypeScript in-process | STFT spectral-flux onsets, tempogram, comb-locked sub-hop beats, downbeats, HPCP chroma key (165–3520 Hz, spectral peaks, tuning, Temperley+KK), downbeat-anchored sections, sonic descriptors |
+| `beat-this` | Optional Python sidecar | Beats / downbeats / tempo (IQR confidence; 180 s timeout) |
+| `allin1` | Optional Python sidecar (slow; Demucs) | Beats / downbeats / tempo / section labels (900 s timeout) |
+| `dnb-crate-envelope` 1.0 | Legacy | Peak-amplitude envelope; kept for migrated Stage 4 rows |
+
+Key and descriptors always come from `dnb-crate-dsp` even when a sidecar supplies rhythm. Rows are stored per `(track_id, analyzer_name)`. Descriptors include `chromaVector` (12-bin) and `tempoEvidence` `{ prominence, stability, tempoConf, onGridRatio }`.
+
+Python is **off by default**. Enable with `analysis.engines.python.enabled` and run `tools/analyzer-py/setup.ps1` (Python 3.12 venv). The product runs without it.
+
+essentia.js was rejected: unmaintained since 2021, AGPL, Node was the slowest environment in the authors' benchmarks, WASM heap OOM on full tracks, ML path needs native tfjs-node.
 
 ## BPM and grids
 
 - Tempo is folded into **160–190 BPM** (half/double time).
-- Grids are 4/4 only, reconstructed from a beat/downbeat anchor (default 0, or `set_cue_points.beatAnchorMs`).
-- Confidence below **0.5**, or a tempo that cannot fold into range, **rejects** the grid. Rejected grids are stored and surfaced; they cannot enter phrase-mix/bass-swap renders unless `allowLowConfidence` is true.
-- Canonical BPM/key precedence: **manual > analyzed > tag**.
+- On real crates, DSP tempo is a grid/structure hint. Mix planning still uses canonical BPM (**manual > published > analyzed**).
+- Grids are tracked from onset strength, then downbeat-phased. Beat times follow the tempo comb (offset from the time-domain onset fit) with parabolic interpolation when the local peak is within 0.15 of a period. A manual `beatAnchorMs` still biases downbeat phase.
+- Confidence is a 3-feature logistic on prominence, stability, and grid-vs-rival score. There is no 0.55 floor. Confidence below **0.6**, or a tempo that cannot fold into range, **rejects** the grid. Re-fit weights with `corepack pnpm exec tsx tools/scripts/calibrate-confidence.mts` after onset/tempo changes.
+- Phrase-mix / bass-swap renders use downbeat-phase alignment in **output time** (`downbeatOffsetMs` and `alignmentPeriodMs` on the manifest).
 
-## Cue points
+## Planner tempo matching
 
-- Analyzer may insert `analyzed` intro/drop/outro cues only when that type is not already present.
-- `set_cue_points` replaces the list as `manual` and may set a beat anchor that reconstructs the stored grid from canonical BPM.
+When both tracks have an accepted grid and their canonical BPMs are within ±3%, `create_set_plan` picks `phrase_mix` or `bass_swap` and sets **both** `playbackRate`s toward a shared target (`normalizeDnbBpm` of the pair average, or the outgoing effective BPM later in a chain). Rates are checked with `assertPlaybackRate` (no excessive override). If either rate is out of range, the pair falls back to `crossfade` with `parameters.reason = "tempo-out-of-range"`.
+
+A track that is incoming from pair *i−1* keeps that rate when it is outgoing to pair *i+1*; the next target is recomputed from effective BPM (`canonicalBpm × rate`). `update_set_plan.setPlaybackRate` still wins on rebuild. Transition `parameters` record `{ targetBpm, barCount, reason }`.
+
+`tempoStability` in the analysis row is the MAD of windowed BPM estimates (0–1, higher is more stable). It is an input to confidence, not a second gate.
+
+## Sections and cues
+
+Bars are anchored at the first downbeat when the grid is accepted. DSP labels `intro | build | drop | breakdown | bridge | outro` from 4-bar novelty peaks (8-bar minimum, merged same-type neighbours, confidence from the boundary margin). Cues (`intro_start`, `drop`, `breakdown`, `outro_start`) are derived from sections: breakdown is the first breakdown after the first drop; `outro_start` only exists when an outro section exists.
+
+Analyzer-inserted cues never overwrite a manual cue of the same type. The transition planner treats `source === "analyzed"` cues as **inferred** (reasons, not blockers). Outgoing mix-out never uses `drop`; incoming `drop` is only used for `bass_swap` when `allowDropIn` is true.
 
 ## Transition templates
 
-| Template     | Behaviour                                                                                                                                                                                                                                                                        |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `crossfade`  | Equal-power `acrossfade` (`c1=hsin`/`c2=hsin`). No grid required.                                                                                                                                                                                                                |
-| `phrase_mix` | 16 or 32 bars at target BPM. Incoming mids/highs fade in through a **250 Hz** high-pass. Outgoing fades out over the phrase.                                                                                                                                                     |
-| `bass_swap`  | Split at a bounded crossover (**120–250 Hz**, default **180**). Highs equal-power acrossfade. Outgoing lows fade out and incoming lows fade in at bar **8 of 16** or **16 of 32**, ramp **20–80 ms** (default **40**). Both lows are never at full strength through the overlap. |
+| Template     | Behaviour |
+| ------------ | --------- |
+| `crossfade`  | Equal-power `acrossfade` (`hsin`). No grid required. |
+| `phrase_mix` | 16 or 32 bars at target BPM. Incoming mids/highs fade in through a **250 Hz** high-pass. |
+| `bass_swap`  | Split at **120–250 Hz** (default 180). Highs acrossfade; lows swap at bar 8/16. |
 
-Parameters are bounded template numbers, not model-supplied FFmpeg strings.
+`create_set_plan` picks `bass_swap` / `phrase_mix` / `crossfade` from grids, ±3% tempo, section lengths, and energy (including `suggestedEnergy` when manual energy is missing), then tempo-matches aligned pairs as above.
 
-Tempo matching uses FFmpeg **`atempo`** (pitch-preserving), not `asetrate`. Playback rate is **±3%** unless `allowExcessiveTempo` is set.
+Tempo matching uses FFmpeg **`atempo`**. Playback rate is **±3%** unless `allowExcessiveTempo`.
 
-`plan_transition` ranks `bass_swap` first when energy rises or both tracks are ≥ 7; otherwise `phrase_mix`; `crossfade` is the fallback. Accept a proposal with `update_set_plan.applyTransition`.
-
-`double_drop` remains Stage 5 (rendered as `bass_swap` with a warning if it appears on a plan).
+`double_drop` remains later work (rendered as `bass_swap` with a warning if it appears on a plan).
 
 ## CLI
 
 ```bash
 pnpm cli analysis:start --track-id UUID --wait
 pnpm cli analysis:get --track-id UUID
+pnpm cli analysis:compare --track-id UUID
+pnpm cli analysis:report
+pnpm cli analysis:gate [--engine dsp|beat-this] [--previews]
+pnpm cli analysis:cue-preview --track-id UUID --cue drop
 pnpm cli transition:plan --from UUID --to UUID --bars 32
 ```
+
+`analysis:gate` re-analyses every track with `bpmSource` `published` or `manual` and prints `get_analysis_report` (in-range vs out-of-range split). Optional `--previews` renders drop cue previews.

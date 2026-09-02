@@ -211,11 +211,11 @@ export class TrackRepository {
     let musicalKey = existing.musicalKey;
     let camelotKey = existing.camelotKey;
     let keySource = existing.keySource;
-    if (existing.bpmSource !== "manual" && input.bpm !== null) {
+    if (existing.bpmSource !== "manual" && existing.bpmSource !== "published" && input.bpm !== null) {
       bpm = input.bpm;
       bpmSource = "analyzed";
     }
-    if (existing.keySource !== "manual" && input.musicalKey !== null) {
+    if (existing.keySource !== "manual" && existing.keySource !== "published" && input.musicalKey !== null) {
       const normalized = normalizeKey(input.musicalKey);
       musicalKey = normalized?.musicalKey ?? input.musicalKey;
       camelotKey = normalized?.camelotKey ?? null;
@@ -341,7 +341,6 @@ export class TrackRepository {
 
     const energy = patch.energy === undefined ? existing.energy : patch.energy;
     const rating = patch.rating === undefined ? existing.rating : patch.rating;
-    const notes = patch.notes === undefined ? existing.notes : patch.notes;
     let bpm = existing.bpm;
     let bpmSource = existing.bpmSource;
     let musicalKey = existing.musicalKey;
@@ -349,7 +348,8 @@ export class TrackRepository {
     let keySource = existing.keySource;
     if (patch.bpm !== undefined) {
       bpm = patch.bpm;
-      bpmSource = patch.bpm === null ? null : "manual";
+      bpmSource =
+        patch.bpm === null ? null : (patch.bpmSource ?? "manual");
     }
     if (patch.musicalKey !== undefined) {
       if (patch.musicalKey === null) {
@@ -360,8 +360,13 @@ export class TrackRepository {
         const normalized = normalizeKey(patch.musicalKey);
         musicalKey = normalized?.musicalKey ?? patch.musicalKey;
         camelotKey = normalized?.camelotKey ?? null;
-        keySource = "manual";
+        keySource = patch.keySource ?? "manual";
       }
+    }
+    let notes = patch.notes === undefined ? existing.notes : patch.notes;
+    if (patch.metadataSourceNote) {
+      const stamp = `[source] ${patch.metadataSourceNote}`;
+      notes = notes ? `${notes}\n${stamp}` : stamp;
     }
     const timestamp = nowIso();
     const run = this.db.transaction(() => {
@@ -477,6 +482,32 @@ export class TrackRepository {
       input.moodsMatch ?? "any",
     );
     this.pushListFilter(where, params, "track_tags", "tag", input.tags, input.tagsMatch ?? "any");
+
+    if (
+      input.subBassMin !== undefined ||
+      input.subBassMax !== undefined ||
+      input.brightnessMin !== undefined ||
+      input.brightnessMax !== undefined
+    ) {
+      where.push(`EXISTS (
+        SELECT 1 FROM track_analyses ta
+        WHERE ta.track_id = tracks.id
+          AND (? IS NULL OR json_extract(ta.descriptors_json, '$.subBassRatio') >= ?)
+          AND (? IS NULL OR json_extract(ta.descriptors_json, '$.subBassRatio') <= ?)
+          AND (? IS NULL OR json_extract(ta.descriptors_json, '$.brightness') >= ?)
+          AND (? IS NULL OR json_extract(ta.descriptors_json, '$.brightness') <= ?)
+      )`);
+      params.push(
+        input.subBassMin ?? null,
+        input.subBassMin ?? 0,
+        input.subBassMax ?? null,
+        input.subBassMax ?? 1,
+        input.brightnessMin ?? null,
+        input.brightnessMin ?? 0,
+        input.brightnessMax ?? null,
+        input.brightnessMax ?? 1,
+      );
+    }
 
     if (input.cursor) {
       const cursor = decodeCursor(input.cursor);
@@ -658,7 +689,10 @@ export class TrackRepository {
 
   private updateScanFields(id: string, input: UpsertTrackInput): Track {
     const existing = this.findById(id);
-    const keepBpm = existing?.bpmSource === "manual" || existing?.bpmSource === "analyzed";
+    const keepBpm =
+      existing?.bpmSource === "manual" ||
+      existing?.bpmSource === "analyzed" ||
+      existing?.bpmSource === "published";
     const keepKey = existing?.keySource === "manual" || existing?.keySource === "analyzed";
     const timestamp = nowIso();
     this.db

@@ -72,6 +72,8 @@ export const renderManifestTrackSchema = z.object({
     .nullable(),
   analysisVersion: z.string().nullable(),
   bpmConfidence: z.number().nullable(),
+  downbeatOffsetMs: z.number().nullable(),
+  alignmentPeriodMs: z.number().nullable().optional(),
 });
 
 export const renderManifestV1Schema = z.object({

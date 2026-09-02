@@ -2,7 +2,12 @@ import { mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { createCatalogRuntime, writeSineWav } from "@dnb-crate/catalog";
+import {
+  buildClickTrackPcm,
+  createCatalogRuntime,
+  encodeMonoWav,
+  writeSineWav,
+} from "@dnb-crate/catalog";
 import type { AppConfig } from "@dnb-crate/domain";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { createMcpHandler } from "@modelcontextprotocol/server";
@@ -65,11 +70,14 @@ describe("MCP tool handlers", () => {
     const names = tools.tools.map((tool) => tool.name).sort();
     expect(names).toEqual(
       [
+        "cancel_render_job",
+        "compare_track_analyses",
+        "create_cue_preview",
         "create_set_plan",
         "create_transition_preview",
-        "cancel_render_job",
         "delete_set_plan",
         "find_compatible_tracks",
+        "get_analysis_report",
         "get_analysis_status",
         "get_library_stats",
         "get_planning_readiness",
@@ -79,6 +87,7 @@ describe("MCP tool handlers", () => {
         "get_set_plan",
         "get_track",
         "get_track_analysis",
+        "get_track_sections",
         "list_render_jobs",
         "list_set_plans",
         "plan_transition",
@@ -328,5 +337,60 @@ describe("MCP tool handlers", () => {
         (resource) => resource.uri === `dnbcrate://renders/${done.id}/manifest`,
       ),
     ).toBe(true);
+  });
+
+  it("returns get_analysis_report shape and create_cue_preview with fake ffmpeg", async () => {
+    const workspace = await tempWorkspace();
+    const runtime = createCatalogRuntime(workspace.config, undefined, { useFakeFfmpeg: true });
+    closers.push(() => runtime.close());
+
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(
+      path.join(workspace.library, "click.wav"),
+      encodeMonoWav(buildClickTrackPcm({ bpm: 174, durationMs: 12_000 })),
+    );
+    await runtime.service.scanLibrary();
+    const track = runtime.service.searchTracks({ query: "click", limit: 1 }).tracks[0]!;
+    runtime.service.updateTrackMetadata(track.id, { bpm: 174, bpmSource: "published" });
+    const started = runtime.service.startTrackAnalysis({ trackIds: [track.id] });
+    await runtime.service.waitForAnalysisJob(started.job.id, 60_000);
+
+    const handler = createMcpHandler(() => createDnbCrateMcpServer({ service: runtime.service }));
+    const transport = new StreamableHTTPClientTransport(new URL("http://test.local/mcp"), {
+      fetch: (url, init) => handler.fetch(new Request(url, init)),
+    });
+    const client = new Client(
+      { name: "analysis-harness", version: "0.5.0" },
+      { versionNegotiation: { mode: "auto" } },
+    );
+    await client.connect(transport);
+    closers.push(async () => {
+      await client.close();
+      await handler.close();
+    });
+
+    const report = await client.callTool({ name: "get_analysis_report", arguments: {} });
+    const reportPayload = report.structuredContent as {
+      ok: true;
+      data: {
+        inRange: { count: number; withinHalf: number };
+        outOfRange: { count: number };
+        engines: unknown[];
+        needsReview: unknown[];
+      };
+    };
+    expect(reportPayload.ok).toBe(true);
+    expect(reportPayload.data.inRange.count).toBeGreaterThanOrEqual(1);
+    expect(Array.isArray(reportPayload.data.engines)).toBe(true);
+    expect(Array.isArray(reportPayload.data.needsReview)).toBe(true);
+
+    const preview = await client.callTool({
+      name: "create_cue_preview",
+      arguments: { trackId: track.id, cue: "drop" },
+    });
+    expect(preview.structuredContent).toMatchObject({
+      ok: true,
+      data: { trackId: track.id, cue: "drop" },
+    });
   });
 });

@@ -3,11 +3,14 @@ import { migration001Init } from "./migrations/001_init.ts";
 import { migration002Planning } from "./migrations/002_planning.ts";
 import { migration003Renders } from "./migrations/003_renders.ts";
 import { migration004Analysis } from "./migrations/004_analysis.ts";
+import { migration005AnalysisV2 } from "./migrations/005_analysis_v2.ts";
+import { migration006PublishedProvenance } from "./migrations/006_published_provenance.ts";
 
 export type Migration = {
   id: number;
   name: string;
   up: (db: SqliteDatabase) => void;
+  foreignKeysOff?: boolean;
 };
 
 const MIGRATIONS: Migration[] = [
@@ -15,6 +18,8 @@ const MIGRATIONS: Migration[] = [
   migration002Planning,
   migration003Renders,
   migration004Analysis,
+  migration005AnalysisV2,
+  migration006PublishedProvenance,
 ];
 
 export function runMigrations(db: SqliteDatabase): void {
@@ -33,19 +38,24 @@ export function runMigrations(db: SqliteDatabase): void {
       .map((row) => Number((row as { id: number }).id)),
   );
 
-  const run = db.transaction(() => {
-    for (const migration of MIGRATIONS) {
-      if (applied.has(migration.id)) {
-        continue;
-      }
+  for (const migration of MIGRATIONS) {
+    if (applied.has(migration.id)) {
+      continue;
+    }
+    if (migration.foreignKeysOff === true) {
+      db.pragma("foreign_keys = OFF");
+    }
+    const run = db.transaction(() => {
       migration.up(db);
       db.prepare("INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)").run(
         migration.id,
         migration.name,
         new Date().toISOString(),
       );
+    });
+    run();
+    if (migration.foreignKeysOff === true) {
+      db.pragma("foreign_keys = ON");
     }
-  });
-
-  run();
+  }
 }

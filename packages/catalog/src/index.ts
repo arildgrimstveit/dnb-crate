@@ -107,3 +107,4 @@ export { isPathInsideRoot, isPathInsideAnyRoot, relativeToRoots } from "./paths.
 export { fingerprintFile } from "./fingerprint.ts";
 export { extractAudioMetadata } from "./metadata.ts";
 export { buildSineWav, writeSineWav, type WavFixtureOptions } from "./wav-fixture.ts";
+export { buildClickTrackPcm, encodeMonoWav } from "@dnb-crate/audio-analysis";

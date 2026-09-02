@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { loadConfig } from "../src/load-config.ts";
 import { DomainError } from "../src/errors.ts";
-import { normalizeKey } from "../src/keys.ts";
+import { keyAgreement, normalizeKey } from "../src/keys.ts";
 
 describe("normalizeKey", () => {
   it("normalizes canonical, enharmonic, and verbose names", () => {
@@ -28,6 +28,13 @@ describe("normalizeKey", () => {
     expect(normalizeKey("")).toBeNull();
     expect(normalizeKey("not a key")).toBeNull();
     expect(normalizeKey("13A")).toBeNull();
+  });
+
+  it("classifies exact and relative key agreement", () => {
+    expect(keyAgreement("F#m", "11A")).toBe("exact");
+    expect(keyAgreement("F#m", "A")).toBe("relative");
+    expect(keyAgreement("F#m", "C")).toBe("none");
+    expect(keyAgreement(null, "C")).toBeNull();
   });
 });
 

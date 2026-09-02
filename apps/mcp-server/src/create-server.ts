@@ -3,9 +3,14 @@ import {
   APP_NAME,
   APP_VERSION,
   analysisJobSchema,
+  analysisReportDataSchema,
   buildDnbSetPromptArgsSchema,
   cancelRenderJobDataSchema,
   cancelRenderJobInputSchema,
+  compareTrackAnalysesDataSchema,
+  compareTrackAnalysesInputSchema,
+  createCuePreviewDataSchema,
+  createCuePreviewInputSchema,
   createSetPlanDataSchema,
   createSetPlanInputSchema,
   createTransitionPreviewInputSchema,
@@ -20,6 +25,8 @@ import {
   getRenderStatusInputSchema,
   getSetPlanInputSchema,
   getTrackAnalysisInputSchema,
+  getTrackSectionsDataSchema,
+  getTrackSectionsInputSchema,
   getTrackDataSchema,
   getTrackInputSchema,
   libraryStatsDataSchema,
@@ -252,14 +259,88 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Get track analysis",
       description:
-        "Return stored beat grid, BPM, key, bands, loudness, suggested cues, and canonical vs analyzed provenance. Fails until start_track_analysis has completed for this track. Also available as dnbcrate://tracks/{trackId}/analysis.",
+        "Return grid summary, BPM, key with mode, sections, descriptors, and canonical provenance. Beat arrays are omitted (use the analysis resource). Fails until start_track_analysis has completed.",
       inputSchema: getTrackAnalysisInputSchema,
       outputSchema: toolResultSchema(trackAnalysisSchema),
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
+    ({ trackId, engine }) => {
+      try {
+        return toolSuccess(service.toToolAnalysis(service.getTrackAnalysis(trackId, engine)));
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "compare_track_analyses",
+    {
+      title: "Compare track analyses",
+      description: "Side-by-side BPM/key/sections from every stored engine for one track UUID.",
+      inputSchema: compareTrackAnalysesInputSchema,
+      outputSchema: toolResultSchema(compareTrackAnalysesDataSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    },
     ({ trackId }) => {
       try {
-        return toolSuccess(service.getTrackAnalysis(trackId));
+        return toolSuccess(service.compareTrackAnalyses(trackId));
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_track_sections",
+    {
+      title: "Get track sections",
+      description: "Return intro/build/drop/breakdown/bridge/outro sections for a track UUID.",
+      inputSchema: getTrackSectionsInputSchema,
+      outputSchema: toolResultSchema(getTrackSectionsDataSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    },
+    ({ trackId, engine }) => {
+      try {
+        return toolSuccess(service.getTrackSections(trackId, engine));
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_analysis_report",
+    {
+      title: "Get analysis report",
+      description:
+        "Library-wide engine agreement vs published/manual BPM. Splits in-range (160–190) references from out-of-range published values so a miss is not confused with a label outside DnB tempo. Use after analyzing a crate, or via CLI analysis:gate.",
+      inputSchema: emptyInputSchema,
+      outputSchema: toolResultSchema(analysisReportDataSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    },
+    () => {
+      try {
+        return toolSuccess(service.getAnalysisReport());
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "create_cue_preview",
+    {
+      title: "Create cue preview",
+      description:
+        "Render an 8-second WAV around a detected intro/drop/breakdown/outro cue for ear-checking.",
+      inputSchema: createCuePreviewInputSchema,
+      outputSchema: toolResultSchema(createCuePreviewDataSchema),
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    async (input) => {
+      try {
+        return toolSuccess(await service.createCuePreview(input));
       } catch (error) {
         return toolFailure(error);
       }
@@ -750,15 +831,15 @@ Brief:
 ${request}
 
 Workflow:
-1. Call get_planning_readiness if metadata may be incomplete. Optionally start_track_analysis for selected UUIDs (never the whole library) and poll get_analysis_status.
-2. Use search_tracks to resolve named tracks to UUIDs (never filesystem paths).
-3. Call create_set_plan with structured fields only: name, targetDurationMs, requestedArc, preferredMoods/Subgenres/Artists, startTrackId/endTrackId, artistRepeatSpacing, seed.
+1. Call get_planning_readiness if metadata may be incomplete. Optionally start_track_analysis for selected UUIDs with engines ["dnb-crate-dsp"] (never the whole library) and poll get_analysis_status. Inspect get_track_analysis / get_track_sections.
+2. Use search_tracks to resolve named tracks to UUIDs (never filesystem paths). Filter on energy, sub-bass, and brightness when the brief is sonic.
+3. Call create_set_plan with structured fields only: name, targetDurationMs, requestedArc, preferredMoods/Subgenres/Artists, startTrackId/endTrackId, artistRepeatSpacing, seed. The planner now chooses phrase_mix/bass_swap/crossfade from grids and sections, and tempo-matches aligned pairs (both playback rates set toward a shared target BPM within ±3%).
 4. Call validate_set_plan. If there are errors or important warnings, call update_set_plan with explicit entry edits.
-5. For beat-matched mixes: plan_transition on a pair, then update_set_plan.applyTransition with the accepted proposal. Use create_transition_preview with template phrase_mix or bass_swap to audition. Low-confidence grids must not be treated as facts unless the user sets allowLowConfidence.
-6. start_set_render. Poll get_render_status; read get_render_manifest when succeeded.
+5. For a pair you want to override: plan_transition, then update_set_plan.applyTransition. Use create_transition_preview or create_cue_preview to audition. Low-confidence grids must not be treated as facts unless the user sets allowLowConfidence.
+6. start_set_render. Poll get_render_status; read get_render_manifest when succeeded (includes downbeatOffsetMs).
 7. Summarize the tracklist with timeline times, why tracks were scored in, remaining warnings, and render job id.
 
-Do not invent BPM, key, energy, or cue points. Analysis is advisory. Manual BPM/key/cues override it. Playback-rate changes stay within ±3% unless allowExcessiveTempo.`,
+Do not invent BPM, key, energy, or cue points. Analysis is advisory. Provenance is manual > published > analyzed > tag. Playback-rate changes stay within ±3% unless allowExcessiveTempo.`,
           },
         },
       ],

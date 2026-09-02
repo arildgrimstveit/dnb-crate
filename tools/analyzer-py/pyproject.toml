@@ -1,0 +1,13 @@
+[project]
+name = "dnb-crate-analyzer-py"
+version = "0.1.0"
+description = "Optional Python analysis sidecar for dnb-crate (beat-this / allin1)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "numpy",
+  "soundfile",
+  "beat-this",
+]
+
+[project.optional-dependencies]
+allin1 = ["all-in-one-infer"]

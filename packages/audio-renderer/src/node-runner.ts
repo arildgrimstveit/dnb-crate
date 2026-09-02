@@ -43,11 +43,17 @@ export function createNodeProcessRunner(
         let stderr = "";
         let settled = false;
 
+        let timedOut = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+
         const finish = (result: RunResult) => {
           if (settled) {
             return;
           }
           settled = true;
+          if (timer) {
+            clearTimeout(timer);
+          }
           request.abortSignal?.removeEventListener("abort", onAbort);
           resolve(result);
         };
@@ -59,6 +65,14 @@ export function createNodeProcessRunner(
           }, 2000);
           killer.unref?.();
         };
+
+        if (request.timeoutMs && request.timeoutMs > 0) {
+          timer = setTimeout(() => {
+            timedOut = true;
+            onAbort();
+          }, request.timeoutMs);
+          timer.unref?.();
+        }
 
         if (request.abortSignal) {
           if (request.abortSignal.aborted) {
@@ -93,6 +107,7 @@ export function createNodeProcessRunner(
             signal,
             stdout,
             stderr,
+            timedOut,
           });
         });
       });

@@ -26,15 +26,22 @@ import type {
   TransitionProposal,
   TransitionValidation,
   ValidateSetPlanResult,
+  AnalysisEngineId,
 } from "@dnb-crate/domain";
 import {
   APP_NAME,
   APP_VERSION,
   COMPATIBLE_TRACKS_LIMIT_MAX,
+  DEFAULT_ANALYSIS_ENGINE,
   DomainError,
   RESOURCE_LIST_LIMIT,
   SCAN_WARNING_LIMIT,
   assertPlaybackRate,
+  DNB_BPM_MAX,
+  DNB_BPM_MIN,
+  keyAgreement,
+  normalizeDnbBpm,
+  resolveCanonicalBpm,
   scoreCandidate,
   toPublicTrack,
 } from "@dnb-crate/domain";
@@ -54,6 +61,8 @@ import type { RenderCoordinator } from "./render/coordinator.ts";
 import type { AnalysisCoordinator } from "./analysis/coordinator.ts";
 import type { AnalysisRepository } from "./analysis-repository.ts";
 import { planTransition, validateTransition } from "./planning/transition-planner.ts";
+import { analysisToTimeline } from "./planning/timeline.ts";
+import { probePythonEngine } from "./analysis/python-engine.ts";
 
 export type CatalogRuntime = {
   db: SqliteDatabase;
@@ -91,6 +100,7 @@ export class CatalogService {
       outputRootConfigured = this.config.outputRoot.length > 0;
     }
 
+    const python = await probePythonEngine(this.config);
     const detected = await this.renders.detect();
     const ffmpegReady = ffmpegMixReady(detected);
 
@@ -106,6 +116,8 @@ export class CatalogService {
       ffmpegVersion: detected?.ffmpegVersion ?? null,
       ffprobeVersion: detected?.ffprobeVersion ?? null,
       supportedExtensions: this.config.supportedExtensions,
+      pythonAnalyzerAvailable: python.available,
+      pythonAnalyzerEngines: python.engines,
     };
   }
 
@@ -246,7 +258,11 @@ export class CatalogService {
     return result;
   }
 
-  startTrackAnalysis(input: { trackIds?: string[]; planningReadyOnly?: boolean }): {
+  startTrackAnalysis(input: {
+    trackIds?: string[];
+    planningReadyOnly?: boolean;
+    engines?: AnalysisEngineId[];
+  }): {
     job: AnalysisJob;
   } {
     const ids = new Set<string>();
@@ -266,16 +282,19 @@ export class CatalogService {
         "No tracks to analyze. Pass trackIds or planningReadyOnly=true with a ready catalog.",
       );
     }
-    return this.analysis.start([...ids]);
+    return this.analysis.start(
+      [...ids],
+      input.engines ?? [this.config.analysis?.defaultEngine ?? DEFAULT_ANALYSIS_ENGINE],
+    );
   }
 
   getAnalysisStatus(analysisJobId?: string): { jobs: AnalysisJob[] } {
     return this.analysis.getStatus(analysisJobId);
   }
 
-  getTrackAnalysis(trackId: string): TrackAnalysisView {
+  getTrackAnalysis(trackId: string, engine?: string): TrackAnalysisView {
     const track = this.requireTrack(trackId);
-    const stored = this.analyses.findByTrackId(trackId);
+    const stored = this.analyses.findByTrackId(trackId, engine);
     const view = this.analyses.toView(track, stored);
     if (!view) {
       throw new DomainError(
@@ -285,6 +304,255 @@ export class CatalogService {
       );
     }
     return view;
+  }
+
+  toToolAnalysis(view: TrackAnalysisView): Omit<TrackAnalysisView, "beatTimesMs" | "downbeatTimesMs"> {
+    const { beatTimesMs: _b, downbeatTimesMs: _d, ...rest } = view;
+    return rest;
+  }
+
+  compareTrackAnalyses(trackId: string): {
+    trackId: string;
+    engines: Array<{
+      analyzerName: string;
+      analyzerVersion: string;
+      bpm: number | null;
+      bpmConfidence: number | null;
+      gridRejected: boolean;
+      musicalKey: string | null;
+      keyConfidence: number | null;
+      downbeatConfidence: number | null;
+      sectionCount: number;
+      engineRuntimeMs: number | null;
+      analyzedAt: string;
+      chromaVector: number[] | null;
+    }>;
+  } {
+    this.requireTrack(trackId);
+    const rows = this.analyses.listByTrackId(trackId);
+    return {
+      trackId,
+      engines: rows.map((row) => ({
+        analyzerName: row.analyzerName,
+        analyzerVersion: row.analyzerVersion,
+        bpm: row.bpm,
+        bpmConfidence: row.bpmConfidence,
+        gridRejected: row.gridRejected,
+        musicalKey: row.musicalKey,
+        keyConfidence: row.keyConfidence,
+        downbeatConfidence: row.downbeatConfidence,
+        sectionCount: row.sections.length,
+        engineRuntimeMs: row.engineRuntimeMs,
+        analyzedAt: row.analyzedAt,
+        chromaVector: row.descriptors?.chromaVector ?? null,
+      })),
+    };
+  }
+
+  getTrackSections(trackId: string, engine?: string): {
+    trackId: string;
+    analyzerName: string;
+    sections: TrackAnalysisView["sections"];
+  } {
+    const analysis = this.getTrackAnalysis(trackId, engine);
+    return {
+      trackId,
+      analyzerName: analysis.analyzerName,
+      sections: analysis.sections,
+    };
+  }
+
+  getAnalysisReport(): {
+    trackCount: number;
+    engineCounts: Record<string, number>;
+    inRange: { count: number; withinHalf: number };
+    outOfRange: { count: number };
+    publishedOrManualCompared: number;
+    dspWithinHalfBpm: number;
+    engines: Array<{
+      trackId: string;
+      title: string;
+      analyzerName: string;
+      bpm: number | null;
+      bpmConfidence: number | null;
+      gridRejected: boolean;
+      keyAgreement: "exact" | "relative" | "none" | null;
+      sectionCount: number;
+    }>;
+    needsReview: Array<{
+      trackId: string;
+      title: string;
+      reason: "out-of-range" | "disagreement";
+      canonicalBpm: number | null;
+      canonicalSource: string | null;
+      publishedFolded: number | null;
+      dspBpm: number | null;
+      engines: Record<string, number | null>;
+    }>;
+    disagreements: Array<{
+      trackId: string;
+      title: string;
+      canonicalBpm: number | null;
+      canonicalSource: string | null;
+      engines: Record<string, number | null>;
+    }>;
+  } {
+    const engineCounts: Record<string, number> = {};
+    const disagreements: Array<{
+      trackId: string;
+      title: string;
+      canonicalBpm: number | null;
+      canonicalSource: string | null;
+      engines: Record<string, number | null>;
+    }> = [];
+    const needsReview: Array<{
+      trackId: string;
+      title: string;
+      reason: "out-of-range" | "disagreement";
+      canonicalBpm: number | null;
+      canonicalSource: string | null;
+      publishedFolded: number | null;
+      dspBpm: number | null;
+      engines: Record<string, number | null>;
+    }> = [];
+    const engineRows: Array<{
+      trackId: string;
+      title: string;
+      analyzerName: string;
+      bpm: number | null;
+      bpmConfidence: number | null;
+      gridRejected: boolean;
+      keyAgreement: "exact" | "relative" | "none" | null;
+      sectionCount: number;
+    }> = [];
+    let inRangeCount = 0;
+    let withinHalf = 0;
+    let outOfRangeCount = 0;
+    for (const track of this.repository.listAll()) {
+      const rows = this.analyses.listByTrackId(track.id);
+      if (rows.length === 0) {
+        continue;
+      }
+      for (const row of rows) {
+        engineCounts[row.analyzerName] = (engineCounts[row.analyzerName] ?? 0) + 1;
+      }
+      const view = this.analyses.toView(track, this.analyses.findByTrackId(track.id));
+      if (!view) {
+        continue;
+      }
+      const engines: Record<string, number | null> = {};
+      for (const row of rows) {
+        engines[row.analyzerName] = row.bpm;
+        const refKey =
+          view.canonicalKeySource === "manual" || view.canonicalKeySource === "published"
+            ? view.canonicalKey
+            : null;
+        engineRows.push({
+          trackId: track.id,
+          title: track.title,
+          analyzerName: row.analyzerName,
+          bpm: row.bpm,
+          bpmConfidence: row.bpmConfidence,
+          gridRejected: row.gridRejected,
+          keyAgreement: keyAgreement(row.musicalKey, refKey),
+          sectionCount: row.sections.length,
+        });
+      }
+      const ref =
+        view.canonicalBpmSource === "manual" || view.canonicalBpmSource === "published"
+          ? view.canonicalBpm
+          : null;
+      if (ref == null) {
+        continue;
+      }
+      const dsp = engines["dnb-crate-dsp"];
+      const inRange = ref >= DNB_BPM_MIN - 1e-6 && ref <= DNB_BPM_MAX + 1e-6;
+      const folded = normalizeDnbBpm(ref)?.bpm ?? null;
+      if (!inRange) {
+        outOfRangeCount += 1;
+        needsReview.push({
+          trackId: track.id,
+          title: track.title,
+          reason: "out-of-range",
+          canonicalBpm: view.canonicalBpm,
+          canonicalSource: view.canonicalBpmSource,
+          publishedFolded: folded,
+          dspBpm: dsp ?? null,
+          engines,
+        });
+        continue;
+      }
+      inRangeCount += 1;
+      if (dsp != null && Math.abs(dsp - ref) <= 0.5) {
+        withinHalf += 1;
+      }
+      const values = Object.values(engines).filter((bpm): bpm is number => bpm != null);
+      const spread = values.length >= 2 && Math.max(...values) - Math.min(...values) > 1;
+      const off = dsp != null && Math.abs(dsp - ref) > 0.5;
+      if (spread || off) {
+        const row = {
+          trackId: track.id,
+          title: track.title,
+          canonicalBpm: view.canonicalBpm,
+          canonicalSource: view.canonicalBpmSource,
+          engines,
+        };
+        disagreements.push(row);
+        needsReview.push({
+          ...row,
+          reason: "disagreement",
+          publishedFolded: folded,
+          dspBpm: dsp ?? null,
+        });
+      }
+    }
+    return {
+      trackCount: this.repository.listAll().length,
+      engineCounts,
+      inRange: { count: inRangeCount, withinHalf },
+      outOfRange: { count: outOfRangeCount },
+      publishedOrManualCompared: inRangeCount + outOfRangeCount,
+      dspWithinHalfBpm: withinHalf,
+      engines: engineRows.slice(0, 200),
+      needsReview: needsReview.slice(0, 50),
+      disagreements: disagreements.slice(0, 50),
+    };
+  }
+
+  async createCuePreview(input: {
+    trackId: string;
+    cue?: "intro_start" | "drop" | "breakdown" | "outro_start";
+    windowMs?: number;
+  }): Promise<{ trackId: string; cue: "intro_start" | "drop" | "breakdown" | "outro_start"; positionMs: number; outputRelpath: string }> {
+    const track = this.requireTrack(input.trackId);
+    const analysis = this.getTrackAnalysis(track.id);
+    const cueType = input.cue ?? "drop";
+    const cue =
+      analysis.suggestedCues.find((item) => item.type === cueType) ??
+      analysis.sections.find((section) =>
+        cueType === "intro_start"
+          ? section.type === "intro"
+          : cueType === "outro_start"
+            ? section.type === "outro"
+            : section.type === cueType,
+      );
+    const positionMs =
+      cue && "positionMs" in cue
+        ? cue.positionMs
+        : cue && "startMs" in cue
+          ? cue.startMs
+          : Math.round(track.durationMs * 0.25);
+    const windowMs = input.windowMs ?? 8000;
+    const startMs = Math.max(0, positionMs - Math.round(windowMs / 4));
+    const endMs = Math.min(track.durationMs, startMs + windowMs);
+    const relPath = `previews/${track.id}-${cueType}.wav`;
+    const rendered = await this.renders.renderCuePreview({
+      filePath: track.filePath,
+      startMs,
+      endMs,
+      relPath,
+    });
+    return { trackId: track.id, cue: cueType, positionMs, outputRelpath: rendered.outputRelpath };
   }
 
   listAnalysisResources(limit = RESOURCE_LIST_LIMIT): TrackAnalysisView[] {
@@ -309,6 +577,7 @@ export class CatalogService {
     targetBpm?: number;
     allowExcessiveTempo?: boolean;
     allowLowConfidence?: boolean;
+    allowDropIn?: boolean;
   }): {
     outgoingTrackId: string;
     incomingTrackId: string;
@@ -382,13 +651,44 @@ export class CatalogService {
     preferredSubgenres?: string[];
     preferredTags?: string[];
     harmonicImportance?: number;
+    subBassMin?: number;
+    brightnessMin?: number;
+    energyMin?: number;
+    energyMax?: number;
   }): { sourceTrackId: string; candidates: CompatibleTrack[] } {
     const source = this.requireTrack(input.sourceTrackId);
     const limit = Math.min(input.limit ?? 10, COMPATIBLE_TRACKS_LIMIT_MAX);
     const scored = this.repository
       .listAll()
-      .filter((track) => track.id !== source.id && !track.fileMissing)
-      .map((track) => ({
+      .filter((track) => {
+        if (track.id === source.id || track.fileMissing) {
+          return false;
+        }
+        if (input.energyMin !== undefined) {
+          const energy = track.energy ?? this.analyses.findByTrackId(track.id)?.descriptors?.suggestedEnergy;
+          if (energy == null || energy < input.energyMin) {
+            return false;
+          }
+        }
+        if (input.energyMax !== undefined) {
+          const energy = track.energy ?? this.analyses.findByTrackId(track.id)?.descriptors?.suggestedEnergy;
+          if (energy == null || energy > input.energyMax) {
+            return false;
+          }
+        }
+        const desc = this.analyses.findByTrackId(track.id)?.descriptors;
+        if (input.subBassMin !== undefined && (desc?.subBassRatio ?? -1) < input.subBassMin) {
+          return false;
+        }
+        if (input.brightnessMin !== undefined && (desc?.brightness ?? -1) < input.brightnessMin) {
+          return false;
+        }
+        return true;
+      })
+      .map((track) => {
+        const candA = this.analyses.findByTrackId(track.id);
+        const srcA = this.analyses.findByTrackId(source.id);
+        return {
         track,
         score: scoreCandidate({
           source,
@@ -405,8 +705,21 @@ export class CatalogService {
           explorationWeight: 0,
           seed: 1,
           alreadyUsed: false,
+          suggestedEnergy: candA?.descriptors?.suggestedEnergy ?? null,
+          sourceSuggestedEnergy: srcA?.descriptors?.suggestedEnergy ?? null,
+          outgoingOutroMs:
+            srcA?.sections.find((s) => s.type === "outro")
+              ? (srcA.sections.find((s) => s.type === "outro")!.endMs -
+                srcA.sections.find((s) => s.type === "outro")!.startMs)
+              : null,
+          incomingIntroMs:
+            candA?.sections.find((s) => s.type === "intro")
+              ? (candA.sections.find((s) => s.type === "intro")!.endMs -
+                candA.sections.find((s) => s.type === "intro")!.startMs)
+              : null,
         }),
-      }))
+      };
+      })
       .sort((a, b) => b.score.total - a.score.total || a.track.id.localeCompare(b.track.id))
       .slice(0, limit);
     return {
@@ -429,7 +742,17 @@ export class CatalogService {
 
   createSetPlan(input: CreateSetPlanInput): CreateSetPlanResult {
     try {
-      const drafted = draftSetPlan(this.repository.listAll(), input);
+      const analyses = new Map(
+        this.repository
+          .listAll()
+          .map((track) => {
+            const row = this.analyses.findByTrackId(track.id);
+            const canon = resolveCanonicalBpm(track, row);
+            return [track.id, analysisToTimeline(row, canon.bpm)] as const;
+          })
+          .filter((entry): entry is readonly [string, NonNullable<ReturnType<typeof analysisToTimeline>>] => entry[1] != null),
+      );
+      const drafted = draftSetPlan(this.repository.listAll(), input, analyses);
       const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
       const validation = validateSetPlan(drafted.plan, tracksById, {
         artistRepeatSpacing: input.artistRepeatSpacing,
@@ -660,7 +983,11 @@ export class CatalogService {
       return track;
     });
     const rebuilt = buildEntries(
-      orderedTracks,
+      orderedTracks.map((track) => {
+        const row = this.analyses.findByTrackId(track.id);
+        const canon = resolveCanonicalBpm(track, row);
+        return { ...track, analysis: analysisToTimeline(row, canon.bpm) };
+      }),
       undefined,
       new Map(entries.map((entry) => [entry.trackId, entry])),
     );

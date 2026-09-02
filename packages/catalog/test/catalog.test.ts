@@ -220,4 +220,16 @@ describe("catalog repository and scanner", () => {
     expect(() => runtime.service.updateTrackMetadata(id, { energy: 11 })).toThrow(DomainError);
     expect(() => runtime.service.updateTrackMetadata(id, { rating: 0 })).toThrow(DomainError);
   });
+
+  it("stores published BPM provenance", async () => {
+    const { library, config } = await makeWorkspace();
+    const runtime = createCatalogRuntime(config);
+    cleanups.push(() => runtime.close());
+    await writeSineWav(path.join(library, "store.wav"), { title: "Store", durationMs: 200 });
+    await runtime.service.scanLibrary();
+    const id = runtime.service.searchTracks({ query: "Store" }).tracks[0]!.id;
+    const updated = runtime.service.updateTrackMetadata(id, { bpm: 174, bpmSource: "published" });
+    expect(updated.bpm).toBe(174);
+    expect(updated.bpmSource).toBe("published");
+  });
 });

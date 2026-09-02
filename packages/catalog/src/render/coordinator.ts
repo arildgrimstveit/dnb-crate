@@ -37,6 +37,7 @@ import {
   requireAlignedFfmpeg,
   requireFfmpeg,
   renderMix,
+  downbeatAlignmentOffsetMs,
   sha256File,
   sha256Json,
   type FfmpegBinaries,
@@ -66,6 +67,11 @@ export type PreparedSegment = MixSegment & {
   requestedTransitionType: TransitionType | null;
   analysisVersion: string | null;
   bpmConfidence: number | null;
+  downbeatTimesMs: number[];
+  analysisBpm: number | null;
+  targetBpm: number | null;
+  downbeatOffsetMs: number | null;
+  alignmentPeriodMs: number | null;
 };
 
 type RenderSettings = {
@@ -151,6 +157,37 @@ export class RenderCoordinator {
     return this.binaries;
   }
 
+  async renderCuePreview(input: {
+    filePath: string;
+    startMs: number;
+    endMs: number;
+    relPath: string;
+  }): Promise<{ outputRelpath: string }> {
+    const binaries = requireFfmpeg(await this.detect());
+    await mkdir(this.config.outputRoot, { recursive: true });
+    const absOut = path.resolve(this.config.outputRoot, input.relPath);
+    await mkdir(path.dirname(absOut), { recursive: true });
+    await renderMix(this.runner, binaries, {
+      segments: [
+        {
+          filePath: input.filePath,
+          sourceStartMs: input.startMs,
+          sourceEndMs: input.endMs,
+          gainDb: 0,
+          playbackRate: 1,
+        },
+      ],
+      overlapMs: [],
+      outputPath: absOut,
+      sampleRateHz: this.settings.sampleRateHz,
+      truePeakCeilingDb: this.settings.truePeakCeilingDb,
+      loudnessTargetLufs: this.settings.loudnessTargetLufs,
+      edgeFadeMs: 20,
+      postProcess: false,
+    });
+    return { outputRelpath: input.relPath.split(path.sep).join("/") };
+  }
+
   async validatePlan(
     setPlanId: string,
     options: { allowLowConfidence?: boolean; allowExcessiveTempo?: boolean } = {},
@@ -180,8 +217,7 @@ export class RenderCoordinator {
         { details: { errors: validation.errors } },
       );
     }
-    const binaries = await this.detect();
-    requireFfmpeg(binaries);
+    const binaries = requireFfmpeg(await this.detect());
     if (planHasAlignedTransition(stored.plan)) {
       requireAlignedFfmpeg(binaries);
     }
@@ -231,8 +267,7 @@ export class RenderCoordinator {
     const validation = await this.validatePlan(input.setPlanId, {
       allowLowConfidence: input.allowLowConfidence,
     });
-    const binaries = await this.detect();
-    requireFfmpeg(binaries);
+    const binaries = requireFfmpeg(await this.detect());
     const effectiveType = input.template ?? pair.outgoing.transitionToNext?.type ?? "crossfade";
     if (effectiveType === "phrase_mix" || effectiveType === "bass_swap") {
       requireAlignedFfmpeg(binaries);
@@ -492,6 +527,44 @@ export class RenderCoordinator {
       );
       if (mixTypes.some((item) => item.type !== "crossfade")) {
         requireAlignedFfmpeg(binaries);
+      }
+
+      for (let i = 0; i < overlaps.length; i += 1) {
+        const outgoing = segments[i];
+        const incoming = segments[i + 1];
+        const overlap = overlaps[i] ?? 0;
+        if (!outgoing || !incoming || overlap <= 0) {
+          continue;
+        }
+        if (mixTypes[i]?.type === "crossfade") {
+          continue;
+        }
+        const outOverlapStart =
+          outgoing.sourceEndMs - overlap * (outgoing.playbackRate > 0 ? outgoing.playbackRate : 1);
+        const offset = downbeatAlignmentOffsetMs({
+          outgoingDownbeatsMs: outgoing.downbeatTimesMs,
+          incomingDownbeatsMs: incoming.downbeatTimesMs,
+          outgoingOverlapStartMs: outOverlapStart,
+          incomingOverlapStartMs: incoming.sourceStartMs,
+          bpm: outgoing.analysisBpm ?? incoming.analysisBpm,
+          outgoingRate: outgoing.playbackRate,
+          incomingRate: incoming.playbackRate,
+          targetBpm:
+            typeof outgoing.targetBpm === "number"
+              ? outgoing.targetBpm
+              : (outgoing.analysisBpm ?? incoming.analysisBpm),
+        });
+        incoming.downbeatOffsetMs = offset;
+        incoming.alignmentPeriodMs =
+          (typeof outgoing.targetBpm === "number" && outgoing.targetBpm > 0
+            ? 60_000 / outgoing.targetBpm
+            : outgoing.analysisBpm && outgoing.analysisBpm > 0
+              ? 60_000 / outgoing.analysisBpm
+              : null);
+        const nextStart = incoming.sourceStartMs + offset;
+        if (nextStart >= 0 && nextStart < incoming.sourceEndMs - 1000) {
+          incoming.sourceStartMs = nextStart;
+        }
       }
 
       await mkdir(this.config.outputRoot, { recursive: true });
@@ -756,6 +829,14 @@ export class RenderCoordinator {
       requestedTransitionType: entry.transitionToNext?.type ?? null,
       analysisVersion: analysis?.analyzerVersion ?? null,
       bpmConfidence: analysis?.bpmConfidence ?? null,
+      downbeatTimesMs: analysis?.downbeatTimesMs ?? [],
+      analysisBpm: analysis?.bpm ?? null,
+      targetBpm:
+        typeof entry.transitionToNext?.parameters.targetBpm === "number"
+          ? entry.transitionToNext.parameters.targetBpm
+          : null,
+      downbeatOffsetMs: 0,
+      alignmentPeriodMs: null,
     };
   }
 
@@ -889,6 +970,8 @@ function toManifestTrack(segment: PreparedSegment, mix?: MixTransitionSpec): Ren
     requestedTransitionType: segment.requestedTransitionType,
     analysisVersion: segment.analysisVersion,
     bpmConfidence: segment.bpmConfidence,
+    downbeatOffsetMs: segment.downbeatOffsetMs,
+    alignmentPeriodMs: segment.alignmentPeriodMs,
   };
 }
 

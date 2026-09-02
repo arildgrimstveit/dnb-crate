@@ -1,6 +1,7 @@
-export type BpmSource = "tag" | "manual" | "analyzed";
-export type KeySource = "tag" | "manual" | "analyzed";
+export type BpmSource = "tag" | "manual" | "analyzed" | "published";
+export type KeySource = "tag" | "manual" | "analyzed" | "published";
 export type AnalysisStatus = "not_analyzed" | "pending" | "complete" | "failed";
+export type AnalysisEngineId = "dnb-crate-dsp" | "dnb-crate-envelope" | "beat-this" | "allin1";
 
 export type Track = {
   id: string;
@@ -55,7 +56,12 @@ export type TrackMetadataPatch = {
   tags?: string[];
   notes?: string | null;
   bpm?: number | null;
+  /** When setting bpm, defaults to "manual". Pass "published" for store/label lookups. */
+  bpmSource?: "manual" | "published";
   musicalKey?: string | null;
+  /** When setting musicalKey, defaults to "manual". */
+  keySource?: "manual" | "published";
+  metadataSourceNote?: string | null;
 };
 
 export function toPublicTrack(track: Track): PublicTrack {

@@ -2,6 +2,7 @@ export type RunRequest = {
   executable: string;
   args: string[];
   abortSignal?: AbortSignal;
+  timeoutMs?: number;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
 };
@@ -11,6 +12,7 @@ export type RunResult = {
   signal: string | null;
   stdout: string;
   stderr: string;
+  timedOut?: boolean;
 };
 
 export type ProcessRunner = {

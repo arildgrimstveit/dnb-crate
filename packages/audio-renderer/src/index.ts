@@ -33,4 +33,9 @@ export { parseEbur128, parseFfprobeJson, parseOutTimeMs, parseSilenceSpans } fro
 export { probeAudioFile } from "./probe.ts";
 export type { ProbeResult } from "./parse.ts";
 export { renderMix, type MixRequest, type MixResult, type MixSegment } from "./mix.ts";
+export {
+  downbeatAlignmentOffsetMs,
+  nearestTime,
+  wrapDelta,
+} from "./downbeat-align.ts";
 export { sha256File, sha256Json, sha256Text } from "./hash.ts";

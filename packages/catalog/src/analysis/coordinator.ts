@@ -1,9 +1,11 @@
-import { attachBarIndices, envelopeAnalyzer } from "@dnb-crate/audio-analysis";
+import { attachBarIndices, dspAnalyzer, type AnalyzerResult } from "@dnb-crate/audio-analysis";
 import {
+  DEFAULT_ANALYSIS_ENGINE,
   DomainError,
   isDomainError,
   reconstructGrid,
   resolveCanonicalBpm,
+  type AnalysisEngineId,
   type AnalysisJob,
   type AppConfig,
   type Logger,
@@ -17,8 +19,10 @@ import {
 } from "@dnb-crate/audio-renderer";
 
 import type { AnalysisJobRepository } from "../analysis-job-repository.ts";
-import type { AnalysisRepository } from "../analysis-repository.ts";
+import type { AnalysisRepository, StoredTrackAnalysis } from "../analysis-repository.ts";
 import { loadPcmForAnalysis } from "./load-pcm.ts";
+import { mergeAnalyzerResults } from "./merger.ts";
+import { runPythonAnalyzer } from "./python-engine.ts";
 import type { TrackRepository } from "../repository.ts";
 
 export class AnalysisCoordinator {
@@ -47,7 +51,10 @@ export class AnalysisCoordinator {
     this.pump();
   }
 
-  start(trackIds: string[]): { job: AnalysisJob } {
+  start(
+    trackIds: string[],
+    engines: AnalysisEngineId[] = [DEFAULT_ANALYSIS_ENGINE],
+  ): { job: AnalysisJob } {
     if (trackIds.length === 0) {
       throw new DomainError("ANALYSIS_FAILED", "No tracks to analyze");
     }
@@ -58,7 +65,8 @@ export class AnalysisCoordinator {
       }
       this.tracks.setAnalysisStatus(id, "pending");
     }
-    const job = this.jobs.insertQueued(trackIds);
+    const resolved = engines.length > 0 ? engines : [DEFAULT_ANALYSIS_ENGINE];
+    const job = this.jobs.insertQueued(trackIds, resolved);
     this.kick();
     return { job };
   }
@@ -152,7 +160,7 @@ export class AnalysisCoordinator {
         }
         const trackId = job.trackIds[i]!;
         try {
-          await this.analyzeTrack(trackId, binaries);
+          await this.analyzeTrack(trackId, binaries, job.engines);
           completed.push(trackId);
         } catch (error) {
           failed.push(trackId);
@@ -179,7 +187,11 @@ export class AnalysisCoordinator {
     }
   }
 
-  private async analyzeTrack(trackId: string, binaries: FfmpegBinaries | null): Promise<void> {
+  private async analyzeTrack(
+    trackId: string,
+    binaries: FfmpegBinaries | null,
+    engines: AnalysisEngineId[],
+  ): Promise<void> {
     const track = this.tracks.findById(trackId);
     if (!track) {
       throw new DomainError("TRACK_NOT_FOUND", `No track with id ${trackId}`);
@@ -189,18 +201,10 @@ export class AnalysisCoordinator {
     }
     const pcm = await loadPcmForAnalysis(track.filePath, this.runner, binaries);
     const anchor = this.analyses.getBeatAnchorMs(trackId);
-    const result = envelopeAnalyzer.analyze(pcm, {
+    const dsp = dspAnalyzer.analyze(pcm, {
       durationMs: track.durationMs,
       beatAnchorMs: anchor,
     });
-    const cues = attachBarIndices(result.suggestedCues, result.beatTimesMs);
-    const suggestedCues: SuggestedCue[] = cues.map((cue) => ({
-      type: cue.type,
-      positionMs: cue.positionMs,
-      beatIndex: cue.beatIndex,
-      barIndex: cue.barIndex,
-      confidence: cue.confidence,
-    }));
     let integratedLufs: number | null = null;
     let truePeakDb: number | null = null;
     if (binaries) {
@@ -222,7 +226,57 @@ export class AnalysisCoordinator {
       integratedLufs = parsed.integratedLufs;
       truePeakDb = parsed.truePeakDb;
     }
-    this.analyses.upsert({
+    const requested = engines.length > 0 ? engines : [DEFAULT_ANALYSIS_ENGINE];
+    this.storeResult(trackId, dsp, anchor, integratedLufs, truePeakDb);
+    for (const engine of requested) {
+      if (engine === "dnb-crate-dsp" || engine === "dnb-crate-envelope") {
+        continue;
+      }
+      const python = await runPythonAnalyzer(
+        this.runner,
+        this.config,
+        engine === "allin1" ? "allin1" : "beat-this",
+        track.filePath,
+      );
+      this.storeResult(trackId, mergeAnalyzerResults(python, dsp), anchor, integratedLufs, truePeakDb);
+    }
+    const preferred = this.analyses.findByTrackId(trackId) ?? this.analyses.findByTrackId(trackId, dsp.analyzerName);
+    if (preferred && !preferred.gridRejected && preferred.bpm !== null) {
+      this.tracks.applyAnalyzedMetadata(trackId, {
+        bpm: preferred.bpm,
+        musicalKey: preferred.musicalKey,
+      });
+    } else {
+      this.tracks.setAnalysisStatus(trackId, "complete");
+    }
+    if (preferred) {
+      this.tracks.insertAnalyzedCuesIfAbsent(trackId, preferred.suggestedCues);
+    }
+  }
+
+  private storeResult(
+    trackId: string,
+    result: AnalyzerResult,
+    anchor: number | null,
+    integratedLufs: number | null,
+    truePeakDb: number | null,
+  ): StoredTrackAnalysis {
+    const cues = attachBarIndices(result.suggestedCues, result.beatTimesMs);
+    const suggestedCues: SuggestedCue[] = cues.map((cue) => ({
+      type: cue.type,
+      positionMs: cue.positionMs,
+      beatIndex: cue.beatIndex,
+      barIndex: cue.barIndex,
+      confidence: cue.confidence,
+    }));
+    const descriptors = result.descriptors
+      ? {
+          ...result.descriptors,
+          integratedLufs: integratedLufs ?? result.descriptors.integratedLufs,
+          truePeakDb: truePeakDb ?? result.descriptors.truePeakDb,
+        }
+      : null;
+    return this.analyses.upsert({
       trackId,
       analyzerName: result.analyzerName,
       analyzerVersion: result.analyzerVersion,
@@ -235,6 +289,10 @@ export class AnalysisCoordinator {
       gridRejectionReason: result.gridRejectionReason,
       musicalKey: result.musicalKey,
       keyConfidence: result.keyConfidence,
+      keyMode: result.keyMode,
+      camelotKey: result.camelotKey,
+      tempoStability: result.tempoStability,
+      downbeatConfidence: result.downbeatConfidence,
       integratedLufs,
       truePeakDb,
       lowBandEnergy: result.lowBandEnergy,
@@ -242,17 +300,11 @@ export class AnalysisCoordinator {
       highBandEnergy: result.highBandEnergy,
       waveformSummary: result.waveformSummary,
       beatAnchorMs: anchor,
+      descriptors,
+      engineRuntimeMs: result.engineRuntimeMs,
       analyzedAt: new Date().toISOString(),
       suggestedCues,
+      sections: result.sections,
     });
-    if (!result.gridRejected && result.bpm !== null) {
-      this.tracks.applyAnalyzedMetadata(trackId, {
-        bpm: result.bpm,
-        musicalKey: result.musicalKey,
-      });
-    } else {
-      this.tracks.setAnalysisStatus(trackId, "complete");
-    }
-    this.tracks.insertAnalyzedCuesIfAbsent(trackId, suggestedCues);
   }
 }

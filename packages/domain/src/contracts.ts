@@ -23,6 +23,10 @@ export const searchTracksInputSchema = z.object({
   camelotKey: z.string().max(8).optional(),
   energyMin: z.number().int().min(1).max(10).optional(),
   energyMax: z.number().int().min(1).max(10).optional(),
+  subBassMin: z.number().min(0).max(1).optional().describe("Minimum analyzed sub-bass ratio"),
+  subBassMax: z.number().min(0).max(1).optional(),
+  brightnessMin: z.number().min(0).max(1).optional().describe("Minimum spectral brightness 0–1"),
+  brightnessMax: z.number().min(0).max(1).optional(),
   minRating: z.number().int().min(1).max(5).optional(),
   subgenres: stringListSchema.optional(),
   subgenresMatch: z.enum(["any", "all"]).optional().describe("Default any"),
@@ -73,10 +77,10 @@ export const publicTrackSchema = z.object({
   sampleRateHz: z.number().int().nullable(),
   channels: z.number().int().nullable(),
   bpm: z.number().nullable(),
-  bpmSource: z.enum(["tag", "manual", "analyzed"]).nullable(),
+  bpmSource: z.enum(["tag", "manual", "analyzed", "published"]).nullable(),
   musicalKey: z.string().nullable(),
   camelotKey: z.string().nullable(),
-  keySource: z.enum(["tag", "manual", "analyzed"]).nullable(),
+  keySource: z.enum(["tag", "manual", "analyzed", "published"]).nullable(),
   energy: z.number().int().nullable(),
   rating: z.number().int().nullable(),
   subgenres: z.array(z.string()),
@@ -116,13 +120,24 @@ export const updateTrackMetadataInputSchema = z
       .max(400)
       .nullable()
       .optional()
-      .describe("Manual BPM; sets bpmSource to manual"),
+      .describe("BPM override; defaults bpmSource to manual unless bpmSource is set"),
+    bpmSource: z
+      .enum(["manual", "published"])
+      .optional()
+      .describe("Provenance for bpm; published = store/label lookup"),
     musicalKey: z
       .string()
       .max(16)
       .nullable()
       .optional()
-      .describe("Manual key or Camelot code; sets keySource to manual"),
+      .describe("Key or Camelot code; defaults keySource to manual unless keySource is set"),
+    keySource: z.enum(["manual", "published"]).optional(),
+    metadataSourceNote: z
+      .string()
+      .max(500)
+      .nullable()
+      .optional()
+      .describe("Optional note about where published/manual values came from"),
   })
   .refine(
     (value) =>
@@ -133,7 +148,8 @@ export const updateTrackMetadataInputSchema = z
       value.tags !== undefined ||
       value.notes !== undefined ||
       value.bpm !== undefined ||
-      value.musicalKey !== undefined,
+      value.musicalKey !== undefined ||
+      value.metadataSourceNote !== undefined,
     { message: "Provide at least one metadata field to update" },
   );
 
@@ -184,6 +200,8 @@ export const serverStatusDataSchema = z.object({
   ffmpegVersion: z.string().nullable(),
   ffprobeVersion: z.string().nullable(),
   supportedExtensions: z.array(z.string()),
+  pythonAnalyzerAvailable: z.boolean(),
+  pythonAnalyzerEngines: z.array(z.string()),
 });
 
 export const toolErrorSchema = z.object({
@@ -277,6 +295,10 @@ export const findCompatibleTracksInputSchema = z.object({
   preferredSubgenres: stringListSchema.optional(),
   preferredTags: stringListSchema.optional(),
   harmonicImportance: z.number().min(0).max(1).optional(),
+  subBassMin: z.number().min(0).max(1).optional(),
+  brightnessMin: z.number().min(0).max(1).optional(),
+  energyMin: z.number().int().min(1).max(10).optional(),
+  energyMax: z.number().int().min(1).max(10).optional(),
 });
 
 const scoreBreakdownSchema = z.object({
@@ -293,6 +315,7 @@ const scoreBreakdownSchema = z.object({
     repeatedArtist: z.number(),
     recentlyUsed: z.number(),
     missingMetadata: z.number(),
+    structure: z.number(),
   }),
   reasons: z.array(z.string()),
 });

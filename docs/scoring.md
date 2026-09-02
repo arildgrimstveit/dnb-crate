@@ -27,6 +27,7 @@ Identical catalog + constraints + seed → identical plan.
 - Minimum playable window: **90 seconds** when the source is long enough
 - Duration tolerance: **90 seconds** vs `targetDurationMs` (default one hour)
 - Trims default to the full file; cue points are never invented
+- Aligned `phrase_mix` / `bass_swap` pairs are tempo-matched: both playback rates move toward a shared target BPM within ±3%. Manual `setPlaybackRate` survives a rebuild.
 
 ## Energy arc default
 

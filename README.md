@@ -1,6 +1,6 @@
 # DnB Crate MCP
 
-Local-first catalog for a private drum & bass library. An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server; the same domain services are also available from a CLI. Stage 1 indexes local audio metadata. Stage 2 builds a deterministic ordered set plan. Stage 3–4 render a gapless WAV with equal-power crossfades plus optional beat-aligned phrase mixes and bass swaps.
+Local-first catalog for a private drum & bass library. An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server; the same domain services are also available from a CLI. The app indexes a local crate, analyzes tracks (BPM, grid, key, sections, descriptors), plans a deterministic one-hour set, and renders a gapless WAV with equal-power crossfades plus beat-aligned phrase mixes and bass swaps.
 
 The language model interprets requests. This application owns scanning, storage, search, and validation.
 
@@ -32,6 +32,9 @@ pnpm cli library:stats
 pnpm cli track:search --query "Technimatic" --limit 10
 pnpm cli analysis:start --track-id UUID --wait
 pnpm cli analysis:get --track-id UUID
+pnpm cli analysis:compare --track-id UUID
+pnpm cli analysis:report
+pnpm cli analysis:cue-preview --track-id UUID --cue drop
 pnpm cli transition:plan --from UUID --to UUID --bars 32
 pnpm cli plan:create --name "Liquid hour" --duration-ms 3600000 --seed 1 --end-query "Nightfall"
 pnpm cli plan:list

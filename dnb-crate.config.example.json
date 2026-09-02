@@ -6,5 +6,13 @@
   "supportedExtensions": [".wav", ".flac", ".mp3", ".m4a", ".aiff", ".aif"],
   "loudnessTargetLufs": -14,
   "truePeakCeilingDb": -1,
-  "renderWorkerLimit": 1
+  "renderWorkerLimit": 1,
+  "analysis": {
+    "defaultEngine": "dnb-crate-dsp",
+    "engines": {
+      "python": {
+        "enabled": false
+      }
+    }
+  }
 }

@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createCatalogRuntime } from "../src/index.ts";
 import type { AppConfig } from "@dnb-crate/domain";
+import { analysisToTimeline, buildEntries, chooseTransition, type TimelineTrack } from "../src/planning/timeline.ts";
+import { planTransition } from "../src/planning/transition-planner.ts";
 
 function testConfig(root: string): AppConfig {
   return {
@@ -248,3 +250,271 @@ describe("set planning", () => {
     expect(ranked.candidates[0]?.track.id).toBe(near);
   });
 });
+
+describe("planner tempo matching", () => {
+  function gridTrack(
+    bpm: number,
+    energy = 5,
+  ): TimelineTrack {
+    return {
+      id: crypto.randomUUID(),
+      durationMs: 180_000,
+      energy,
+      bpm,
+      analysis: {
+        gridOk: true,
+        bpm,
+        canonicalBpm: bpm,
+        suggestedEnergy: energy,
+        introStartMs: 0,
+        outroStartMs: 140_000,
+        outroEndMs: 180_000,
+        introLenMs: 30_000,
+        outroLenMs: 40_000,
+      },
+    };
+  }
+
+  it("tempo-matches 174/176 onto 175", () => {
+    const a = gridTrack(174, 4);
+    const b = gridTrack(176, 9);
+    const chosen = chooseTransition(a, b);
+    expect(["bass_swap", "phrase_mix"]).toContain(chosen.transition.type);
+    expect(chosen.targetBpm).toBe(175);
+    expect(chosen.transition.parameters.targetBpm).toBe(175);
+    expect(chosen.incomingRate).toBeCloseTo(175 / 176, 5);
+    expect(chosen.outgoingRate).toBeCloseTo(175 / 174, 5);
+    expect(Math.abs(chosen.incomingRate - 1)).toBeLessThanOrEqual(0.03);
+    expect(Math.abs(chosen.outgoingRate - 1)).toBeLessThanOrEqual(0.03);
+    const entries = buildEntries([a, b]);
+    expect(entries[0]?.playbackRate).toBeCloseTo(175 / 174, 5);
+    expect(entries[1]?.playbackRate).toBeCloseTo(175 / 176, 5);
+  });
+
+  it("falls back to crossfade when 174/182 cannot lock within 3%", () => {
+    const chosen = chooseTransition(gridTrack(174), gridTrack(182));
+    expect(chosen.transition.type).toBe("crossfade");
+    expect(chosen.outgoingRate).toBe(1);
+    expect(chosen.incomingRate).toBe(1);
+    expect(chosen.transition.parameters.reason).toBe("tempo-out-of-range");
+  });
+
+  it("keeps a 174/175/176 chain monotone and within 3%", () => {
+    const entries = buildEntries([gridTrack(174), gridTrack(175), gridTrack(176)]);
+    const rates = entries.map((entry) => entry.playbackRate);
+    expect(rates[0]!).toBeGreaterThanOrEqual(rates[1]!);
+    expect(rates[1]!).toBeGreaterThanOrEqual(rates[2]!);
+    const canons = [174, 175, 176];
+    for (let i = 0; i < rates.length; i += 1) {
+      expect(Math.abs(rates[i]! - 1)).toBeLessThanOrEqual(0.03);
+      const effective = canons[i]! * rates[i]!;
+      expect(Math.abs(effective / canons[i]! - 1)).toBeLessThanOrEqual(0.03);
+    }
+  });
+
+  it("preserves a manual playbackRate on re-plan", () => {
+    const a = gridTrack(174);
+    const b = gridTrack(176);
+    const first = buildEntries([a, b]);
+    expect(first[0]?.playbackRate).not.toBe(1);
+    const prior = new Map([
+      [a.id, { ...first[0]!, playbackRate: 1.01 }],
+      [b.id, first[1]!],
+    ]);
+    const again = buildEntries([a, b], undefined, prior);
+    expect(again[0]?.playbackRate).toBe(1.01);
+  });
+
+  it("copies canonicalBpm into the timeline view", () => {
+    const timeline = analysisToTimeline(
+      {
+        gridRejected: false,
+        bpm: 174.2,
+        bpmConfidence: 0.8,
+        descriptors: { suggestedEnergy: 7 },
+        sections: [
+          { type: "intro", startMs: 0, endMs: 20_000 },
+          { type: "outro", startMs: 140_000, endMs: 180_000 },
+        ],
+      },
+      174,
+    );
+    expect(timeline?.canonicalBpm).toBe(174);
+    expect(timeline?.introLenMs).toBe(20_000);
+    expect(timeline?.outroLenMs).toBe(40_000);
+    expect(timeline?.gridOk).toBe(true);
+  });
+});
+
+describe("analyzed cue provenance", () => {
+  it("treats analyzer cues as reasons, not blockers, and never mixes out before the drop", () => {
+    const outgoing = {
+      track: {
+        id: "out",
+        filePath: "out.wav",
+        fileFingerprint: "out",
+        artist: "A",
+        title: "Out",
+        album: null,
+        durationMs: 180_000,
+        sampleRateHz: 44100,
+        channels: 2,
+        bpm: 174,
+        bpmSource: "manual" as const,
+        musicalKey: "Fm",
+        camelotKey: "4A",
+        keySource: "manual" as const,
+        energy: 5,
+        rating: 4,
+        subgenres: [],
+        moods: [],
+        tags: [],
+        notes: null,
+        analysisStatus: "complete" as const,
+        fileMissing: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      analysis: {
+        trackId: "out",
+        analyzerName: "dnb-crate-dsp",
+        analyzerVersion: "2.1.0",
+        bpm: 174,
+        bpmConfidence: 0.8,
+        bpmRaw: 174,
+        beatTimesMs: [0, 345, 689],
+        downbeatTimesMs: [0, 1379],
+        gridRejected: false,
+        gridRejectionReason: null,
+        musicalKey: "Fm",
+        keyConfidence: 0.7,
+        keyMode: "minor" as const,
+        camelotKey: "4A",
+        tempoStability: 0.8,
+        downbeatConfidence: 0.7,
+        integratedLufs: null,
+        truePeakDb: null,
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        waveformSummary: null,
+        beatAnchorMs: null,
+        descriptors: null,
+        engineRuntimeMs: 1,
+        analyzedAt: new Date().toISOString(),
+        suggestedCues: [],
+        sections: [
+          { type: "intro" as const, startMs: 0, endMs: 20_000, startBar: 0, endBar: 8, confidence: 0.6, sectionEnergy: 0.4 },
+          { type: "drop" as const, startMs: 20_000, endMs: 80_000, startBar: 8, endBar: 32, confidence: 0.8, sectionEnergy: 0.9 },
+          { type: "outro" as const, startMs: 140_000, endMs: 180_000, startBar: 56, endBar: 72, confidence: 0.62, sectionEnergy: 0.3 },
+        ],
+      },
+      cues: [
+        {
+          id: "c1",
+          trackId: "out",
+          type: "outro_start" as const,
+          positionMs: 140_000,
+          beatIndex: null,
+          barIndex: 56,
+          confidence: 0.62,
+          source: "analyzed" as const,
+          label: null,
+        },
+      ],
+    };
+    const incoming = {
+      ...outgoing,
+      track: { ...outgoing.track, id: "in", title: "In", fileFingerprint: "in" },
+      analysis: {
+        ...outgoing.analysis,
+        trackId: "in",
+        sections: [
+          { type: "intro" as const, startMs: 0, endMs: 16_000, startBar: 0, endBar: 8, confidence: 0.55, sectionEnergy: 0.3 },
+          { type: "drop" as const, startMs: 16_000, endMs: 80_000, startBar: 8, endBar: 32, confidence: 0.8, sectionEnergy: 0.9 },
+        ],
+      },
+      cues: [
+        {
+          id: "c2",
+          trackId: "in",
+          type: "intro_start" as const,
+          positionMs: 0,
+          beatIndex: null,
+          barIndex: 0,
+          confidence: 0.55,
+          source: "analyzed" as const,
+          label: null,
+        },
+      ],
+    };
+    const planned = planTransition(outgoing, incoming, {
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      preferredType: "phrase_mix",
+    });
+    const proposal = planned.proposals[0]!;
+    expect(proposal.feasible).toBe(true);
+    expect(proposal.blockers).toHaveLength(0);
+    expect(proposal.reasons.some((reason) => /analyzer-derived/i.test(reason))).toBe(true);
+    expect(proposal.outgoingSourceEndMs).toBeGreaterThanOrEqual(80_000);
+  });
+
+  it("does not add a reason when the outro cue is manual", () => {
+    const base = {
+      track: {
+        id: "out",
+        filePath: "out.wav",
+        fileFingerprint: "out",
+        artist: "A",
+        title: "Out",
+        album: null,
+        durationMs: 180_000,
+        sampleRateHz: 44100,
+        channels: 2,
+        bpm: 174,
+        bpmSource: "manual" as const,
+        musicalKey: "Fm",
+        camelotKey: "4A",
+        keySource: "manual" as const,
+        energy: 5,
+        rating: 4,
+        subgenres: [],
+        moods: [],
+        tags: [],
+        notes: null,
+        analysisStatus: "complete" as const,
+        fileMissing: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      analysis: null,
+      cues: [
+        {
+          id: "manual-outro",
+          trackId: "out",
+          type: "outro_start" as const,
+          positionMs: 150_000,
+          beatIndex: null,
+          barIndex: null,
+          confidence: 1,
+          source: "manual" as const,
+          label: null,
+        },
+      ],
+    };
+    const incoming = {
+      ...base,
+      track: { ...base.track, id: "in", title: "In", fileFingerprint: "in" },
+      cues: [],
+    };
+    const planned = planTransition(base, incoming, {
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      preferredType: "crossfade",
+    });
+    const proposal = planned.proposals.find((item) => item.type === "crossfade")!;
+    expect(proposal.reasons.some((reason) => /analyzer-derived/i.test(reason))).toBe(false);
+  });
+});
+

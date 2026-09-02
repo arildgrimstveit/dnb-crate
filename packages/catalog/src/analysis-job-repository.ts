@@ -1,4 +1,4 @@
-import type { AnalysisJob, AnalysisJobStatus } from "@dnb-crate/domain";
+import type { AnalysisEngineId, AnalysisJob, AnalysisJobStatus } from "@dnb-crate/domain";
 import { ANALYSIS_JOB_LIST_LIMIT_MAX, DomainError } from "@dnb-crate/domain";
 
 import type { SqliteDatabase } from "./db.ts";
@@ -8,6 +8,7 @@ type JobRow = {
   status: AnalysisJobStatus;
   progress: number;
   track_ids_json: string;
+  engines_json: string | null;
   completed_ids_json: string;
   failed_ids_json: string;
   error_code: string | null;
@@ -28,6 +29,9 @@ function mapJob(row: JobRow): AnalysisJob {
     status: row.status,
     progress: row.progress,
     trackIds: JSON.parse(row.track_ids_json) as string[],
+    engines: row.engines_json
+      ? (JSON.parse(row.engines_json) as AnalysisJob["engines"])
+      : (["dnb-crate-dsp"] as AnalysisJob["engines"]),
     completedTrackIds: JSON.parse(row.completed_ids_json) as string[],
     failedTrackIds: JSON.parse(row.failed_ids_json) as string[],
     errorCode: row.error_code,
@@ -42,16 +46,16 @@ function mapJob(row: JobRow): AnalysisJob {
 export class AnalysisJobRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
-  insertQueued(trackIds: string[]): AnalysisJob {
+  insertQueued(trackIds: string[], engines: AnalysisEngineId[] = ["dnb-crate-dsp"]): AnalysisJob {
     const id = crypto.randomUUID();
     const timestamp = nowIso();
     this.db
       .prepare(
         `INSERT INTO analysis_jobs (
-          id, status, progress, track_ids_json, completed_ids_json, failed_ids_json, created_at
-        ) VALUES (?, 'queued', 0, ?, '[]', '[]', ?)`,
+          id, status, progress, track_ids_json, engines_json, completed_ids_json, failed_ids_json, created_at
+        ) VALUES (?, 'queued', 0, ?, ?, '[]', '[]', ?)`,
       )
-      .run(id, JSON.stringify(trackIds), timestamp);
+      .run(id, JSON.stringify(trackIds), JSON.stringify(engines), timestamp);
     return this.require(id);
   }
 

@@ -13,7 +13,7 @@ import {
   type Track,
 } from "@dnb-crate/domain";
 
-import { buildEntries, planDurationMs } from "./timeline.ts";
+import { buildEntries, planDurationMs, type TimelineAnalysis } from "./timeline.ts";
 
 const DEFAULT_ARC = [
   { atFraction: 0, targetEnergy: 3 },
@@ -47,6 +47,7 @@ function respectsSpacing(track: Track, recent: Track[], spacing: number): boolea
 export function draftSetPlan(
   catalog: Track[],
   input: CreateSetPlanInput,
+  analyses: Map<string, TimelineAnalysis> = new Map(),
 ): { plan: SetPlanV1; explanation: PlanExplanation; partial: boolean } {
   const seed = input.seed ?? 1;
   const targetDurationMs = input.targetDurationMs ?? DEFAULT_TARGET_DURATION_MS;
@@ -128,8 +129,10 @@ export function draftSetPlan(
   const remainingRequired = () =>
     requiredIds.filter((id) => !used.has(id) && id !== reservedEnd?.id);
 
-  const scoreFor = (candidate: Track, source: Track | null, fraction: number) =>
-    scoreCandidate({
+  const scoreFor = (candidate: Track, source: Track | null, fraction: number) => {
+    const candA = analyses.get(candidate.id);
+    const srcA = source ? analyses.get(source.id) : undefined;
+    return scoreCandidate({
       source,
       candidate,
       targetEnergy: interpolateEnergy(requestedArc, fraction),
@@ -144,13 +147,20 @@ export function draftSetPlan(
       explorationWeight,
       seed,
       alreadyUsed: used.has(candidate.id),
+      suggestedEnergy: candA?.suggestedEnergy ?? null,
+      sourceSuggestedEnergy: srcA?.suggestedEnergy ?? null,
+      outgoingOutroMs: srcA?.outroLenMs ?? null,
+      incomingIntroMs: candA?.introLenMs ?? null,
     });
+  };
 
   const avgPlayable = typicalPlayable(pool);
   let safety = 0;
   while (safety < PLANNER_CANDIDATE_CAP) {
     safety += 1;
-    const currentDuration = planDurationMs(buildEntries(selected));
+    const currentDuration = planDurationMs(
+      buildEntries(selected.map((track) => ({ ...track, analysis: analyses.get(track.id) ?? null }))),
+    );
     const reservedDuration = reservedEnd
       ? Math.max(reservedEnd.durationMs - DEFAULT_TRANSITION_OVERLAP_MS, 0)
       : 0;
@@ -210,7 +220,9 @@ export function draftSetPlan(
     }
   }
 
-  const entries = buildEntries(selected);
+  const entries = buildEntries(
+    selected.map((track) => ({ ...track, analysis: analyses.get(track.id) ?? null })),
+  );
   const duration = planDurationMs(entries);
   const partial =
     duration + DURATION_TOLERANCE_MS < targetDurationMs || remainingRequired().length > 0;

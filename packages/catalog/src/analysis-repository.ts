@@ -1,5 +1,14 @@
-import type { SuggestedCue, TrackAnalysis, TrackAnalysisView } from "@dnb-crate/domain";
-import { resolveCanonicalBpm, resolveCanonicalKey, type Track } from "@dnb-crate/domain";
+import {
+  buildBeatGridSummary,
+  resolveCanonicalBpm,
+  resolveCanonicalKey,
+  type SonicDescriptors,
+  type SuggestedCue,
+  type Track,
+  type TrackAnalysis,
+  type TrackAnalysisView,
+  type TrackSection,
+} from "@dnb-crate/domain";
 
 import type { SqliteDatabase } from "./db.ts";
 
@@ -16,6 +25,10 @@ type AnalysisRow = {
   grid_rejection_reason: string | null;
   musical_key: string | null;
   key_confidence: number | null;
+  key_mode: "major" | "minor" | null;
+  camelot_key: string | null;
+  tempo_stability: number | null;
+  downbeat_confidence: number | null;
   integrated_lufs: number | null;
   true_peak_db: number | null;
   low_band_energy: number | null;
@@ -24,12 +37,17 @@ type AnalysisRow = {
   waveform_summary_json: string | null;
   beat_anchor_ms: number | null;
   suggested_cues_json: string;
+  descriptors_json: string | null;
+  engine_runtime_ms: number | null;
   analyzed_at: string;
 };
 
-export type StoredTrackAnalysis = TrackAnalysis & { suggestedCues: SuggestedCue[] };
+export type StoredTrackAnalysis = TrackAnalysis & {
+  suggestedCues: SuggestedCue[];
+  sections: TrackSection[];
+};
 
-function mapAnalysis(row: AnalysisRow): StoredTrackAnalysis {
+function mapAnalysis(row: AnalysisRow, sections: TrackSection[] = []): StoredTrackAnalysis {
   return {
     trackId: row.track_id,
     analyzerName: row.analyzer_name,
@@ -43,6 +61,10 @@ function mapAnalysis(row: AnalysisRow): StoredTrackAnalysis {
     gridRejectionReason: row.grid_rejection_reason,
     musicalKey: row.musical_key,
     keyConfidence: row.key_confidence,
+    keyMode: row.key_mode,
+    camelotKey: row.camelot_key,
+    tempoStability: row.tempo_stability,
+    downbeatConfidence: row.downbeat_confidence,
     integratedLufs: row.integrated_lufs,
     truePeakDb: row.true_peak_db,
     lowBandEnergy: row.low_band_energy,
@@ -52,18 +74,100 @@ function mapAnalysis(row: AnalysisRow): StoredTrackAnalysis {
       ? (JSON.parse(row.waveform_summary_json) as number[])
       : null,
     beatAnchorMs: row.beat_anchor_ms,
+    descriptors: row.descriptors_json
+      ? (JSON.parse(row.descriptors_json) as SonicDescriptors)
+      : null,
+    engineRuntimeMs: row.engine_runtime_ms,
     analyzedAt: row.analyzed_at,
     suggestedCues: JSON.parse(row.suggested_cues_json) as SuggestedCue[],
+    sections,
   };
 }
+
+const PREFERRED_ORDER = ["dnb-crate-dsp", "beat-this", "allin1", "dnb-crate-envelope"];
 
 export class AnalysisRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
-  findByTrackId(trackId: string): StoredTrackAnalysis | null {
-    const row = this.db.prepare("SELECT * FROM track_analyses WHERE track_id = ?").get(trackId) as
-      AnalysisRow | undefined;
-    return row ? mapAnalysis(row) : null;
+  listByTrackId(trackId: string): StoredTrackAnalysis[] {
+    const rows = this.db
+      .prepare("SELECT * FROM track_analyses WHERE track_id = ?")
+      .all(trackId) as AnalysisRow[];
+    return rows.map((row) => mapAnalysis(row, this.listSections(trackId, row.analyzer_name)));
+  }
+
+  findByTrackId(trackId: string, engine?: string): StoredTrackAnalysis | null {
+    if (engine) {
+      const row = this.db
+        .prepare("SELECT * FROM track_analyses WHERE track_id = ? AND analyzer_name = ?")
+        .get(trackId, engine) as AnalysisRow | undefined;
+      return row ? mapAnalysis(row, this.listSections(trackId, engine)) : null;
+    }
+    const all = this.listByTrackId(trackId);
+    if (all.length === 0) {
+      return null;
+    }
+    const ranked = [...all].sort((a, b) => {
+      const ai = PREFERRED_ORDER.indexOf(a.analyzerName);
+      const bi = PREFERRED_ORDER.indexOf(b.analyzerName);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+    return ranked[0] ?? null;
+  }
+
+  listSections(trackId: string, analyzerName: string): TrackSection[] {
+    const rows = this.db
+      .prepare(
+        `SELECT type, start_ms, end_ms, start_bar, end_bar, confidence, energy
+         FROM track_sections WHERE track_id = ? AND analyzer_name = ?
+         ORDER BY start_ms ASC`,
+      )
+      .all(trackId, analyzerName) as Array<{
+      type: TrackSection["type"];
+      start_ms: number;
+      end_ms: number;
+      start_bar: number | null;
+      end_bar: number | null;
+      confidence: number;
+      energy: number;
+    }>;
+    return rows.map((row) => ({
+      type: row.type,
+      startMs: row.start_ms,
+      endMs: row.end_ms,
+      startBar: row.start_bar,
+      endBar: row.end_bar,
+      confidence: row.confidence,
+      sectionEnergy: row.energy,
+    }));
+  }
+
+  replaceSections(trackId: string, analyzerName: string, sections: TrackSection[]): void {
+    const run = this.db.transaction(() => {
+      this.db
+        .prepare("DELETE FROM track_sections WHERE track_id = ? AND analyzer_name = ?")
+        .run(trackId, analyzerName);
+      const stmt = this.db.prepare(
+        `INSERT INTO track_sections (
+          id, track_id, analyzer_name, type, start_ms, end_ms, start_bar, end_bar, confidence, energy
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const section of sections) {
+        stmt.run(
+          crypto.randomUUID(),
+          trackId,
+          analyzerName,
+          section.type,
+          Math.round(section.startMs),
+          Math.round(section.endMs),
+          section.startBar,
+          section.endBar,
+          section.confidence,
+          section.sectionEnergy,
+        );
+      }
+    });
+    run();
   }
 
   upsert(analysis: StoredTrackAnalysis): StoredTrackAnalysis {
@@ -72,12 +176,12 @@ export class AnalysisRepository {
         `INSERT INTO track_analyses (
           track_id, analyzer_name, analyzer_version, bpm, bpm_confidence, bpm_raw,
           beat_times_json, downbeat_times_json, grid_rejected, grid_rejection_reason,
-          musical_key, key_confidence, integrated_lufs, true_peak_db,
-          low_band_energy, mid_band_energy, high_band_energy, waveform_summary_json,
-          beat_anchor_ms, suggested_cues_json, analyzed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(track_id) DO UPDATE SET
-          analyzer_name = excluded.analyzer_name,
+          musical_key, key_confidence, key_mode, camelot_key, tempo_stability, downbeat_confidence,
+          integrated_lufs, true_peak_db, low_band_energy, mid_band_energy, high_band_energy,
+          waveform_summary_json, beat_anchor_ms, suggested_cues_json, descriptors_json,
+          engine_runtime_ms, analyzed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(track_id, analyzer_name) DO UPDATE SET
           analyzer_version = excluded.analyzer_version,
           bpm = excluded.bpm,
           bpm_confidence = excluded.bpm_confidence,
@@ -88,6 +192,10 @@ export class AnalysisRepository {
           grid_rejection_reason = excluded.grid_rejection_reason,
           musical_key = excluded.musical_key,
           key_confidence = excluded.key_confidence,
+          key_mode = excluded.key_mode,
+          camelot_key = excluded.camelot_key,
+          tempo_stability = excluded.tempo_stability,
+          downbeat_confidence = excluded.downbeat_confidence,
           integrated_lufs = excluded.integrated_lufs,
           true_peak_db = excluded.true_peak_db,
           low_band_energy = excluded.low_band_energy,
@@ -96,6 +204,8 @@ export class AnalysisRepository {
           waveform_summary_json = excluded.waveform_summary_json,
           beat_anchor_ms = excluded.beat_anchor_ms,
           suggested_cues_json = excluded.suggested_cues_json,
+          descriptors_json = excluded.descriptors_json,
+          engine_runtime_ms = excluded.engine_runtime_ms,
           analyzed_at = excluded.analyzed_at`,
       )
       .run(
@@ -111,6 +221,10 @@ export class AnalysisRepository {
         analysis.gridRejectionReason,
         analysis.musicalKey,
         analysis.keyConfidence,
+        analysis.keyMode,
+        analysis.camelotKey,
+        analysis.tempoStability,
+        analysis.downbeatConfidence,
         analysis.integratedLufs,
         analysis.truePeakDb,
         analysis.lowBandEnergy,
@@ -119,9 +233,12 @@ export class AnalysisRepository {
         analysis.waveformSummary ? JSON.stringify(analysis.waveformSummary) : null,
         analysis.beatAnchorMs,
         JSON.stringify(analysis.suggestedCues),
+        analysis.descriptors ? JSON.stringify(analysis.descriptors) : null,
+        analysis.engineRuntimeMs,
         analysis.analyzedAt,
       );
-    return this.findByTrackId(analysis.trackId)!;
+    this.replaceSections(analysis.trackId, analysis.analyzerName, analysis.sections ?? []);
+    return this.findByTrackId(analysis.trackId, analysis.analyzerName)!;
   }
 
   getBeatAnchorMs(trackId: string): number | null {
@@ -146,12 +263,16 @@ export class AnalysisRepository {
     }
     const bpm = resolveCanonicalBpm(track, analysis);
     const key = resolveCanonicalKey(track, analysis);
+    const availableEngines = this.listByTrackId(track.id).map((row) => row.analyzerName);
     return {
       ...analysis,
       canonicalBpm: bpm.bpm,
       canonicalBpmSource: bpm.source,
       canonicalKey: key.musicalKey,
       canonicalKeySource: key.source,
+      sections: analysis.sections ?? [],
+      availableEngines: availableEngines.length > 0 ? availableEngines : [analysis.analyzerName],
+      gridSummary: buildBeatGridSummary(analysis),
     };
   }
 }
