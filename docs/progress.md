@@ -25,7 +25,7 @@ Evidence (2026-09-02, Node 24, Windows):
   - Keys no longer collapse to F/Dm: Gm×3 is the mode; others unique or pairs. Target ≤3 tracks sharing one key holds.
 - Default engine remains **`dnb-crate-dsp`**. Mix tempo still uses published/manual canonical BPM.
 - Target in-range exact ≥ 8/10 is **not** met; synthetic fixtures are green. Python `beat-this` comparison not run.
-- Ear-check of bass-swap / drop previews not repeated in this pass (existing `output/previews/` from v2.0).
+- Ear-check (2026-09-02): drop cues correct on Basic Instinct, Angel, Witchcraft, Tidal Wave. Witchcraft → Tidal Wave `bass_swap` passed (no low-end phasing at the swap bar).
 
 ## Stage 5 — Analysis v2 + mix intelligence
 
