@@ -5,6 +5,8 @@ import {
   DEFAULT_MID_DIP_DB,
   DEFAULT_PHRASE_BARS,
   DEFAULT_TRANSITION_OVERLAP_MS,
+  LEVEL_MATCH_GAIN_MAX_DB,
+  LEVEL_MATCH_GAIN_MIN_DB,
   MAX_TEMPO_DEVIATION,
   SHORT_CROSSFADE_MS,
   MIN_ANALYSIS_CONFIDENCE,
@@ -47,6 +49,7 @@ export type TimelineAnalysis = {
   mixOutMs: number | null;
   headEnergy: number | null;
   tailEnergy: number | null;
+  integratedLufs: number | null;
   descriptors?: {
     energy: number | null;
     danceability: number | null;
@@ -273,11 +276,40 @@ export function musicalWindow(
   };
 }
 
+export function medianLufs(values: Array<number | null | undefined>): number | null {
+  const finite = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (finite.length === 0) {
+    return null;
+  }
+  const sorted = [...finite].sort((left, right) => left - right);
+  const mid = Math.floor((sorted.length - 1) / 2);
+  if (sorted.length % 2 === 1) {
+    return sorted[mid] ?? null;
+  }
+  return ((sorted[mid] ?? 0) + (sorted[mid + 1] ?? 0)) / 2;
+}
+
+export function levelMatchGainDb(
+  trackLufs: number | null | undefined,
+  referenceLufs: number | null | undefined,
+): { gainDb: number; warning: string | null } {
+  if (referenceLufs == null || !Number.isFinite(referenceLufs)) {
+    return { gainDb: 0, warning: trackLufs == null ? "missing-lufs" : null };
+  }
+  if (trackLufs == null || !Number.isFinite(trackLufs)) {
+    return { gainDb: 0, warning: "missing-lufs" };
+  }
+  const raw = referenceLufs - trackLufs;
+  const gainDb = Math.min(LEVEL_MATCH_GAIN_MAX_DB, Math.max(LEVEL_MATCH_GAIN_MIN_DB, raw));
+  return { gainDb: Number(gainDb.toFixed(2)), warning: null };
+}
+
 export function buildEntries(
   tracks: TimelineTrack[],
   overlapMs = DEFAULT_TRANSITION_OVERLAP_MS,
   existing?: Map<string, Partial<SetPlanEntry>>,
 ): SetPlanEntry[] {
+  const referenceLufs = medianLufs(tracks.map((track) => track.analysis?.integratedLufs));
   const rates = tracks.map((track) => {
     const prior = existing?.get(track.id);
     return prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : 1;
@@ -379,6 +411,17 @@ export function buildEntries(
           };
     const playbackRate =
       prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : (rates[index] ?? 1);
+    const matched = levelMatchGainDb(track.analysis?.integratedLufs, referenceLufs);
+    const gainDb = typeof prior?.gainDb === "number" ? prior.gainDb : matched.gainDb;
+    const transitionWithGain =
+      transitionToNext === null
+        ? null
+        : matched.warning && typeof prior?.gainDb !== "number"
+          ? {
+              ...transitionToNext,
+              parameters: { ...transitionToNext.parameters, levelMatchWarning: matched.warning },
+            }
+          : transitionToNext;
     entries.push({
       id: prior?.id ?? crypto.randomUUID(),
       trackId: track.id,
@@ -387,8 +430,8 @@ export function buildEntries(
       sourceEndMs,
       timelineStartMs: timeline,
       playbackRate,
-      gainDb: prior?.gainDb ?? 0,
-      transitionToNext,
+      gainDb,
+      transitionToNext: transitionWithGain,
     });
     const playable = playableOutputMs({ sourceStartMs, sourceEndMs, playbackRate });
     const overlap = isLast ? 0 : Math.min(overlapFor(transitionToNext), Math.max(0, playable - 1));
@@ -431,11 +474,13 @@ export function analysisToTimeline(
     bpm: number | null;
     bpmRaw?: number | null;
     bpmConfidence: number | null;
+    integratedLufs?: number | null;
     downbeatTimesMs?: number[];
     downbeatConfidence?: number | null;
     beatTimesMs?: number[];
     descriptors: {
       suggestedEnergy: number | null;
+      integratedLufs?: number | null;
       energy?: number | null;
       danceability?: number | null;
       valence?: number | null;
@@ -512,6 +557,8 @@ export function analysisToTimeline(
     mixOutMs: mixOut.ms,
     headEnergy: sectionEnergyAt(sections, mixIn.ms),
     tailEnergy: sectionEnergyAt(sections, mixOut.ms),
+    integratedLufs:
+      analysis.integratedLufs ?? analysis.descriptors?.integratedLufs ?? null,
     descriptors: analysis.descriptors
       ? {
           energy: analysis.descriptors.energy ?? null,

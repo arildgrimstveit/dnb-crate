@@ -35,6 +35,10 @@ The two **343 ms** residuals are one beat (`alignmentPeriodMs` 345) on joins who
 
 Plan file, crate-count refresh (431), manifest join fields (`barCount`, `phraseShape`, `exitKind`, mix windows, LUFS, Camelot), `render:check` v2 (residual, level step, low-overlap proxy, key distance). `parseEbur128` now takes the Summary `I:` so 10 s windows are not read as the first momentary −70 LUFS line.
 
+### WP1 shipped
+
+`gainDb = clamp(setMedianLufs − trackLufs, −6, +3)`. Missing LUFS stays 0 with `levelMatchWarning`. Non-zero manual gain survives `--replan`.
+
 ## Crate v3 — baseline (2026-09-03)
 
 `library:stats` before WP1–WP5. Live crate, no re-analysis.

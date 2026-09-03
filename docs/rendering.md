@@ -18,6 +18,8 @@ Tempo matching uses **`atempo`** (pitch-preserving). `asetrate` is not used.
 
 Unchanged from Stage 3: mix-wide **-14 LUFS**, true-peak **-1.0 dBTP**, no per-track loudnorm, one mix-wide attenuation if the mix is >0.5 LU above target, `alimiter` on the ceiling.
 
+Each plan entry also gets a bounded `gainDb` so tracks sit near the **set median** integrated LUFS (not a fixed −14). `gainDb = clamp(medianLufs − trackLufs, −6, +3)`. Tracks without LUFS stay at 0 and record `levelMatchWarning: missing-lufs`. A non-zero manual `gainDb` survives `plan:clone --replan`. The renderer already applies this as `volume=`. `render:check` v2 prints per-join `outgoingGainDb` / `incomingGainDb` and the 10 s level step.
+
 ## Timing
 
 - Crossfade: `acrossfade` with `c1=hsin` / `c2=hsin`.
@@ -42,7 +44,7 @@ Same as Stage 3: `start_set_render` / `create_transition_preview` return a job i
 
 Aligned templates **fail closed** when a required grid is missing, rejected, or below confidence 0.6, unless `allowLowConfidence` is true.
 
-`render:check --id JOB` runs `silencedetect` (−50 dB, ≥ 1 s) and prints interior spans plus per-join template, bars, rates, `downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode`, and `windowInSilence`. Exit 1 if any interior span or window sits in silence.
+`render:check --id JOB` runs `silencedetect` (−50 dB, ≥ 1 s) and prints interior spans plus per-join template, bars, rates, `downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode`, `windowInSilence`, alignment residual, 10 s level step (LU), low-overlap proxy, Camelot distance, `exitKind`, mix windows, and per-track LUFS/gain. Exit 1 if any interior span, window sits in silence, residual > 40 ms, or |level step| > 3 LU.
 
 ## Known limitations
 

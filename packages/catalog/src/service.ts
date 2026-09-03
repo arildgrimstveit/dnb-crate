@@ -904,7 +904,15 @@ export class CatalogService {
     });
     const now = new Date().toISOString();
     const entries = input.replan
-      ? buildEntries(this.timelineTracksFor(orderedTracks))
+      ? buildEntries(
+          this.timelineTracksFor(orderedTracks),
+          undefined,
+          new Map(
+            ordered
+              .filter((entry) => entry.gainDb !== 0)
+              .map((entry) => [entry.trackId, { gainDb: entry.gainDb }]),
+          ),
+        )
       : ordered.map((entry) => ({
           ...entry,
           id: crypto.randomUUID(),

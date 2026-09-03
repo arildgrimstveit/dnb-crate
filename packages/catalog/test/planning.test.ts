@@ -339,6 +339,45 @@ describe("set planning", () => {
     );
   });
 
+  it("keeps a non-zero manual gain across clone --replan", () => {
+    const catalog = runtime();
+    const a = seedTrack(catalog, { title: "Loud", artist: "A", bpm: 174, camelot: "11A", energy: 6 });
+    const b = seedTrack(catalog, { title: "Quiet", artist: "B", bpm: 174, camelot: "12A", energy: 6 });
+    stubDescriptors(catalog, a, { energy: 0.7 }, { bpm: 174 });
+    stubDescriptors(catalog, b, { energy: 0.7 }, { bpm: 174 });
+    catalog.analyses.upsert({
+      ...catalog.analyses.findByTrackId(a)!,
+      integratedLufs: -8,
+    });
+    catalog.analyses.upsert({
+      ...catalog.analyses.findByTrackId(b)!,
+      integratedLufs: -16,
+    });
+    const created = catalog.service.createSetPlan({
+      name: "Levels",
+      targetDurationMs: 300_000,
+      startTrackId: a,
+      endTrackId: b,
+      seed: 1,
+    });
+    expect(created.plan.entries[0]?.gainDb).toBe(-4);
+    expect(created.plan.entries[1]?.gainDb).toBe(3);
+    const edited = {
+      ...created.plan,
+      entries: created.plan.entries.map((entry, index) =>
+        index === 0 ? { ...entry, gainDb: -1.25 } : entry,
+      ),
+    };
+    catalog.setPlans.save(edited, 1, created.explanation);
+    const replanned = catalog.service.cloneSetPlan({
+      setPlanId: created.plan.id,
+      name: "Levels replan",
+      replan: true,
+    });
+    expect(replanned.plan.entries[0]?.gainDb).toBe(-1.25);
+    expect(replanned.plan.entries[1]?.gainDb).toBe(3);
+  });
+
   it("ranks compatible neighbours above distant keys", () => {
     const catalog = runtime();
     const source = seedTrack(catalog, {
@@ -392,6 +431,7 @@ describe("planner tempo matching", () => {
         mixOutMs: 140_000,
         headEnergy: 0.3,
         tailEnergy: 0.4,
+        integratedLufs: null,
         ...extra,
       },
     };
@@ -573,6 +613,39 @@ describe("planner tempo matching", () => {
       const effective = canons[i]! * rates[i]!;
       expect(Math.abs(effective / canons[i]! - 1)).toBeLessThanOrEqual(0.03);
     }
+  });
+
+  it("matches levels to the set median LUFS and clamps", () => {
+    const loud = gridTrack(174, 5, { integratedLufs: -8 });
+    const mid = gridTrack(174, 5, { integratedLufs: -12 });
+    const quiet = gridTrack(174, 5, { integratedLufs: -16 });
+    const entries = buildEntries([loud, mid, quiet]);
+    expect(entries.map((entry) => entry.gainDb)).toEqual([-4, 0, 3]);
+  });
+
+  it("leaves gain at 0 and warns when LUFS is missing", () => {
+    const known = gridTrack(174, 5, { integratedLufs: -12 });
+    const unknown = gridTrack(174, 5, { integratedLufs: null });
+    const entries = buildEntries([known, unknown]);
+    expect(entries[1]?.gainDb).toBe(0);
+    expect(entries[0]?.transitionToNext?.parameters.levelMatchWarning).toBeUndefined();
+    const onlyUnknown = buildEntries([unknown, known]);
+    expect(onlyUnknown[0]?.gainDb).toBe(0);
+    expect(onlyUnknown[0]?.transitionToNext?.parameters.levelMatchWarning).toBe("missing-lufs");
+  });
+
+  it("preserves a manual gainDb on re-plan", () => {
+    const a = gridTrack(174, 5, { integratedLufs: -8 });
+    const b = gridTrack(174, 5, { integratedLufs: -16 });
+    const first = buildEntries([a, b]);
+    expect(first[0]?.gainDb).toBe(-4);
+    const prior = new Map([
+      [a.id, { ...first[0]!, gainDb: -1.5 }],
+      [b.id, first[1]!],
+    ]);
+    const again = buildEntries([a, b], undefined, prior);
+    expect(again[0]?.gainDb).toBe(-1.5);
+    expect(again[1]?.gainDb).toBe(first[1]?.gainDb);
   });
 
   it("preserves a manual playbackRate on re-plan", () => {
