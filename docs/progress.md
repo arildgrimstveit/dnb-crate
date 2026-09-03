@@ -72,6 +72,12 @@ Analyzer **3.1.0** stale re-run: job `71eb4f40-0b5f-4d3f-afe7-04fa4f6d3bc1`, **4
 - beat-this not installed (host Python 3.14 only). `analysis:gate --engine beat-this` skipped. DSP stays the rhythm source — see `docs/decisions.md`.
 - Published/manual **140**: in-range **85**, accepted **57**, exact **56**. No accepted in-range grid disagrees with published by > 1.0.
 
+### WP4 shipped
+
+Kick/sub comb agreement is on `tempoEvidence.agreement` (130 tracks = 1, 49 mid on the 3.1.0 pass). Logistic **not** re-fit (no beat-this labels; fixtures and accepted-correct win). Bounded rescue: agreement 1 + logistic ≥ 0.45 clears the 0.6 floor only; sine fixtures stay rejected. `gridSource: "sidecar"` is wired for when a 3.12 venv exists.
+
+3.1.0 crate (before rescue re-run): DnB-genre accepted **152 / 271** (56%). Target ≥ 75% needs the next stale pass. Zero accepted in-range published disagreements > 1.0 BPM.
+
 ## Crate v3 — baseline (2026-09-03)
 
 `library:stats` before WP1–WP5. Live crate, no re-analysis.

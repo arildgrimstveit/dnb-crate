@@ -1065,6 +1065,20 @@ export const dspAnalyzer: AudioAnalyzer = {
         }
       }
     }
+    if (
+      gridRejected &&
+      folded &&
+      bpm != null &&
+      (tempoEvidence?.agreement ?? 0) >= 1 &&
+      (tempoEvidence?.prominence ?? 0) >= 0.35 &&
+      bpmConfidence >= 0.45 &&
+      (gridRejectionReason ?? "").includes("below")
+    ) {
+      gridRejected = false;
+      gridRejectionReason = null;
+      bpmConfidence = Math.max(bpmConfidence, MIN_ANALYSIS_CONFIDENCE);
+      gridSource = "analyzed";
+    }
     const referenceBpm = options.referenceBpm;
     const tolerance =
       referenceBpm != null && referenceBpm > 0 ? publishedBpmTolerance(referenceBpm) : 0.5;

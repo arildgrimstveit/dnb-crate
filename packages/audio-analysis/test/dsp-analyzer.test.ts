@@ -282,6 +282,7 @@ describe("dnb-crate-dsp", () => {
     });
     expect(sine.gridRejected).toBe(true);
     expect(resolveBpmHint(sine).bpm).toBeNull();
+    expect(sine.bpmConfidence ?? 0).toBeLessThan(0.45);
   });
 
   it("keeps a free-accepted click track as analyzed", () => {

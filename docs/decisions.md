@@ -1,5 +1,13 @@
 # Decisions
 
+## 2026-09-03 — Tempo logistic not re-fit; agreement is a bounded rescue
+
+`tempoEvidence.agreement` is the free-fold vs kick/sub comb (1 if Δ≤1 BPM, 0.45 if ≤3). A kick-comb auto-accept of every in-range reject accepted constant-sine fixtures and was reverted.
+
+beat-this labels are unavailable, so `calibrate-confidence.mts` was not given sidecar tempos. The 2026-09-03 synthetic weights and `MIN_ANALYSIS_CONFIDENCE` **0.6** stay. A rejected free grid is rescued only when agreement is **1**, prominence is **≥ 0.35**, logistic confidence is **≥ 0.45**, and the reject reason is the 0.6 floor — not a failed reference fit. Constant-sine fixtures stay rejected (logistic < 0.45) even when the two combs agree.
+
+DnB-genre accepted grids on the 3.1.0 pass were **152 / 271** (56%), short of the 75% target. The rescue needs a stale re-run to count. No accepted in-range grid disagreed with published by > 1.0.
+
 ## 2026-09-03 — beat-this is not the rhythm source
 
 `tools/analyzer-py/setup.ps1` now requires **Python 3.12** and CPU torch. This machine only has **3.14** (`py -0p` → `C:\Python314\python.exe`). beat-this / torch wheels cannot be installed, so `analysis:gate --engine beat-this` was not run.
