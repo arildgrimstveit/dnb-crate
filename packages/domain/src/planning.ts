@@ -55,6 +55,11 @@ export type ScoreComponents = {
   recentlyUsed: number;
   missingMetadata: number;
   structure: number;
+  joinLevel: number;
+  joinStructure: number;
+  joinAligned: number;
+  joinHarmonic: number;
+  genrePrior: number;
 };
 
 export type ScoreBreakdown = {
@@ -109,6 +114,7 @@ export type PlanExplanation = {
   seed: number;
   selected: SelectionExplanation[];
   rejected: RejectionExplanation[];
+  harmonicCoverage?: { knownJoins: number; totalJoins: number };
 };
 
 export type ValidationIssue = {

@@ -6,7 +6,7 @@ import {
 } from "./descriptor-filters.ts";
 import { normalizeGenre } from "./genres.ts";
 import { normalizePersonName } from "./identity.ts";
-import { camelotDistance } from "./keys.ts";
+import { camelotDistance, camelotNumberDistance } from "./keys.ts";
 import type { EnergyDirection, ScoreBreakdown, ScoreComponents } from "./planning.ts";
 import type { Track } from "./track.ts";
 
@@ -33,6 +33,15 @@ export type ScoreContext = {
   sourceBpmHint?: number | null;
   descriptors?: DescriptorValues | null;
   sourceDescriptors?: DescriptorValues | null;
+  candidateLufs?: number | null;
+  sourceLufs?: number | null;
+  candidateGridOk?: boolean;
+  sourceGridOk?: boolean;
+  candidateKeyConfidence?: number | null;
+  sourceKeyConfidence?: number | null;
+  candidateDropBars?: number | null;
+  sourceQuietTail?: boolean;
+  candidateGenres?: string[];
 };
 
 function overlapScore(left: string[], right: string[]): number {
@@ -98,17 +107,19 @@ function harmonicScore(
   sourceKey: string | null,
   candidateKey: string | null,
   importance: number,
+  sourceConf = 1,
+  candidateConf = 1,
 ): number {
   if (importance <= 0) {
     return 0;
   }
-  const distance = camelotDistance(sourceKey, candidateKey);
+  const distance = camelotNumberDistance(sourceKey, candidateKey) ?? camelotDistance(sourceKey, candidateKey);
   if (distance === null) {
     return 0;
   }
   const raw =
     distance === 0 ? 1 : distance === 1 ? 0.85 : distance === 2 ? 0.45 : distance === 3 ? 0.15 : 0;
-  return raw * clamp01(importance);
+  return raw * clamp01(importance) * Math.min(clamp01(sourceConf), clamp01(candidateConf));
 }
 
 /**
@@ -159,7 +170,34 @@ export function scoreCandidate(
     source?.camelotKey ?? null,
     candidate.camelotKey,
     ctx.harmonicImportance,
+    ctx.sourceKeyConfidence ?? (source?.camelotKey ? 1 : 0),
+    ctx.candidateKeyConfidence ?? (candidate.camelotKey ? 1 : 0),
   );
+  const deltaLufs =
+    ctx.sourceLufs != null && ctx.candidateLufs != null
+      ? Math.abs(ctx.candidateLufs - ctx.sourceLufs)
+      : 0;
+  const joinLevelRaw = source ? -Math.max(0, deltaLufs - 3) / 6 : 0;
+  const joinStructureRaw =
+    source && (ctx.candidateDropBars ?? 0) >= 16 && ctx.sourceQuietTail
+      ? 1
+      : source && ((ctx.candidateDropBars ?? 0) >= 16 || ctx.sourceQuietTail)
+        ? 0.45
+        : 0;
+  const bpmClose =
+    sourceBpm != null &&
+    candidateBpm != null &&
+    Math.abs(candidateBpm - sourceBpm) / Math.max(sourceBpm, 1) <= 0.03;
+  const joinAlignedRaw = source && ctx.candidateGridOk && ctx.sourceGridOk && bpmClose ? 1 : 0;
+  const joinHarmonicRaw = harmonic;
+  const priorLabels = new Set(["liquid funk", "neurofunk", "jump up", "jungle"]);
+  const candidateGenres = (ctx.candidateGenres ?? candidate.genres ?? []).map(normalizeGenre);
+  const preferredGenres = new Set(ctx.preferredSubgenres.map(normalizeGenre));
+  const genrePriorRaw = candidateGenres.some((genre) => priorLabels.has(genre))
+    ? candidateGenres.some((genre) => preferredGenres.has(genre))
+      ? 1
+      : 0.4
+    : 0;
   const outro = ctx.outgoingOutroMs;
   const intro = ctx.incomingIntroMs;
   let structureRaw = 0;
@@ -240,6 +278,11 @@ export function scoreCandidate(
     recentlyUsed: -(recentlyUsed * weights.recentlyUsed),
     missingMetadata: -(missingMetadata * weights.missingMetadata),
     structure: structureRaw * weights.structure,
+    joinLevel: joinLevelRaw * weights.joinLevel,
+    joinStructure: joinStructureRaw * weights.joinStructure,
+    joinAligned: joinAlignedRaw * weights.joinAligned,
+    joinHarmonic: joinHarmonicRaw * weights.joinHarmonic,
+    genrePrior: genrePriorRaw * weights.genrePrior,
   };
 
   const total = Object.values(components).reduce((sum, value) => sum + value, 0);

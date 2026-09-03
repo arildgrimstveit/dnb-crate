@@ -1,5 +1,13 @@
 # Decisions
 
+## 2026-09-03 — Analyzed keys are gated at 0.5
+
+`applyAnalyzedMetadata` used to write every analyzed key as canonical (216 rows, `key_confidence` p50 0.012). That bypassed `resolveCanonicalKey`’s 0.5 gate and fed noise into `harmonicScore`.
+
+Analyzed keys now write only when `keyConfidence ≥ MIN_KEY_CONFIDENCE` (0.5). Below that, an existing analyzed key is cleared. Published and manual keys are untouched. The 3.1.0 stale pass loaded the old writer, so the 216 rows remain until the next version bump.
+
+Harmony scores Camelot **number** distance first (5A vs 5B is 0). Unknown keys score 0 and count toward `harmonicCoverage`. Aligned overlaps ≥ 16 bars with number distance ≥ 3 get `KEY_CLASH` and a shorter phrase.
+
 ## 2026-09-03 — Tempo logistic not re-fit; agreement is a bounded rescue
 
 `tempoEvidence.agreement` is the free-fold vs kick/sub comb (1 if Δ≤1 BPM, 0.45 if ≤3). A kick-comb auto-accept of every in-range reject accepted constant-sine fixtures and was reverted.

@@ -78,6 +78,10 @@ Kick/sub comb agreement is on `tempoEvidence.agreement` (130 tracks = 1, 49 mid 
 
 3.1.0 crate (before rescue re-run): DnB-genre accepted **152 / 271** (56%). Target ≥ 75% needs the next stale pass. Zero accepted in-range published disagreements > 1.0 BPM.
 
+### WP5 shipped
+
+Key v3 (sub-root prior + margin logistic × clarity gate) already ran in the 3.1.0 pass; `key_confidence` p50 is still **0.012**, max 0.184, **0** rows ≥ 0.5. Canonical writes are now gated at **0.5** and will clear the 216 ungated analyzed keys on the **3.2.0** stale re-run. Gold set of 30 is listed in `docs/analysis.md` — agreement ≥ 70% waits on published labels. Harmony is Camelot number distance; 5A vs 5B is 0.
+
 ## Crate v3 — baseline (2026-09-03)
 
 `library:stats` before WP1–WP5. Live crate, no re-analysis.

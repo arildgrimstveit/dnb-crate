@@ -155,9 +155,21 @@ export function parseCamelot(code: string): ParsedCamelot | null {
  * Wheel distance: 0 = identical, 1 = relative major/minor or ±1 number,
  * then number-steps plus a letter change.
  */
-export type KeyAgreement = "exact" | "relative" | "none";
+export type KeyAgreement = "exact" | "relative" | "number_pm1" | "clash";
 
-/** Exact Camelot match, or relative major/minor (same number, A↔B). */
+export function camelotNumberDistance(left: string | null, right: string | null): number | null {
+  if (left === null || right === null) {
+    return null;
+  }
+  const a = parseCamelot(left);
+  const b = parseCamelot(right);
+  if (!a || !b) {
+    return null;
+  }
+  return Math.min((a.number - b.number + 12) % 12, (b.number - a.number + 12) % 12);
+}
+
+/** Exact Camelot, relative (same number), number ±1, or clash. */
 export function keyAgreement(
   analyzed: string | null | undefined,
   reference: string | null | undefined,
@@ -173,12 +185,14 @@ export function keyAgreement(
   if (left.musicalKey === right.musicalKey || left.camelotKey === right.camelotKey) {
     return "exact";
   }
-  const a = parseCamelot(left.camelotKey);
-  const b = parseCamelot(right.camelotKey);
-  if (a && b && a.number === b.number) {
+  const numberDist = camelotNumberDistance(left.camelotKey, right.camelotKey);
+  if (numberDist === 0) {
     return "relative";
   }
-  return "none";
+  if (numberDist === 1) {
+    return "number_pm1";
+  }
+  return "clash";
 }
 
 export function camelotDistance(left: string | null, right: string | null): number | null {

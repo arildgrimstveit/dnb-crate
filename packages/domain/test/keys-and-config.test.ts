@@ -33,7 +33,8 @@ describe("normalizeKey", () => {
   it("classifies exact and relative key agreement", () => {
     expect(keyAgreement("F#m", "11A")).toBe("exact");
     expect(keyAgreement("F#m", "A")).toBe("relative");
-    expect(keyAgreement("F#m", "C")).toBe("none");
+    expect(keyAgreement("F#m", "C#m")).toBe("number_pm1");
+    expect(keyAgreement("F#m", "C")).toBe("clash");
     expect(keyAgreement(null, "C")).toBeNull();
   });
 });

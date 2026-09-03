@@ -303,10 +303,12 @@ export class AnalysisCoordinator {
       );
     }
     const preferred = this.analyses.findByTrackId(trackId) ?? this.analyses.findByTrackId(trackId, dsp.analyzerName);
-    if (preferred && !preferred.gridRejected && preferred.bpm !== null) {
+    if (preferred) {
       this.tracks.applyAnalyzedMetadata(trackId, {
-        bpm: preferred.bpm,
+        bpm: preferred.gridRejected ? null : preferred.bpm,
         musicalKey: preferred.musicalKey,
+        keyConfidence: preferred.keyConfidence,
+        gridRejected: preferred.gridRejected,
       });
     } else {
       this.tracks.setAnalysisStatus(trackId, "complete");
@@ -355,6 +357,7 @@ export class AnalysisCoordinator {
       keyConfidence: result.keyConfidence,
       keyMode: result.keyMode,
       camelotKey: result.camelotKey,
+      keyCandidates: result.keyCandidates ?? result.descriptors?.keyCandidates ?? null,
       tempoStability: result.tempoStability,
       downbeatConfidence: result.downbeatConfidence,
       integratedLufs,

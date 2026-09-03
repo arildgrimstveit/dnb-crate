@@ -8,7 +8,7 @@ Canonical BPM/key precedence: **manual > published > analyzed > tag**.
 
 | Engine | Runtime | What it produces |
 | --- | --- | --- |
-| `dnb-crate-dsp` 3.1 (default) | TypeScript in-process | STFT spectral-flux onsets, tempogram, comb-locked sub-hop beats, downbeat v2 (kick/sub + snare flux, mod-4 then mod-8, drop/section log-priors, logistic confidence), per-bar features, HPCP chroma key (165–3520 Hz, spectral peaks, tuning, Temperley+KK), downbeat-anchored sections, sonic descriptors including a same-pass pack (`energy`, `danceability`, `acousticness`, `melodicness`, `valence`) |
+| `dnb-crate-dsp` 3.2 (default) | TypeScript in-process | STFT spectral-flux onsets, tempogram, comb-locked sub-hop beats, downbeat v2 (kick/sub + snare flux, mod-4 then mod-8, drop/section log-priors, logistic confidence), per-bar features, HPCP chroma key v3 (165–3520 Hz, sub-root prior, clarity-gated confidence), downbeat-anchored sections, sonic descriptors including a same-pass pack (`energy`, `danceability`, `acousticness`, `melodicness`, `valence`) |
 | `beat-this` | Optional Python sidecar | Beats / downbeats / tempo (IQR confidence; 180 s timeout) |
 | `allin1` | Optional Python sidecar (slow; Demucs) | Beats / downbeats / tempo / section labels (900 s timeout) |
 | `dnb-crate-envelope` 1.0 | Legacy | Peak-amplitude envelope; kept for migrated Stage 4 rows |
@@ -108,4 +108,22 @@ pnpm cli analysis:cue-preview --track-id UUID --cue drop
 pnpm cli transition:plan --from UUID --to UUID --bars 32
 ```
 
-`analysis:gate` re-analyses every track with `bpmSource` `published` or `manual` and prints `get_analysis_report` (in-range vs out-of-range split). Stderr also prints one line: in-range accepted/count, accepted-exact, and `gridSource` counts. Optional `--previews` renders drop cue previews.
+`analysis:gate` re-analyses every track with `bpmSource` `published` or `manual` and prints `get_analysis_report` (in-range vs out-of-range split). Stderr also prints one line: in-range accepted/count, accepted-exact, `gridSource` counts, and `keyAgreement` counts (exact / relative / number ±1 / clash) against published or manual keys. Optional `--previews` renders drop cue previews.
+
+## Key v3 and the gold set
+
+Chroma is still HPCP in 165–3520 Hz. Key v3 adds a **sub-root prior**: the dominant 35–110 Hz pitch class over drop frames boosts that tonic in both modes (+0.06). Confidence is a logistic of the score-margin z-score, times a clarity gate (`clarity < 0.45` → `clarity * 0.08`) so broadband noise cannot look confident. `keyCandidates` is `[best, runnerUp]`.
+
+`applyAnalyzedMetadata` writes an analyzed canonical key only when `keyConfidence ≥ MIN_KEY_CONFIDENCE` (0.5). Rejected-grid tracks can still get a key. Existing ungated analyzed keys are cleared on the next stale pass. Analysis stays advisory; false “confident” keys are worse than unknown keys.
+
+Melodicness uses the calibrated key confidence: when `chromaClarity < 0.45` the key term is weighted 0.2.
+
+### Gold set (30) — label with `update_track_metadata { musicalKey, keySource: "published" }`
+
+Peak v3 (16): Pendulum — Under The Waves; Logistics — Chant; Sub Focus — Let The Story Begin; Technimatic — Let It Fall; Logistics — Inemuri; Sub Focus — Calling for a Sign; Nu:Logic — Dreamweaver; Technimatic — Breathe In; Technimatic — Hold on a While; Nu:Logic — Red Velvet; Technimatic — Moment to Moment; Technimatic — Colour Me In; Sub Focus — Until The End; Sub Focus — Tidal Wave; Pendulum — Streamline; Sub Focus — Vapourise.
+
+Liquid v3 (12): Form Form — New Element; Goldie — Sensual; Gavin Bryars — Raising the Titanic (Big Drum Mix); JMJ & Flytronic — In Too Deep; Nu:Logic — Pathways (feat. BLAKE); Logistics — Microdot; Maduk, Amanda Collis — Fire Away; Calibre — Feeling Normal; PFM — Danny's Song; Calibre — Say Enough (with DRS); Calibre — Time to Breathe (with Cimone); PFM — One & Only.
+
+Also: Alone; Complicated.
+
+Agreement target: ≥ 70 % on Camelot **number** (relative major/minor counts as agreement). Not measured until those rows are labelled published. On the 3.1.0 pass `key_confidence` p50 is still **0.012** and **0** rows are ≥ 0.5, so the gate writes no new canonical keys until confidence improves or labels exist.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { camelotDistance, interpolateEnergy, scoreCandidate } from "../src/index.ts";
+import { camelotDistance, camelotNumberDistance, interpolateEnergy, scoreCandidate } from "../src/index.ts";
 import type { Track } from "../src/index.ts";
 
 function track(partial: Partial<Track> & Pick<Track, "id" | "title">): Track {
@@ -43,6 +43,13 @@ describe("camelotDistance", () => {
 
   it("returns null when a key is missing", () => {
     expect(camelotDistance(null, "11A")).toBeNull();
+  });
+});
+
+describe("camelotNumberDistance", () => {
+  it("treats 5A vs 5B as number distance 0", () => {
+    expect(camelotNumberDistance("5A", "5B")).toBe(0);
+    expect(camelotNumberDistance("5A", "6A")).toBe(1);
   });
 });
 

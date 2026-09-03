@@ -12,6 +12,7 @@ import type {
 import {
   DomainError,
   DSP_ANALYZER_NAME,
+  MIN_KEY_CONFIDENCE,
   SEARCH_LIMIT_DEFAULT,
   SEARCH_LIMIT_MAX,
   normalizeGenres,
@@ -255,7 +256,12 @@ export class TrackRepository {
 
   applyAnalyzedMetadata(
     trackId: string,
-    input: { bpm: number | null; musicalKey: string | null },
+    input: {
+      bpm: number | null;
+      musicalKey: string | null;
+      keyConfidence?: number | null;
+      gridRejected?: boolean;
+    },
   ): Track {
     const existing = this.findById(trackId);
     if (!existing) {
@@ -266,15 +272,30 @@ export class TrackRepository {
     let musicalKey = existing.musicalKey;
     let camelotKey = existing.camelotKey;
     let keySource = existing.keySource;
-    if (existing.bpmSource !== "manual" && existing.bpmSource !== "published" && input.bpm !== null) {
+    const canWriteBpm =
+      existing.bpmSource !== "manual" &&
+      existing.bpmSource !== "published" &&
+      input.bpm !== null &&
+      input.gridRejected !== true;
+    if (canWriteBpm) {
       bpm = input.bpm;
       bpmSource = "analyzed";
     }
-    if (existing.keySource !== "manual" && existing.keySource !== "published" && input.musicalKey !== null) {
-      const normalized = normalizeKey(input.musicalKey);
-      musicalKey = normalized?.musicalKey ?? input.musicalKey;
-      camelotKey = normalized?.camelotKey ?? null;
-      keySource = "analyzed";
+    const gatedKey =
+      input.musicalKey !== null && (input.keyConfidence ?? 0) >= MIN_KEY_CONFIDENCE
+        ? input.musicalKey
+        : null;
+    if (existing.keySource !== "manual" && existing.keySource !== "published") {
+      if (gatedKey) {
+        const normalized = normalizeKey(gatedKey);
+        musicalKey = normalized?.musicalKey ?? gatedKey;
+        camelotKey = normalized?.camelotKey ?? null;
+        keySource = "analyzed";
+      } else if (existing.keySource === "analyzed") {
+        musicalKey = null;
+        camelotKey = null;
+        keySource = null;
+      }
     }
     this.db
       .prepare(
