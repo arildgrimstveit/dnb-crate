@@ -27,7 +27,7 @@ Each plan entry also gets a bounded `gainDb` so tracks sit near the **set median
 
   | Preset | What moves |
   | --- | --- |
-  | `phrase_mix` | Complementary: incoming mid/high fade in over the overlap (`hsin`); outgoing mid/high fade out over the same span. Incoming low arrives at bar 12 (24 of 32, 6 of 8). Sequential: incoming mid/high start 2 bars before mid-phrase. Landing: incoming low at −inf until the last bar; outgoing mid/high fade only over the last 8 bars (4 when `B = 8`); incoming drop hits as the outgoing ends. |
+  | `phrase_mix` | Complementary: incoming mid/high fade in over the overlap (`hsin`); outgoing mid/high fade out over the same span. Incoming low arrives at bar 12 (24 of 32, 6 of 8). Sequential: incoming mid/high start 2 bars before mid-phrase. Landing: incoming low at −inf until the last bar; outgoing mid/high fade only over the last 8 bars (4 when `B = 8`); incoming drop hits as the outgoing ends. Render keeps a planned `landing` (or `exitKind: dropLanding`) and does not run `choosePhraseShape` over it. Sequential still applies when the planner did not set landing. |
   | `bass_swap` | Mid/high crossfade across the overlap; outgoing mid dips −6 dB from bar 4. Lows swap at bar 8 (16 of 32, 4 of 8) in `rampMs`, then outgoing low goes to −inf at the handover bar. |
   | `crossfade` | Single `acrossfade` with `hsin`. |
 

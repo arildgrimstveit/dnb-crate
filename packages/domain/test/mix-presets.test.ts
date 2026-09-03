@@ -5,6 +5,7 @@ import {
   clampMixPresetParams,
   expandPreset,
   isMonotoneBand,
+  resolveRenderPhraseShape,
 } from "../src/mix-presets.ts";
 
 const BAR_MS = (4 * 60_000) / 174;
@@ -50,6 +51,18 @@ describe("mix presets", () => {
     ).toBe("complementary");
     expect(
       choosePhraseShape({ type: "drop", sectionEnergy: 0.334 }, { type: "intro", sectionEnergy: 0.078 }),
+    ).toBe("complementary");
+  });
+
+  it("keeps a planned landing at render even when sections look sequential", () => {
+    const hotDrop = { type: "drop" as const, sectionEnergy: 0.334 };
+    const hotIntro = { type: "intro" as const, sectionEnergy: 0.217 };
+    expect(choosePhraseShape(hotDrop, hotIntro)).toBe("sequential");
+    expect(resolveRenderPhraseShape("landing", null, hotDrop, hotIntro)).toBe("landing");
+    expect(resolveRenderPhraseShape("complementary", "dropLanding", hotDrop, hotIntro)).toBe("landing");
+    expect(resolveRenderPhraseShape(undefined, undefined, hotDrop, hotIntro)).toBe("sequential");
+    expect(
+      resolveRenderPhraseShape("complementary", "quietTail", hotDrop, { type: "intro", sectionEnergy: 0.078 }),
     ).toBe("complementary");
   });
 

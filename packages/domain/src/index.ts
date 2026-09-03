@@ -159,6 +159,7 @@ export {
 } from "./analysis.ts";
 export {
   choosePhraseShape,
+  resolveRenderPhraseShape,
   clampMixPresetParams,
   defaultLowHandoverBar,
   expandPreset,

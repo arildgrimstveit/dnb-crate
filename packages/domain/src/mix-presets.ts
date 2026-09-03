@@ -108,6 +108,19 @@ export function choosePhraseShape(
   return "complementary";
 }
 
+/** Keep a planned landing (or dropLanding exit). Sequential only when landing was not set. */
+export function resolveRenderPhraseShape(
+  planned: PhraseShape | null | undefined,
+  exitKind: string | null | undefined,
+  outgoing: Pick<TrackSection, "type" | "sectionEnergy"> | null | undefined,
+  incoming: Pick<TrackSection, "type" | "sectionEnergy"> | null | undefined,
+): PhraseShape {
+  if (planned === "landing" || exitKind === "dropLanding") {
+    return "landing";
+  }
+  return choosePhraseShape(outgoing, incoming);
+}
+
 function event(
   target: AutomationEvent["target"],
   atBar: number,

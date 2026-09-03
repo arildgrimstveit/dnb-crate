@@ -20,7 +20,7 @@ import {
   RENDERER_VERSION,
   assertPlaybackRate,
   clampMixPresetParams,
-  choosePhraseShape,
+  resolveRenderPhraseShape,
   expandPreset,
   normalizePhraseBars,
   isDomainError,
@@ -783,7 +783,9 @@ export class RenderCoordinator {
           const inAnalysis = this.analyses.findByTrackId(incoming.trackId);
           const outMs =
             outgoing.sourceEndMs - overlap * (outgoing.playbackRate > 0 ? outgoing.playbackRate : 1);
-          const shape = choosePhraseShape(
+          const shape = resolveRenderPhraseShape(
+            params?.phraseShape,
+            outgoing.exitKind,
             sectionAtMs(outAnalysis?.sections ?? [], outMs),
             sectionAtMs(inAnalysis?.sections ?? [], incoming.sourceStartMs),
           );
