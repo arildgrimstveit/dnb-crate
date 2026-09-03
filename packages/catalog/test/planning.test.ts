@@ -83,7 +83,13 @@ function stubDescriptors(
   catalog: ReturnType<typeof runtime>,
   trackId: string,
   descriptors: Partial<SonicDescriptors> & { energy?: number | null },
-  options: { gridRejected?: boolean; bpm?: number | null; bpmRaw?: number | null; bpmConfidence?: number | null } = {},
+  options: {
+    gridRejected?: boolean;
+    bpm?: number | null;
+    bpmRaw?: number | null;
+    bpmConfidence?: number | null;
+    integratedLufs?: number | null;
+  } = {},
 ): void {
   catalog.analyses.upsert({
     trackId,
@@ -104,7 +110,7 @@ function stubDescriptors(
     camelotKey: null,
     tempoStability: null,
     downbeatConfidence: null,
-    integratedLufs: null,
+    integratedLufs: options.integratedLufs ?? null,
     truePeakDb: null,
     lowBandEnergy: null,
     midBandEnergy: null,
@@ -411,6 +417,7 @@ describe("planner tempo matching", () => {
       durationMs: 180_000,
       energy,
       bpm,
+      camelotKey: null,
       analysis: {
         gridOk: true,
         bpm,
@@ -432,6 +439,7 @@ describe("planner tempo matching", () => {
         headEnergy: 0.3,
         tailEnergy: 0.4,
         integratedLufs: null,
+        keyConfidence: null,
         ...extra,
       },
     };
@@ -1259,6 +1267,80 @@ describe("descriptor filters and mood presets", () => {
     expect(hintScore?.score.reasons).toContain("BPM_HINT_ONLY");
     const join = created.plan.entries[0]?.transitionToNext;
     expect(join?.type).toBe("crossfade");
+  });
+
+  it("prefers the closer LUFS neighbour when the rest is equal", () => {
+    const catalog = runtime();
+    const start = seedTrack(catalog, { title: "Src", artist: "A", bpm: 174, camelot: "8A", energy: 6 });
+    const close = seedTrack(catalog, { title: "Close", artist: "B", bpm: 174, camelot: "8A", energy: 6 });
+    const far = seedTrack(catalog, { title: "Far", artist: "C", bpm: 174, camelot: "8A", energy: 6 });
+    stubDescriptors(catalog, start, { energy: 0.7 }, { integratedLufs: -8 });
+    stubDescriptors(catalog, close, { energy: 0.7 }, { integratedLufs: -7 });
+    stubDescriptors(catalog, far, { energy: 0.7 }, { integratedLufs: -13 });
+    const created = catalog.service.createSetPlan({
+      name: "Level",
+      targetDurationMs: 300_000,
+      startTrackId: start,
+      seed: 1,
+    });
+    const second = created.plan.entries[1]?.trackId;
+    expect(second).toBe(close);
+    expect(created.explanation.selected.some((row) => row.score.components.joinLevel !== 0 || row.trackId === close)).toBe(
+      true,
+    );
+  });
+
+  it("does not write an analyzed key below the confidence gate", () => {
+    const catalog = runtime();
+    const id = crypto.randomUUID();
+    catalog.repository.upsertFromScan({
+      id,
+      filePath: path.join("C:", "virtual", "gated.wav"),
+      fileFingerprint: "gated",
+      artist: "X",
+      title: "Gated",
+      album: null,
+      durationMs: 150_000,
+      sampleRateHz: 44100,
+      channels: 2,
+      bpm: null,
+      bpmSource: null,
+      musicalKey: null,
+      camelotKey: null,
+      keySource: null,
+    });
+    catalog.repository.applyAnalyzedMetadata(id, {
+      bpm: 174,
+      musicalKey: "Cm",
+      keyConfidence: 0.05,
+      gridRejected: false,
+    });
+    expect(catalog.repository.findById(id)?.musicalKey).toBeNull();
+    catalog.repository.applyAnalyzedMetadata(id, {
+      bpm: 174,
+      musicalKey: "Cm",
+      keyConfidence: 0.8,
+      gridRejected: false,
+    });
+    expect(catalog.repository.findById(id)?.musicalKey).toBe("Cm");
+    expect(catalog.repository.findById(id)?.keySource).toBe("analyzed");
+  });
+
+  it("reports harmonicCoverage for keyed joins", () => {
+    const catalog = runtime();
+    const start = seedTrack(catalog, { title: "A", artist: "X", bpm: 174, camelot: "8A", energy: 6 });
+    const next = seedTrack(catalog, { title: "B", artist: "Y", bpm: 174, camelot: "8A", energy: 6 });
+    stubDescriptors(catalog, start, { energy: 0.7 });
+    stubDescriptors(catalog, next, { energy: 0.7 });
+    const created = catalog.service.createSetPlan({
+      name: "Coverage",
+      targetDurationMs: 300_000,
+      startTrackId: start,
+      endTrackId: next,
+      seed: 1,
+    });
+    expect(created.explanation.harmonicCoverage?.totalJoins).toBeGreaterThanOrEqual(1);
+    expect(created.explanation.harmonicCoverage?.knownJoins).toBeGreaterThanOrEqual(1);
   });
 });
 

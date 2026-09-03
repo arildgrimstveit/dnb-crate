@@ -9,6 +9,8 @@ const stringListSchema = z.array(z.string().trim().min(1).max(64)).max(20);
 export const descriptorRangeSchema = z.object({
   min: z.number().min(0).max(1).optional(),
   max: z.number().min(0).max(1).optional(),
+  minPct: z.number().min(0).max(100).optional(),
+  maxPct: z.number().min(0).max(100).optional(),
 });
 
 export const descriptorFiltersSchema = z.object({
@@ -411,6 +413,11 @@ const scoreBreakdownSchema = z.object({
     recentlyUsed: z.number(),
     missingMetadata: z.number(),
     structure: z.number(),
+    joinLevel: z.number(),
+    joinStructure: z.number(),
+    joinAligned: z.number(),
+    joinHarmonic: z.number(),
+    genrePrior: z.number(),
   }),
   reasons: z.array(z.string()),
 });
@@ -657,6 +664,12 @@ export const planExplanationSchema = z.object({
       reason: z.string(),
     }),
   ),
+  harmonicCoverage: z
+    .object({
+      knownJoins: z.number().int(),
+      totalJoins: z.number().int(),
+    })
+    .optional(),
 });
 
 export const createSetPlanDataSchema = z.object({

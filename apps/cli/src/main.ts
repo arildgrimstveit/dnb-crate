@@ -271,7 +271,7 @@ async function main(): Promise<void> {
         }
         const report = runtime.service.getAnalysisReport();
         process.stderr.write(
-          `analysis:gate in-range accepted ${report.inRange.accepted}/${report.inRange.count} exact ${report.inRange.acceptedExact} gridSource ${JSON.stringify(report.gridSourceCounts)}\n`,
+          `analysis:gate in-range accepted ${report.inRange.accepted}/${report.inRange.count} exact ${report.inRange.acceptedExact} gridSource ${JSON.stringify(report.gridSourceCounts)} key ${JSON.stringify(report.keyAgreementCounts)}\n`,
         );
         printJson({ ok: true, data: report });
         break;

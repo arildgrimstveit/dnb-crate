@@ -11,7 +11,12 @@ The planner is deterministic. The host model translates “soulful liquid, peak 
 | Subgenre overlap        | 8                         |                                                            |
 | Target-energy proximity | 12                        | Interpolated from `requestedArc`                           |
 | BPM compatibility       | 12                        | Falls off over ±8 BPM                                      |
-| Harmonic (Camelot)      | 10 × `harmonicImportance` | 0 same, 1 relative/neighbour, then wheel distance          |
+| Harmonic (Camelot)      | 10 × `harmonicImportance` | Number distance first (5A/5B = 0), scaled by `min(keyConf)` |
+| Join level              | 6                         | −(|ΔLUFS| − 3)⁺ / 6                                       |
+| Join structure          | 8                         | Incoming drop ≥ 16 bars and/or outgoing quiet tail          |
+| Join aligned            | 10                        | Both grids accepted and BPM within ±3%                      |
+| Join harmonic           | 8                         | Same as harmonic, used in lookahead                         |
+| Genre prior             | 4                         | liquid funk / neurofunk / jump up / jungle                  |
 | Personal rating         | 6                         | 1–5 scaled to 0–1                                          |
 | Preferred-artist bonus  | 8                         |                                                            |
 | Exploration             | 4 × `explorationWeight`   | Seeded hash of `seed + trackId`                            |
@@ -41,6 +46,8 @@ Identical catalog + constraints + seed → identical plan.
 - Cue points are never invented; missing mix-in/out cues produce validation warnings, not guessed positions
 - Missing BPM/key/energy penalizes a candidate; it does not fabricate values
 - A library that cannot fill the target duration returns a **partial** plan (`partial: true`) plus warnings
-- Harmonic scoring uses Camelot wheel distance, not audio analysis
+- Harmonic scoring uses Camelot **number** distance, confidence-weighted. Unknown keys score 0 (`harmonicCoverage` on the plan explanation)
+- Mood presets may use crate percentiles (`minPct` / `maxPct` against stored p10/p50/p90)
+- Pool floor: if the crate is large and the pool is still ≤ 12 after relaxing descriptor ranges, planning stops (`POOL_TOO_SMALL`). A relaxed pool records `POOL_RELAXED`
 - Exploration is a seeded hash, not embeddings
 - Ten live natural-language host evaluations are not part of the automated gate

@@ -82,6 +82,10 @@ Kick/sub comb agreement is on `tempoEvidence.agreement` (130 tracks = 1, 49 mid 
 
 Key v3 (sub-root prior + margin logistic × clarity gate) already ran in the 3.1.0 pass; `key_confidence` p50 is still **0.012**, max 0.184, **0** rows ≥ 0.5. Canonical writes are now gated at **0.5** and will clear the 216 ungated analyzed keys on the **3.2.0** stale re-run. Gold set of 30 is listed in `docs/analysis.md` — agreement ≥ 70% waits on published labels. Harmony is Camelot number distance; 5A vs 5B is 0.
 
+### WP6 shipped
+
+`scoreCandidate` adds `joinLevel`, `joinStructure`, `joinAligned`, `joinHarmonic`, `genrePrior`. The planner scores the top 5, looks ahead one join (beam 3), and re-ranks `total + 0.35 * lookahead`. `chooseAlignedType` uses `relEnergy` for `bass_swap` (hot+hot or drop-in on `dropLanding`). Readiness warnings use effective energy so descriptor energy no longer flags every track. `KEY_CLASH` shortens ≥16-bar clashes to 8 bars.
+
 ## Crate v3 — baseline (2026-09-03)
 
 `library:stats` before WP1–WP5. Live crate, no re-analysis.

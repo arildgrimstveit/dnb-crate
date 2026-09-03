@@ -113,10 +113,21 @@ export function validateSetPlan(
         trackId: track.id,
       });
     }
-    if (track.bpm === null || track.camelotKey === null || track.energy === null) {
+    const energy = options?.effectiveEnergyByTrackId?.get(track.id) ?? track.energy;
+    const missing: string[] = [];
+    if (track.bpm === null) {
+      missing.push("BPM");
+    }
+    if (track.camelotKey === null) {
+      missing.push("key");
+    }
+    if (energy === null) {
+      missing.push("energy");
+    }
+    if (missing.length > 0) {
       warnings.push({
         code: "MISSING_METADATA",
-        message: `${track.title} is missing BPM, key, and/or energy`,
+        message: `${track.title} is missing ${missing.join(", ")}`,
         entryId: entry.id,
         trackId: track.id,
       });

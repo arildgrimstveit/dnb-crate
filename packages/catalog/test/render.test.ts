@@ -102,7 +102,12 @@ function saveTwoTrackPlan(
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  catalog.setPlans.save(plan, 1, { seed: 1, selected: [], rejected: [] });
+  catalog.setPlans.save(plan, 1, {
+    seed: 1,
+    selected: [],
+    rejected: [],
+    harmonicCoverage: { knownJoins: 0, totalJoins: 0 },
+  });
   return plan;
 }
 

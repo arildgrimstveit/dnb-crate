@@ -12,6 +12,7 @@ import {
   MIN_PLAYABLE_DURATION_MS,
   assertPlaybackRate,
   normalizeDnbBpm,
+  camelotNumberDistance,
   normalizePhraseBars,
   resolveBpmHint,
   phraseDurationMs,
@@ -52,6 +53,7 @@ export type TimelineAnalysis = {
   headEnergy: number | null;
   tailEnergy: number | null;
   integratedLufs: number | null;
+  keyConfidence: number | null;
   descriptors?: {
     energy: number | null;
     danceability: number | null;
@@ -64,7 +66,7 @@ export type TimelineAnalysis = {
   } | null;
 };
 
-export type TimelineTrack = Pick<Track, "id" | "durationMs" | "energy" | "bpm"> & {
+export type TimelineTrack = Pick<Track, "id" | "durationMs" | "energy" | "bpm" | "camelotKey"> & {
   analysis?: TimelineAnalysis | null;
 };
 
@@ -130,7 +132,15 @@ function sectionAt(sections: TrackSection[], atMs: number | null): TrackSection 
   );
 }
 
-function chooseAlignedType(outgoing: TimelineTrack, incoming: TimelineTrack): {
+function relEnergy(sectionEnergy: number, dropEnergy: number): number {
+  return dropEnergy > 0 ? sectionEnergy / dropEnergy : 0;
+}
+
+function chooseAlignedType(
+  outgoing: TimelineTrack,
+  incoming: TimelineTrack,
+  window?: PhraseWindow | null,
+): {
   type: "phrase_mix" | "bass_swap";
   reason: string;
 } {
@@ -150,13 +160,24 @@ function chooseAlignedType(outgoing: TimelineTrack, incoming: TimelineTrack): {
     0,
     ...inSections.filter((section) => section.type === "drop").map((section) => section.sectionEnergy),
   );
+  const outDropEnergy = Math.max(
+    0,
+    ...outSections.filter((section) => section.type === "drop").map((section) => section.sectionEnergy),
+  );
   const headEnergy = incoming.analysis?.headEnergy ?? head?.sectionEnergy ?? 0;
   const tailEnergy = outgoing.analysis?.tailEnergy ?? 0;
+  const headRel = relEnergy(headEnergy, dropEnergy);
+  const tailRel = relEnergy(tailEnergy, outDropEnergy);
   const headIsDrop = head?.type === "drop";
-  const headNearDrop = dropEnergy > 0 && headEnergy >= 0.6 * dropEnergy;
-  const bothHot = tailEnergy >= 0.6 && headEnergy >= 0.6;
-  if (headIsDrop || headNearDrop || bothHot) {
-    return { type: "bass_swap", reason: headIsDrop ? "incoming-drop" : bothHot ? "hot-join" : "head-near-drop" };
+  const headNearDrop = dropEnergy > 0 && headRel >= 0.6;
+  const bothHot =
+    (dropEnergy > 0 && outDropEnergy > 0 && headRel >= 0.8 && tailRel >= 0.8) ||
+    (dropEnergy === 0 && outDropEnergy === 0 && tailEnergy >= 0.6 && headEnergy >= 0.6);
+  if (bothHot) {
+    return { type: "bass_swap", reason: "hot-join" };
+  }
+  if (headIsDrop || (window?.exitKind === "dropLanding" && headNearDrop)) {
+    return { type: "bass_swap", reason: headIsDrop ? "incoming-drop" : "drop-landing" };
   }
   return { type: "phrase_mix", reason: "matched-grid-phrase" };
 }
@@ -197,14 +218,19 @@ export function chooseTransition(
   } catch {
     return crossfade("tempo-out-of-range", SHORT_CROSSFADE_MS);
   }
-  const aligned = chooseAlignedType(outgoing, incoming);
   const window =
     options.window ??
     planPhraseWindow(outgoing, incoming, {
       dropAnchored: options.dropAnchored,
       targetBpm: target,
     });
-  const phraseBars: PhraseBarCount = normalizePhraseBars(window.barCount);
+  const aligned = chooseAlignedType(outgoing, incoming, window);
+  let phraseBars: PhraseBarCount = normalizePhraseBars(window.barCount);
+  const numberDist = camelotNumberDistance(outgoing.camelotKey ?? null, incoming.camelotKey ?? null);
+  const keyClash = phraseBars >= 16 && numberDist != null && numberDist >= 3;
+  if (keyClash) {
+    phraseBars = 8;
+  }
   const phraseShape =
     window.phraseShape ??
     choosePhraseShape(
@@ -233,6 +259,7 @@ export function chooseTransition(
         mixInMs: window.mixInMs,
         ...(window.exitKind ? { exitKind: window.exitKind } : {}),
         ...(window.incomingDropMs != null ? { incomingDropMs: window.incomingDropMs } : {}),
+        ...(keyClash ? { keyClash: true, keyClashWarning: "KEY_CLASH" } : {}),
       },
     },
     outgoingRate,
@@ -489,6 +516,7 @@ export function analysisToTimeline(
     bpm: number | null;
     bpmRaw?: number | null;
     bpmConfidence: number | null;
+    keyConfidence?: number | null;
     integratedLufs?: number | null;
     downbeatTimesMs?: number[];
     downbeatConfidence?: number | null;
@@ -574,6 +602,7 @@ export function analysisToTimeline(
     tailEnergy: sectionEnergyAt(sections, mixOut.ms),
     integratedLufs:
       analysis.integratedLufs ?? analysis.descriptors?.integratedLufs ?? null,
+    keyConfidence: analysis.keyConfidence ?? null,
     descriptors: analysis.descriptors
       ? {
           energy: analysis.descriptors.energy ?? null,

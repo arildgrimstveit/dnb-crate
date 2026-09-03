@@ -4,12 +4,17 @@ import {
   DEFAULT_TRANSITION_OVERLAP_MS,
   DURATION_TOLERANCE_MS,
   PLANNER_CANDIDATE_CAP,
+  PLANNER_POOL_MIN_TRACKS,
+  PLANNER_POOL_RELAX_FACTOR,
   genresMatchFilter,
   interpolateEnergy,
   matchesDescriptorFilters,
   normalizePersonName,
+  resolveDescriptorFilters,
   scoreCandidate,
   type CreateSetPlanInput,
+  type DescriptorFilters,
+  type DescriptorPercentiles,
   type PlanExplanation,
   type RejectionExplanation,
   type SetPlanV1,
@@ -50,10 +55,29 @@ function respectsSpacing(track: Track, recent: Track[], spacing: number): boolea
   return !recent.slice(-spacing).some((item) => artistKey(item) === key);
 }
 
+function relaxDescriptorFilters(filters: DescriptorFilters | undefined, step: number): DescriptorFilters | undefined {
+  if (!filters) {
+    return filters;
+  }
+  const loosened: DescriptorFilters = {};
+  for (const key of Object.keys(filters) as Array<keyof DescriptorFilters>) {
+    const range = filters[key];
+    if (!range) {
+      continue;
+    }
+    loosened[key] = {
+      min: range.min != null ? range.min - 0.08 * step : undefined,
+      max: range.max != null ? range.max + 0.08 * step : undefined,
+    };
+  }
+  return loosened;
+}
+
 export function draftSetPlan(
   catalog: Track[],
   input: CreateSetPlanInput,
   analyses: Map<string, TimelineAnalysis> = new Map(),
+  options: { percentiles?: DescriptorPercentiles | null } = {},
 ): { plan: SetPlanV1; explanation: PlanExplanation; partial: boolean } {
   const seed = input.seed ?? 1;
   const targetDurationMs = input.targetDurationMs ?? DEFAULT_TARGET_DURATION_MS;
@@ -66,8 +90,13 @@ export function draftSetPlan(
   const explorationWeight = input.explorationWeight ?? 0.2;
   const now = new Date().toISOString();
   const rejected: RejectionExplanation[] = [];
-
-  const pool = catalog.filter((track) => {
+  const needed = Math.max(
+    16,
+    Math.ceil((input.targetDurationMs ?? DEFAULT_TARGET_DURATION_MS) / typicalPlayable(catalog)),
+  );
+  let descriptorFilters = resolveDescriptorFilters(input.descriptors, options.percentiles);
+  const filterCatalog = (filters: DescriptorFilters | undefined) =>
+    catalog.filter((track) => {
     if (track.fileMissing) {
       rejected.push({ trackId: track.id, title: track.title, reason: "FILE_MISSING" });
       return false;
@@ -99,7 +128,7 @@ export function draftSetPlan(
       return false;
     }
     const descriptors = analysis?.descriptors ?? null;
-    const descriptorMatch = matchesDescriptorFilters(track, descriptors, input.descriptors);
+    const descriptorMatch = matchesDescriptorFilters(track, descriptors, filters);
     if (!descriptorMatch.ok) {
       rejected.push({
         trackId: track.id,
@@ -119,6 +148,23 @@ export function draftSetPlan(
     }
     return true;
   });
+
+  let pool = filterCatalog(descriptorFilters);
+  if (
+    descriptorFilters &&
+    catalog.length >= needed * PLANNER_POOL_RELAX_FACTOR &&
+    pool.length < needed * PLANNER_POOL_RELAX_FACTOR
+  ) {
+    for (let step = 1; step <= 3 && pool.length < needed * PLANNER_POOL_RELAX_FACTOR; step += 1) {
+      descriptorFilters = relaxDescriptorFilters(descriptorFilters, step);
+      pool = filterCatalog(descriptorFilters);
+    }
+    rejected.push({ trackId: "pool", title: "pool", reason: "POOL_RELAXED" });
+  }
+  if (pool.length <= PLANNER_POOL_MIN_TRACKS && catalog.length > PLANNER_POOL_MIN_TRACKS) {
+    rejected.push({ trackId: "pool", title: "pool", reason: "POOL_TOO_SMALL" });
+    pool = [];
+  }
 
   const byId = new Map(pool.map((track) => [track.id, track]));
   const requireTrack = (id: string | undefined, label: string): Track | undefined => {
@@ -163,6 +209,20 @@ export function draftSetPlan(
   const scoreFor = (candidate: Track, source: Track | null, fraction: number) => {
     const candA = analyses.get(candidate.id);
     const srcA = source ? analyses.get(source.id) : undefined;
+    const dropBars =
+      candA?.sections
+        ?.filter((section) => section.type === "drop")
+        .reduce((max, section) => {
+          const bars =
+            section.startBar != null && section.endBar != null
+              ? section.endBar - section.startBar
+              : 0;
+          return Math.max(max, bars);
+        }, 0) ?? 0;
+    const quietTail = (srcA?.sections ?? []).some(
+      (section) =>
+        (section.type === "outro" || section.type === "breakdown") && section.sectionEnergy <= 0.5,
+    );
     return scoreCandidate({
       source,
       candidate,
@@ -186,6 +246,15 @@ export function draftSetPlan(
       sourceBpmHint: srcA?.bpmHint ?? null,
       descriptors: candA?.descriptors ?? null,
       sourceDescriptors: srcA?.descriptors ?? null,
+      candidateLufs: candA?.integratedLufs ?? null,
+      sourceLufs: srcA?.integratedLufs ?? null,
+      candidateKeyConfidence: candA?.keyConfidence ?? null,
+      sourceKeyConfidence: srcA?.keyConfidence ?? null,
+      candidateGridOk: candA?.gridOk ?? false,
+      sourceGridOk: srcA?.gridOk ?? false,
+      candidateDropBars: dropBars,
+      sourceQuietTail: quietTail,
+      candidateGenres: candidate.genres,
     });
   };
 
@@ -230,15 +299,26 @@ export function draftSetPlan(
     }
     const spaced = candidates.filter((track) => respectsSpacing(track, selected, spacing));
     const usable = spaced.length > 0 ? spaced : candidates;
-    usable.sort((a, b) => {
-      const scoreA = scoreFor(a, source, fraction).total;
-      const scoreB = scoreFor(b, source, fraction).total;
-      if (scoreA !== scoreB) {
-        return scoreB - scoreA;
-      }
-      return a.id.localeCompare(b.id);
-    });
-    const next = usable[0];
+    const ranked = usable
+      .map((track) => ({ track, breakdown: scoreFor(track, source, fraction), lookahead: 0 }))
+      .sort(
+        (a, b) => b.breakdown.total - a.breakdown.total || a.track.id.localeCompare(b.track.id),
+      );
+    const top = ranked.slice(0, 5);
+    for (const item of top) {
+      const nextScores = usable
+        .filter((track) => track.id !== item.track.id)
+        .map((track) => scoreFor(track, item.track, fraction).total)
+        .sort((a, b) => b - a)
+        .slice(0, 3);
+      item.lookahead = nextScores[0] ?? 0;
+    }
+    top.sort(
+      (a, b) =>
+        b.breakdown.total + 0.35 * (b.lookahead ?? 0) - (a.breakdown.total + 0.35 * (a.lookahead ?? 0)) ||
+        a.track.id.localeCompare(b.track.id),
+    );
+    const next = top[0]?.track;
     if (!next) {
       break;
     }
@@ -286,6 +366,13 @@ export function draftSetPlan(
     updatedAt: now,
   };
 
+  const totalJoins = Math.max(selected.length - 1, 0);
+  let knownJoins = 0;
+  for (let i = 0; i < totalJoins; i += 1) {
+    if (selected[i]?.camelotKey && selected[i + 1]?.camelotKey) {
+      knownJoins += 1;
+    }
+  }
   const explanation: PlanExplanation = {
     seed,
     selected: selected.map((track, order) => ({
@@ -300,6 +387,7 @@ export function draftSetPlan(
       ),
     })),
     rejected: rejected.slice(0, 50),
+    harmonicCoverage: { knownJoins, totalJoins },
   };
 
   return { plan, explanation, partial };

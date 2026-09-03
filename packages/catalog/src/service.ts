@@ -52,6 +52,7 @@ import {
   effectiveEnergy,
   genresMatchFilter,
   matchesDescriptorFilters,
+  resolveDescriptorFilters,
   toPublicTrack,
 } from "@dnb-crate/domain";
 import { ffmpegMixReady } from "@dnb-crate/audio-renderer";
@@ -415,11 +416,18 @@ export class CatalogService {
       bpm: number | null;
       bpmConfidence: number | null;
       gridRejected: boolean;
-      gridSource: "analyzed" | "reference" | "anchor" | null;
-      keyAgreement: "exact" | "relative" | "none" | null;
+      gridSource: "analyzed" | "reference" | "anchor" | "sidecar" | null;
+      keyAgreement: "exact" | "relative" | "number_pm1" | "clash" | null;
       sectionCount: number;
     }>;
-    gridSourceCounts: { analyzed: number; reference: number; anchor: number };
+    gridSourceCounts: { analyzed: number; reference: number; anchor: number; sidecar: number };
+    keyAgreementCounts: {
+      exact: number;
+      relative: number;
+      number_pm1: number;
+      clash: number;
+      unknown: number;
+    };
     needsReview: Array<{
       trackId: string;
       title: string;
@@ -463,11 +471,18 @@ export class CatalogService {
       bpm: number | null;
       bpmConfidence: number | null;
       gridRejected: boolean;
-      gridSource: "analyzed" | "reference" | "anchor" | null;
-      keyAgreement: "exact" | "relative" | "none" | null;
+      gridSource: "analyzed" | "reference" | "anchor" | "sidecar" | null;
+      keyAgreement: "exact" | "relative" | "number_pm1" | "clash" | null;
       sectionCount: number;
     }> = [];
-    const gridSourceCounts = { analyzed: 0, reference: 0, anchor: 0 };
+    const gridSourceCounts = { analyzed: 0, reference: 0, anchor: 0, sidecar: 0 };
+    const keyAgreementCounts = {
+      exact: 0,
+      relative: 0,
+      number_pm1: 0,
+      clash: 0,
+      unknown: 0,
+    };
     let inRangeCount = 0;
     let withinHalf = 0;
     let accepted = 0;
@@ -503,8 +518,19 @@ export class CatalogService {
           keyAgreement: keyAgreement(row.musicalKey, refKey),
           sectionCount: row.sections.length,
         });
+        const agreement = keyAgreement(row.musicalKey, refKey);
+        if (agreement) {
+          keyAgreementCounts[agreement] += 1;
+        } else {
+          keyAgreementCounts.unknown += 1;
+        }
         const source = row.gridSource ?? "analyzed";
-        if (source === "reference" || source === "anchor" || source === "analyzed") {
+        if (
+          source === "reference" ||
+          source === "anchor" ||
+          source === "analyzed" ||
+          source === "sidecar"
+        ) {
           gridSourceCounts[source] += 1;
         }
       }
@@ -576,6 +602,7 @@ export class CatalogService {
       publishedOrManualCompared: inRangeCount + outOfRangeCount,
       dspWithinHalfBpm: withinHalf,
       gridSourceCounts,
+      keyAgreementCounts,
       engines: engineRows.slice(0, 200),
       needsReview: needsReview.slice(0, 50),
       disagreements: disagreements.slice(0, 50),
@@ -826,6 +853,13 @@ export class CatalogService {
           sourceBpmHint: srcA ? resolveBpmHint(srcA).bpm : null,
           descriptors: candA?.descriptors ?? null,
           sourceDescriptors: srcA?.descriptors ?? null,
+          candidateKeyConfidence: candA?.keyConfidence ?? null,
+          sourceKeyConfidence: srcA?.keyConfidence ?? null,
+          candidateGridOk: Boolean(candA && !candA.gridRejected),
+          sourceGridOk: Boolean(srcA && !srcA.gridRejected),
+          candidateLufs: candA?.integratedLufs ?? null,
+          sourceLufs: srcA?.integratedLufs ?? null,
+          candidateGenres: track.genres,
         }),
       };
       })
@@ -857,7 +891,13 @@ export class CatalogService {
           .map((track) => [track.id, this.toTimeline(track)] as const)
           .filter((entry): entry is readonly [string, NonNullable<ReturnType<typeof analysisToTimeline>>] => entry[1] != null),
       );
-      const drafted = draftSetPlan(this.repository.listAll(), input, analyses);
+      const drafted = draftSetPlan(this.repository.listAll(), {
+        ...input,
+        descriptors: resolveDescriptorFilters(
+          input.descriptors,
+          this.getLibraryStats().descriptorPercentiles,
+        ),
+      }, analyses, { percentiles: this.getLibraryStats().descriptorPercentiles });
       const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
       const validation = validateSetPlan(drafted.plan, tracksById, {
         artistRepeatSpacing: input.artistRepeatSpacing,
