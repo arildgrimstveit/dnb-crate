@@ -253,7 +253,7 @@ Plan `b85cd3fb-5540-48a0-ba80-554d94edf4b3`, job `9be8dba1-d7cf-4641-a04d-c4f7f3
 
 - Do not regress Inemuri → Calling for a Sign (“absolutely beautiful” on v3.1). That was a 16-bar phrase mix into a relatively quiet incoming intro (Inemuri mix-out is a build; Calling for a Sign intro energy 0.114).
 - Do not turn every Peak join into sequential. The Technimatic run (Dreamweaver → … → Moment to Moment) and Colour Me In → Until The End were already perfect on complementary after the halfway-cliff fix.
-- Do not force phrase-mix onto liquid hours. Crossfade was correct for almost every Liquid v3 join.
+- Do not force phrase-mix onto liquid hours **as a v3 lesson**. v3 Liquid was nice because the *material* was soft, not because crossfade is the goal. **v5:** phrase-mix (and bass_swap) is the default aligned template for Liquid too, with `dropAnchored: true`. Crossfade is only the mismatch fallback (missing grid or tempo out of range). See `docs/examples/liquid-hour-v5.brief.json`.
 - Do not use 8 s tempo-mismatch cuts as a pairing strategy (Complicated → Tidal Wave).
 - Do not overwrite the files in the keep table.
 
