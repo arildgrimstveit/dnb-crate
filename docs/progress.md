@@ -86,6 +86,12 @@ Key v3 (sub-root prior + margin logistic × clarity gate) already ran in the 3.1
 
 `scoreCandidate` adds `joinLevel`, `joinStructure`, `joinAligned`, `joinHarmonic`, `genrePrior`. The planner scores the top 5, looks ahead one join (beam 3), and re-ranks `total + 0.35 * lookahead`. `chooseAlignedType` uses `relEnergy` for `bass_swap` (hot+hot or drop-in on `dropLanding`). Readiness warnings use effective energy so descriptor energy no longer flags every track. `KEY_CLASH` shortens ≥16-bar clashes to 8 bars.
 
+### WP7 shipped
+
+Mood presets resolve `minPct` / `maxPct` against crate p10/p50/p90. Pool relaxes in 0.08 steps when below 3× needed and refuses to plan from ≤ 12 tracks on a large crate. Briefs: `docs/examples/peak-hour-v4.brief.json` (seed 6, drop-anchored) and `liquid-hour-v4.brief.json` (seed 3, intro-start, `melodicness.minPct` 60).
+
+On 3.1.0 stored descriptors: Peak pool **95** (92 accepted grids, 97%). Liquid pool **68** (36 accepted, 53%) — pool floor met; 60% accepted-grid target waits on the 3.2.0 rescue re-run. Liquid `minPct` 70 was only 30 tracks, so the brief uses 60.
+
 ## Crate v3 — baseline (2026-09-03)
 
 `library:stats` before WP1–WP5. Live crate, no re-analysis.

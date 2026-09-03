@@ -1,0 +1,18 @@
+{
+  "name": "Liquid hour v4",
+  "targetDurationMs": 3600000,
+  "seed": 3,
+  "artistRepeatSpacing": 2,
+  "dropAnchored": false,
+  "requestedArc": [
+    { "atFraction": 0, "targetEnergy": 4 },
+    { "atFraction": 0.55, "targetEnergy": 7 },
+    { "atFraction": 1, "targetEnergy": 5 }
+  ],
+  "genres": { "exclude": ["idm", "ambient", "rock"] },
+  "preferredSubgenres": ["liquid funk"],
+  "descriptors": {
+    "melodicness": { "minPct": 60 },
+    "energy": { "minPct": 15, "maxPct": 80 }
+  }
+}
