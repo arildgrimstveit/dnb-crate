@@ -1,5 +1,5 @@
 import type { RenderReadiness } from "./render.ts";
-import type { Track } from "./track.ts";
+import type { BpmSource, Track } from "./track.ts";
 
 export type EnergyArcPoint = {
   atFraction: number;
@@ -156,6 +156,7 @@ export type PlanningReadiness = {
   ready: boolean;
   missing: string[];
   cuePointTypes: string[];
+  bpmSource?: BpmSource | "hint" | null;
 };
 
 export type SetPlanSummary = {

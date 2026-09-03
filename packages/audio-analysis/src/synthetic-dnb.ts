@@ -168,6 +168,38 @@ export function buildKeyedDnbPcm(
   return { ...pcm, expected: { ...pcm.expected, key: options.key } };
 }
 
+/** 124 BPM kicks with 186 BPM hats — 3:2 confusion fixture. */
+export function buildOffbeatHatPcm(
+  options: {
+    kickBpm?: number;
+    hatBpm?: number;
+    durationMs?: number;
+    sampleRateHz?: number;
+  } = {},
+): PcmAudio & { expected: { kickBpm: number; hatBpm: number } } {
+  const kickBpm = options.kickBpm ?? 124;
+  const hatBpm = options.hatBpm ?? 186;
+  const durationMs = options.durationMs ?? 16_000;
+  const sampleRateHz = options.sampleRateHz ?? 22_050;
+  const frameCount = Math.max(1, Math.round((sampleRateHz * durationMs) / 1000));
+  const samples = new Float32Array(frameCount);
+  const kickPeriodMs = 60_000 / kickBpm;
+  const hatPeriodMs = 60_000 / hatBpm;
+  for (let t = 0; t < durationMs; t += kickPeriodMs) {
+    addKick(samples, sampleRateHz, Math.round((t / 1000) * sampleRateHz), 0.95);
+  }
+  for (let t = hatPeriodMs / 2; t < durationMs; t += hatPeriodMs) {
+    addHat(samples, sampleRateHz, Math.round((t / 1000) * sampleRateHz), 0.18);
+  }
+  return {
+    samples,
+    sampleRateHz,
+    durationMs: (frameCount / sampleRateHz) * 1000,
+    channels: 1,
+    expected: { kickBpm, hatBpm },
+  };
+}
+
 export function buildChordPcm(options: {
   frequencies: number[];
   durationMs?: number;

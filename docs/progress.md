@@ -10,6 +10,10 @@
 - Energy / rating / moods / tags / subgenres: **0**. Enrichment fields (isrc, label, releaseDate, recordingMbid, genres, duplicateGroups) report 0 until WP3.
 - File tags (not yet in the catalog): ISRC 122, label 115, genre 491, date 582, MusicBrainz IDs 30.
 
+### WP1 shipped
+
+Analysis scopes (`unanalyzed` / `stale` / `all` / `planningReady`), `reference_bpm`, decode/ebur128 prefetch, 2/3–3/2 fold, integer published tolerance 1.0 BPM, `bpmHint` on rejected in-range rows, CLI `analysis:run`. Analyzer version still **2.1.0**. Suite 18 files / 126 passed.
+
 ## Mixing v2.2 (2026-09-03)
 
 Set plans now consume analysis: mix windows from mix-in/mix-out + silence bounds, beat-or-bar alignment, reference grids, 3-band presets, and join type from head/tail energy. WP0–WP6 notes sit below.

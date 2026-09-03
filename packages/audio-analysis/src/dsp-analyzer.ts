@@ -5,6 +5,7 @@ import {
   DNB_BPM_MIN,
   MIN_ANALYSIS_CONFIDENCE,
   normalizeDnbBpm,
+  publishedBpmTolerance,
   snapToNearestBeat,
   type TrackSection,
 } from "@dnb-crate/domain";
@@ -387,6 +388,111 @@ function scoreReferenceTempo(
       tempoConf: Number(tempoConf.toFixed(4)),
       onGridRatio: Number(onGridRatio.toFixed(4)),
     },
+  };
+}
+
+function tryRatioFold(
+  onset: number[],
+  hopMs: number,
+  bpmRaw: number,
+  minBpm: number,
+  maxBpm: number,
+  bpmConfidence: number,
+  gridRejected: boolean,
+): {
+  bpmRaw: number;
+  bpm: number | null;
+  bpmConfidence: number;
+  offsetMs: number;
+  gridRejected: boolean;
+  gridRejectionReason: string | null;
+  tempoEvidence: {
+    prominence: number;
+    stability: number;
+    tempoConf: number;
+    onGridRatio: number;
+  };
+} | null {
+  const ratioBpms = [bpmRaw * (2 / 3), bpmRaw * (3 / 2)].filter(
+    (value) => value > 40 && value < 400,
+  );
+  const scored = ratioBpms.map((candidate) => ({
+    bpm: candidate,
+    ...scoreReferenceTempo(onset, hopMs, candidate),
+  }));
+
+  let nextBpm: number | null = gridRejected ? null : (normalizeDnbBpm(bpmRaw, minBpm, maxBpm)?.bpm ?? null);
+  let nextRaw = bpmRaw;
+  let nextConfidence = bpmConfidence;
+  let nextRejected = gridRejected;
+  let nextReason: string | null = gridRejected
+    ? "No plausible DnB tempo (160–190 after half/double fold)"
+    : null;
+  let nextOffset = 0;
+  let nextEvidence = scored[0]?.tempoEvidence ?? {
+    prominence: 0,
+    stability: 0,
+    tempoConf: 0,
+    onGridRatio: 0,
+  };
+  let changed = false;
+
+  if (gridRejected) {
+    const inRange = scored
+      .filter(
+        (row) =>
+          row.bpm >= minBpm - 1e-6 &&
+          row.bpm <= maxBpm + 1e-6 &&
+          row.confidence >= MIN_ANALYSIS_CONFIDENCE,
+      )
+      .sort((a, b) => b.confidence - a.confidence);
+    const best = inRange[0];
+    if (best) {
+      nextBpm = Number(best.bpm.toFixed(3));
+      nextRaw = best.bpm;
+      nextConfidence = Number(best.confidence.toFixed(3));
+      nextRejected = false;
+      nextReason = null;
+      nextOffset = best.offsetMs;
+      nextEvidence = best.tempoEvidence;
+      changed = true;
+    }
+  }
+
+  if (!nextRejected && nextBpm != null) {
+    const current = scoreReferenceTempo(onset, hopMs, nextBpm);
+    const outOfRange = [nextBpm * (2 / 3), nextBpm * (3 / 2)]
+      .filter((value) => value < minBpm - 1e-6 || value > maxBpm + 1e-6)
+      .map((candidate) => ({
+        bpm: candidate,
+        ...scoreReferenceTempo(onset, hopMs, candidate),
+      }))
+      .sort((a, b) => b.confidence - a.confidence);
+    const better = outOfRange[0];
+    if (better && better.confidence > current.confidence + 1e-6) {
+      return {
+        bpmRaw: better.bpm,
+        bpm: null,
+        bpmConfidence: Number(better.confidence.toFixed(3)),
+        offsetMs: better.offsetMs,
+        gridRejected: true,
+        gridRejectionReason: "No plausible DnB tempo (160–190 after 2/3–3/2 fold)",
+        tempoEvidence: better.tempoEvidence,
+      };
+    }
+  }
+
+  if (!changed) {
+    return null;
+  }
+  return {
+    bpmRaw: nextRaw,
+    bpm: nextBpm,
+    bpmConfidence: nextConfidence,
+    offsetMs: nextOffset,
+    gridRejected: nextRejected,
+    gridRejectionReason: nextReason,
+    tempoEvidence: nextEvidence,
   };
 }
 
@@ -877,7 +983,7 @@ export const dspAnalyzer: AudioAnalyzer = {
     const tempoOnset = timeDomainOnset(pcm.samples, tempoHop);
     const tempoHopMs = (tempoHop / pcm.sampleRateHz) * 1000;
     const estimated = estimateTempo(tempoOnset, tempoHopMs, minBpm, maxBpm);
-    const bpmRaw = estimated?.bpmRaw ?? null;
+    let bpmRaw = estimated?.bpmRaw ?? null;
     const folded = bpmRaw === null ? null : normalizeDnbBpm(bpmRaw, minBpm, maxBpm);
     let bpmConfidence = Number((estimated?.confidence ?? 0).toFixed(3));
     let gridRejected = false;
@@ -894,9 +1000,34 @@ export const dspAnalyzer: AudioAnalyzer = {
       gridRejected = true;
       gridRejectionReason = `Beat-grid confidence ${bpmConfidence} is below ${MIN_ANALYSIS_CONFIDENCE}`;
     }
+    if (bpmRaw !== null) {
+      const ratio = tryRatioFold(
+        tempoOnset,
+        tempoHopMs,
+        bpmRaw,
+        minBpm,
+        maxBpm,
+        bpmConfidence,
+        gridRejected,
+      );
+      if (ratio) {
+        bpmRaw = ratio.bpmRaw;
+        bpm = ratio.bpm;
+        bpmConfidence = ratio.bpmConfidence;
+        gridOffsetMs = ratio.offsetMs;
+        gridRejected = ratio.gridRejected;
+        gridRejectionReason = ratio.gridRejectionReason;
+        tempoEvidence = ratio.tempoEvidence;
+        if (!ratio.gridRejected) {
+          gridSource = "analyzed";
+        }
+      }
+    }
     const referenceBpm = options.referenceBpm;
+    const tolerance =
+      referenceBpm != null && referenceBpm > 0 ? publishedBpmTolerance(referenceBpm) : 0.5;
     const disagrees =
-      referenceBpm != null && bpm != null && Math.abs(bpm - referenceBpm) > 0.5;
+      referenceBpm != null && bpm != null && Math.abs(bpm - referenceBpm) > tolerance;
     if (referenceBpm != null && referenceBpm > 0 && (gridRejected || disagrees)) {
       const ref = scoreReferenceTempo(tempoOnset, tempoHopMs, referenceBpm);
       const refConf = Number(ref.confidence.toFixed(3));

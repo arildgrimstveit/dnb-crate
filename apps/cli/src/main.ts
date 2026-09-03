@@ -38,6 +38,7 @@ Commands:
   library:stats
   track:search [--query TEXT] [--artist TEXT] [--limit N]
   analysis:start --track-id UUID [--engine dsp|beat-this|allin1] [--wait]
+  analysis:run --scope stale|unanalyzed|all|planningReady [--wait] [--timeout-min N]
   analysis:status [--id UUID]
   analysis:get --track-id UUID
   analysis:compare --track-id UUID
@@ -121,6 +122,33 @@ async function main(): Promise<void> {
         });
         if (flag(args, "--wait")) {
           const done = await runtime.service.waitForAnalysisJob(started.job.id);
+          printJson({ ok: true, data: done });
+        } else {
+          printJson({ ok: true, data: started.job });
+        }
+        break;
+      }
+      case "analysis:run": {
+        const scopeRaw = option(args, "--scope") ?? "stale";
+        if (
+          scopeRaw !== "stale" &&
+          scopeRaw !== "unanalyzed" &&
+          scopeRaw !== "all" &&
+          scopeRaw !== "planningReady"
+        ) {
+          throw new Error("analysis:run requires --scope stale|unanalyzed|all|planningReady");
+        }
+        const timeoutMinRaw = option(args, "--timeout-min");
+        const timeoutMin = timeoutMinRaw === undefined ? 90 : Number(timeoutMinRaw);
+        if (!Number.isFinite(timeoutMin) || timeoutMin <= 0) {
+          throw new Error("analysis:run --timeout-min must be a positive number");
+        }
+        const started = runtime.service.startTrackAnalysis({ scope: scopeRaw });
+        if (flag(args, "--wait")) {
+          const done = await runtime.service.waitForAnalysisJob(
+            started.job.id,
+            timeoutMin * 60_000,
+          );
           printJson({ ok: true, data: done });
         } else {
           printJson({ ok: true, data: started.job });

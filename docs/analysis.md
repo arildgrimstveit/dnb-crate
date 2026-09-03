@@ -21,11 +21,12 @@ essentia.js was rejected: unmaintained since 2021, AGPL, Node was the slowest en
 
 ## BPM and grids
 
-- Tempo is folded into **160–190 BPM** (half/double time).
+- Tempo is folded into **160–190 BPM** (half/double time). If that fold fails or the grid is rejected, the analyzer also scores **2/3 and 3/2** of the raw estimate via the same reference-tempo logistic and adopts an in-range candidate that clears the 0.6 floor. A 3:2 confusion (for example 186 hats over 124 kicks) rejects the in-range accept when the out-of-range partner scores higher — `bpmRaw` keeps the stronger out-of-range candidate and the grid stays rejected. Confidence below **0.6** is never accepted.
 - On real crates, DSP tempo is a grid/structure hint. Mix planning still uses canonical BPM (**manual > published > analyzed**).
 - Grids are tracked from onset strength, then downbeat-phased. Beat times follow the tempo comb (offset from the time-domain onset fit) with parabolic interpolation when the local peak is within 0.15 of a period. A manual `beatAnchorMs` still biases downbeat phase.
 - Confidence is a 3-feature logistic on prominence, stability, and grid-vs-rival score. There is no 0.55 floor. Confidence below **0.6**, or a tempo that cannot fold into range, **rejects** the grid. Re-fit weights with `node ./node_modules/tsx/dist/cli.mjs tools/scripts/calibrate-confidence.mts --config dnb-crate.config.json` after onset/tempo changes. Crate rows that would drop accepted-correct are not pasted blindly.
-- When the track has a published or manual BPM, the analyzer also fits phase at that **reference tempo**. If the free grid is rejected or disagrees by more than 0.5 BPM, a passing logistic at the reference is stored as `gridSource: "reference"` (`bpm` = reference, `bpmRaw` = free estimate). A failing reference fit rejects the grid (`"Reference tempo … does not fit"`); a free grid that disagrees with published BPM is never accepted. `set_beat_anchor` stores `gridSource: "anchor"`. Canonical BPM/key values are unchanged.
+- When the track has a published or manual BPM, the analyzer also fits phase at that **reference tempo**. Integer published BPM tolerates **1.0** BPM of free-grid disagreement (fractional published BPM still uses 0.5). If the free grid is rejected or disagrees beyond that tolerance, a passing logistic at the reference is stored as `gridSource: "reference"` (`bpm` = reference, `bpmRaw` = free estimate). A free grid that lands inside the tolerance stays `gridSource: "analyzed"` (Like a Memory 175 vs published 176). A failing reference fit rejects the grid (`"Reference tempo … does not fit"`). `set_beat_anchor` stores `gridSource: "anchor"`. Canonical BPM/key values are unchanged. The published/manual BPM used for the fit is persisted as `reference_bpm`.
+- A rejected grid whose raw estimate still folds into 160–190 with confidence ≥ **0.3** exposes `bpmHint` / `bpmHintConfidence` on the analysis view and timeline. Hints never write `tracks.bpm`. Planning readiness treats a hint as covering the BPM field (`bpmSource: "hint"`). Pool BPM filters (WP4) may use hints at half weight; tempo matching and aligned templates do not.
 - Phrase-mix / bass-swap renders use downbeat-phase alignment in **output time** (`downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode` on the manifest). `alignmentMode` is `bar` when both downbeat confidences are ≥ 0.5, otherwise `beat`. The mix itself is a 3-band preset (`expandPreset`); plan `parameters` carry `crossoverHz`, `swapAtBar`, `lowHandoverBar`, `rampMs`, `lowAttenuationDb`, `midDipDb`.
 
 ## Planner tempo matching
@@ -60,10 +61,25 @@ Tempo matching uses FFmpeg **`atempo`**. Playback rate is **±3%** unless `allow
 
 `double_drop` remains later work (rendered as `bass_swap` with a warning if it appears on a plan).
 
+## Analysis scopes
+
+`start_track_analysis` / `analysis:run` accept `scope`:
+
+| Scope | Selects |
+| --- | --- |
+| `ids` (default) | Explicit `trackIds` |
+| `planningReady` | Tracks that pass `get_planning_readiness` (BPM, key, energy, file). A `bpmHint` counts as BPM. |
+| `unanalyzed` | `analysis_status != complete` and file present |
+| `stale` | No DSP row, `analyzer_version` older than current, `analysis_status = failed`, or `reference_bpm` ≠ current published/manual BPM (including null `reference_bpm` when a published/manual BPM exists) |
+| `all` | Every non-missing file |
+
+`analysis:start` is unchanged (explicit ids or `--planning-ready`). `analysis:run --scope stale|unanalyzed|all|planningReady [--wait] [--timeout-min N]` is the whole-library entry (default wait timeout 90 minutes). Decode of track *i+1* is prefetched while DSP runs on *i*; ebur128 of *i* overlaps that decode. Config `analysis.prefetch` defaults to 1. Progress logs every 25 tracks. Stopping mid-job marks the job failed and retryable.
+
 ## CLI
 
 ```bash
 pnpm cli analysis:start --track-id UUID --wait
+pnpm cli analysis:run --scope stale --wait --timeout-min 90
 pnpm cli analysis:get --track-id UUID
 pnpm cli analysis:compare --track-id UUID
 pnpm cli analysis:report

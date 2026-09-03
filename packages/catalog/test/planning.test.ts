@@ -312,6 +312,8 @@ describe("planner tempo matching", () => {
         gridOk: true,
         bpm,
         canonicalBpm: bpm,
+        bpmHint: null,
+        bpmHintConfidence: null,
         suggestedEnergy: energy,
         introStartMs: 0,
         outroStartMs: 140_000,

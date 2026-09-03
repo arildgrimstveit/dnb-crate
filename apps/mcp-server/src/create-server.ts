@@ -220,7 +220,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Start track analysis",
       description:
-        "Queue BPM/beat-grid/key/loudness analysis for explicit track UUIDs or the planning-ready subset. Requires trackIds or planningReadyOnly=true so the whole library is never analyzed by accident. Returns a job id; poll get_analysis_status. Analysis is advisory (confidence + provenance).",
+        "Queue BPM/beat-grid/key/loudness analysis. Pass trackIds (scope ids), planningReadyOnly, or scope unanalyzed|stale|all|planningReady. Whole-library analysis is allowed via scope. Returns a job id; poll get_analysis_status. Analysis is advisory (confidence + provenance).",
       inputSchema: startTrackAnalysisInputSchema,
       outputSchema: toolResultSchema(analysisJobSchema),
       annotations: { readOnlyHint: false, idempotentHint: false },
@@ -831,7 +831,7 @@ Brief:
 ${request}
 
 Workflow:
-1. Call get_planning_readiness if metadata may be incomplete. Optionally start_track_analysis for selected UUIDs with engines ["dnb-crate-dsp"] (never the whole library) and poll get_analysis_status. Inspect get_track_analysis / get_track_sections.
+1. Call get_planning_readiness if metadata may be incomplete. Optionally start_track_analysis for selected UUIDs or scope stale/unanalyzed with engines ["dnb-crate-dsp"] and poll get_analysis_status. Inspect get_track_analysis / get_track_sections.
 2. Use search_tracks to resolve named tracks to UUIDs (never filesystem paths). Filter on energy, sub-bass, and brightness when the brief is sonic.
 3. Call create_set_plan with structured fields only: name, targetDurationMs, requestedArc, preferredMoods/Subgenres/Artists, startTrackId/endTrackId, artistRepeatSpacing, seed. The planner chooses phrase_mix/bass_swap from the join (head/tail sections), tempo-matches aligned pairs within ±3%, and uses an 8s crossfade on tempo mismatch. Playable windows come from mix-in/mix-out sections, not file bounds.
 4. Call validate_set_plan. If there are errors or important warnings, call update_set_plan with explicit entry edits.

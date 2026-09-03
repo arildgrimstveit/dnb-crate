@@ -13,13 +13,20 @@ export const analysisJobStatusSchema = z.enum([
   "cancelled",
 ]);
 
+export const analysisScopeSchema = z.enum(["ids", "planningReady", "unanalyzed", "stale", "all"]);
+
 export const startTrackAnalysisInputSchema = z
   .object({
-    trackIds: z.array(trackIdSchema).min(1).max(100).optional(),
+    trackIds: z.array(trackIdSchema).min(1).max(2000).optional(),
     planningReadyOnly: z
       .boolean()
       .optional()
       .describe("If true, analyze the planning-ready subset (BPM, key, energy, file present)."),
+    scope: analysisScopeSchema
+      .optional()
+      .describe(
+        "ids (default) uses trackIds; planningReady / unanalyzed / stale / all select from the catalog.",
+      ),
     engines: z
       .array(z.enum(["dnb-crate-dsp", "beat-this", "allin1"]))
       .min(1)
@@ -27,9 +34,15 @@ export const startTrackAnalysisInputSchema = z
       .optional()
       .describe("Analysis engines to run. Default is config analysis.defaultEngine."),
   })
-  .refine((value) => (value.trackIds?.length ?? 0) > 0 || value.planningReadyOnly === true, {
-    message: "Pass trackIds or planningReadyOnly=true",
-  });
+  .refine(
+    (value) =>
+      (value.trackIds?.length ?? 0) > 0 ||
+      value.planningReadyOnly === true ||
+      (value.scope !== undefined && value.scope !== "ids"),
+    {
+      message: "Pass trackIds, planningReadyOnly=true, or scope unanalyzed|stale|all|planningReady",
+    },
+  );
 
 export const getAnalysisStatusInputSchema = z.object({
   analysisJobId: z.string().uuid().optional(),
@@ -204,6 +217,9 @@ export const trackAnalysisSchema = z.object({
   sections: z.array(trackSectionSchema),
   availableEngines: z.array(z.string()),
   gridSummary: beatGridSummarySchema,
+  bpmHint: z.number().nullable().optional(),
+  bpmHintConfidence: z.number().nullable().optional(),
+  referenceBpm: z.number().nullable().optional(),
 });
 
 export const compareTrackAnalysesDataSchema = z.object({

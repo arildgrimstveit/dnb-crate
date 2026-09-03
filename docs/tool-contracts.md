@@ -48,7 +48,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `start_track_analysis`
 
-- Input: `{ trackIds?: UUID[], planningReadyOnly?: boolean }` — at least one of `trackIds` or `planningReadyOnly=true`
+- Input: `{ trackIds?: UUID[], planningReadyOnly?: boolean, scope?: ids|planningReady|unanalyzed|stale|all }` — pass trackIds, planningReadyOnly=true, or a non-ids scope. Whole-library is allowed via `scope`.
 - Output: analysis job
 - Errors: `TRACK_NOT_FOUND`, `ANALYSIS_FAILED`
 

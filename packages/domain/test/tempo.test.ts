@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  analyzerVersionLessThan,
   assertPlaybackRate,
   DomainError,
   normalizeDnbBpm,
   phraseDurationMs,
   playbackRateForBpm,
+  publishedBpmTolerance,
   reconstructGrid,
+  resolveBpmHint,
   snapToNearestBeat,
 } from "../src/index.ts";
 
@@ -47,5 +50,31 @@ describe("DnB tempo helpers", () => {
     expect(snapped).not.toBeNull();
     expect(Math.abs(snapped!.positionMs - 120)).toBeLessThan(5);
     expect(grid.downbeatTimesMs.length).toBeGreaterThan(0);
+  });
+
+  it("uses 1.0 BPM tolerance for integer published tempo", () => {
+    expect(publishedBpmTolerance(176)).toBe(1);
+    expect(publishedBpmTolerance(173.7)).toBe(0.5);
+  });
+
+  it("compares analyzer versions", () => {
+    expect(analyzerVersionLessThan("2.0.0", "2.1.0")).toBe(true);
+    expect(analyzerVersionLessThan("2.1.0", "2.1.0")).toBe(false);
+    expect(analyzerVersionLessThan("3.0.0", "2.1.0")).toBe(false);
+  });
+
+  it("resolves a bpmHint only for rejected in-range raw estimates", () => {
+    expect(
+      resolveBpmHint({ gridRejected: true, bpmRaw: 174, bpmConfidence: 0.4 }).bpm,
+    ).toBe(174);
+    expect(
+      resolveBpmHint({ gridRejected: true, bpmRaw: 124, bpmConfidence: 0.9 }).bpm,
+    ).toBeNull();
+    expect(
+      resolveBpmHint({ gridRejected: true, bpmRaw: 174, bpmConfidence: 0.2 }).bpm,
+    ).toBeNull();
+    expect(
+      resolveBpmHint({ gridRejected: false, bpmRaw: 174, bpmConfidence: 0.9 }).bpm,
+    ).toBeNull();
   });
 });

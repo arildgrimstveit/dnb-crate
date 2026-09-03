@@ -1,5 +1,9 @@
 import {
+  analyzerVersionLessThan,
   buildBeatGridSummary,
+  DSP_ANALYZER_NAME,
+  DSP_ANALYZER_VERSION,
+  resolveBpmHint,
   resolveCanonicalBpm,
   resolveCanonicalKey,
   type SonicDescriptors,
@@ -41,6 +45,7 @@ type AnalysisRow = {
   engine_runtime_ms: number | null;
   analyzed_at: string;
   grid_source?: string | null;
+  reference_bpm?: number | null;
 };
 
 export type StoredTrackAnalysis = TrackAnalysis & {
@@ -84,6 +89,7 @@ function mapAnalysis(row: AnalysisRow, sections: TrackSection[] = []): StoredTra
       : null,
     engineRuntimeMs: row.engine_runtime_ms,
     analyzedAt: row.analyzed_at,
+    referenceBpm: row.reference_bpm ?? null,
     suggestedCues: JSON.parse(row.suggested_cues_json) as SuggestedCue[],
     sections,
   };
@@ -184,8 +190,8 @@ export class AnalysisRepository {
           musical_key, key_confidence, key_mode, camelot_key, tempo_stability, downbeat_confidence,
           integrated_lufs, true_peak_db, low_band_energy, mid_band_energy, high_band_energy,
           waveform_summary_json, beat_anchor_ms, suggested_cues_json, descriptors_json,
-          engine_runtime_ms, analyzed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          engine_runtime_ms, analyzed_at, reference_bpm
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(track_id, analyzer_name) DO UPDATE SET
           analyzer_version = excluded.analyzer_version,
           bpm = excluded.bpm,
@@ -212,7 +218,8 @@ export class AnalysisRepository {
           suggested_cues_json = excluded.suggested_cues_json,
           descriptors_json = excluded.descriptors_json,
           engine_runtime_ms = excluded.engine_runtime_ms,
-          analyzed_at = excluded.analyzed_at`,
+          analyzed_at = excluded.analyzed_at,
+          reference_bpm = excluded.reference_bpm`,
       )
       .run(
         analysis.trackId,
@@ -243,6 +250,7 @@ export class AnalysisRepository {
         analysis.descriptors ? JSON.stringify(analysis.descriptors) : null,
         analysis.engineRuntimeMs,
         analysis.analyzedAt,
+        analysis.referenceBpm ?? null,
       );
     this.replaceSections(analysis.trackId, analysis.analyzerName, analysis.sections ?? []);
     return this.findByTrackId(analysis.trackId, analysis.analyzerName)!;
@@ -271,6 +279,7 @@ export class AnalysisRepository {
     const bpm = resolveCanonicalBpm(track, analysis);
     const key = resolveCanonicalKey(track, analysis);
     const availableEngines = this.listByTrackId(track.id).map((row) => row.analyzerName);
+    const hint = resolveBpmHint(analysis);
     return {
       ...analysis,
       canonicalBpm: bpm.bpm,
@@ -280,6 +289,60 @@ export class AnalysisRepository {
       sections: analysis.sections ?? [],
       availableEngines: availableEngines.length > 0 ? availableEngines : [analysis.analyzerName],
       gridSummary: buildBeatGridSummary(analysis),
+      bpmHint: hint.bpm,
+      bpmHintConfidence: hint.confidence,
     };
+  }
+
+  listIdsForScope(scope: "unanalyzed" | "stale" | "all"): string[] {
+    if (scope === "all") {
+      return (
+        this.db.prepare("SELECT id FROM tracks WHERE file_missing = 0").all() as { id: string }[]
+      ).map((row) => row.id);
+    }
+    if (scope === "unanalyzed") {
+      return (
+        this.db
+          .prepare(
+            "SELECT id FROM tracks WHERE file_missing = 0 AND analysis_status != 'complete'",
+          )
+          .all() as { id: string }[]
+      ).map((row) => row.id);
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT t.id, t.analysis_status, t.bpm, t.bpm_source, a.analyzer_version, a.reference_bpm
+         FROM tracks t
+         LEFT JOIN track_analyses a
+           ON a.track_id = t.id AND a.analyzer_name = ?
+         WHERE t.file_missing = 0`,
+      )
+      .all(DSP_ANALYZER_NAME) as Array<{
+      id: string;
+      analysis_status: string;
+      bpm: number | null;
+      bpm_source: string | null;
+      analyzer_version: string | null;
+      reference_bpm: number | null;
+    }>;
+    return rows
+      .filter((row) => {
+        if (row.analyzer_version === null) {
+          return true;
+        }
+        if (row.analysis_status === "failed") {
+          return true;
+        }
+        if (analyzerVersionLessThan(row.analyzer_version, DSP_ANALYZER_VERSION)) {
+          return true;
+        }
+        const hasCanon =
+          (row.bpm_source === "published" || row.bpm_source === "manual") && row.bpm != null;
+        if (hasCanon && (row.reference_bpm == null || Math.abs(row.reference_bpm - row.bpm!) > 0.01)) {
+          return true;
+        }
+        return false;
+      })
+      .map((row) => row.id);
   }
 }

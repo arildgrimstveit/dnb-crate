@@ -84,6 +84,7 @@ export type TrackAnalysis = {
   bpm: number | null;
   bpmConfidence: number | null;
   bpmRaw: number | null;
+  referenceBpm?: number | null;
   beatTimesMs: number[];
   downbeatTimesMs: number[];
   gridRejected: boolean;
@@ -216,6 +217,8 @@ export type TrackAnalysisView = TrackAnalysis & {
   sections: TrackSection[];
   availableEngines: string[];
   gridSummary: BeatGridSummary;
+  bpmHint: number | null;
+  bpmHintConfidence: number | null;
 };
 
 function clamp(value: number, min: number, max: number): number {

@@ -47,6 +47,9 @@ export {
   DNB_BPM_MAX,
   MAX_TEMPO_DEVIATION,
   MIN_ANALYSIS_CONFIDENCE,
+  MIN_BPM_HINT_CONFIDENCE,
+  PUBLISHED_BPM_INTEGER_TOLERANCE,
+  PUBLISHED_BPM_FRACTION_TOLERANCE,
   DEFAULT_PHRASE_BARS,
   PHRASE_BAR_OPTIONS,
   DEFAULT_BASS_CROSSOVER_HZ,
@@ -79,12 +82,17 @@ export {
   barIndexForBeat,
   beatPeriodMs,
   normalizeDnbBpm,
+  publishedBpmTolerance,
+  analyzerVersionLessThan,
+  resolveBpmHint,
   phraseDurationMs,
   playbackRateForBpm,
   reconstructGrid,
   snapToNearestBeat,
   type NormalizedDnbBpm,
 } from "./tempo.ts";
+export const analysisScopeValues = ["ids", "planningReady", "unanalyzed", "stale", "all"] as const;
+export type AnalysisScope = (typeof analysisScopeValues)[number];
 export type {
   AnalysisJob,
   AnalysisJobStatus,
@@ -135,6 +143,7 @@ export {
   planTransitionInputSchema,
   setBeatAnchorInputSchema,
   startTrackAnalysisInputSchema,
+  analysisScopeSchema,
   trackAnalysisSchema,
   trackSectionSchema,
   transitionProposalSchema,

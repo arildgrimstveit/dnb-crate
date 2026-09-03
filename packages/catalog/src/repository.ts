@@ -14,6 +14,7 @@ import {
   SEARCH_LIMIT_DEFAULT,
   SEARCH_LIMIT_MAX,
   normalizeKey,
+  resolveBpmHint,
   toPublicTrack,
 } from "@dnb-crate/domain";
 
@@ -696,17 +697,24 @@ export class TrackRepository {
       accepted = dsp.accepted ?? 0;
       rejected = dsp.rejected ?? 0;
       reference = dsp.reference ?? 0;
-      if (this.hasColumn("track_analyses", "descriptors_json")) {
-        const hint = this.db
-          .prepare(
-            `SELECT COUNT(*) AS n FROM track_analyses
-             WHERE analyzer_name = ?
-               AND grid_rejected = 1
-               AND json_extract(descriptors_json, '$.bpmHint') IS NOT NULL`,
-          )
-          .get(DSP_ANALYZER_NAME) as { n: number };
-        bpmHintOnly = hint.n;
-      }
+      const hintRows = this.db
+        .prepare(
+          `SELECT bpm_raw, bpm_confidence, grid_rejected
+           FROM track_analyses WHERE analyzer_name = ?`,
+        )
+        .all(DSP_ANALYZER_NAME) as Array<{
+        bpm_raw: number | null;
+        bpm_confidence: number | null;
+        grid_rejected: number;
+      }>;
+      bpmHintOnly = hintRows.filter(
+        (row) =>
+          resolveBpmHint({
+            gridRejected: row.grid_rejected === 1,
+            bpmRaw: row.bpm_raw,
+            bpmConfidence: row.bpm_confidence,
+          }).bpm != null,
+      ).length;
     }
 
     return { analyzed, notAnalyzed, byEngineVersion, accepted, rejected, reference, bpmHintOnly };

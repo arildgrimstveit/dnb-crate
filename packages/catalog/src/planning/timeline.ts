@@ -11,6 +11,7 @@ import {
   MIN_PLAYABLE_DURATION_MS,
   assertPlaybackRate,
   normalizeDnbBpm,
+  resolveBpmHint,
   phraseDurationMs,
   playbackRateForBpm,
   defaultLowHandoverBar,
@@ -29,6 +30,8 @@ export type TimelineAnalysis = {
   gridOk: boolean;
   bpm: number | null;
   canonicalBpm: number | null;
+  bpmHint: number | null;
+  bpmHintConfidence: number | null;
   suggestedEnergy: number | null;
   introStartMs: number | null;
   outroStartMs: number | null;
@@ -411,6 +414,7 @@ export function analysisToTimeline(
     trackId?: string;
     gridRejected: boolean;
     bpm: number | null;
+    bpmRaw?: number | null;
     bpmConfidence: number | null;
     downbeatTimesMs?: number[];
     downbeatConfidence?: number | null;
@@ -465,10 +469,13 @@ export function analysisToTimeline(
   };
   const mixIn = pickMixIn(bundle);
   const mixOut = pickMixOut(bundle);
+  const hint = resolveBpmHint(analysis);
   return {
     gridOk: !analysis.gridRejected && (analysis.bpmConfidence ?? 0) >= MIN_ANALYSIS_CONFIDENCE,
     bpm: analysis.bpm,
     canonicalBpm: canonicalBpm ?? analysis.bpm,
+    bpmHint: hint.bpm,
+    bpmHintConfidence: hint.confidence,
     suggestedEnergy: analysis.descriptors?.suggestedEnergy ?? null,
     introStartMs: intro?.startMs ?? null,
     outroStartMs: outro?.startMs ?? null,

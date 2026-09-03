@@ -1,4 +1,9 @@
-import { attachBarIndices, dspAnalyzer, type AnalyzerResult } from "@dnb-crate/audio-analysis";
+import {
+  attachBarIndices,
+  dspAnalyzer,
+  type AnalyzerResult,
+  type PcmAudio,
+} from "@dnb-crate/audio-analysis";
 import {
   DEFAULT_ANALYSIS_ENGINE,
   DomainError,
@@ -155,20 +160,57 @@ export class AnalysisCoordinator {
     const failed: string[] = [];
     try {
       const binaries = await this.detect();
+      const prefetchN = this.config.analysis?.prefetch ?? 1;
+      const pcmCache = new Map<string, Promise<PcmAudio>>();
+      const queueDecode = (trackId: string): void => {
+        if (pcmCache.has(trackId)) {
+          return;
+        }
+        const track = this.tracks.findById(trackId);
+        if (!track || track.fileMissing) {
+          return;
+        }
+        pcmCache.set(trackId, loadPcmForAnalysis(track.filePath, this.runner, binaries));
+      };
       for (let i = 0; i < job.trackIds.length; i += 1) {
         if (this.stopped) {
+          this.jobs.markFailed(
+            job.id,
+            {
+              code: "ANALYSIS_FAILED",
+              message: "Analysis job stopped before completion",
+              retryable: true,
+            },
+            completed,
+            failed,
+          );
           return;
         }
         const trackId = job.trackIds[i]!;
+        if (prefetchN > 0) {
+          for (let k = 1; k <= prefetchN && i + k < job.trackIds.length; k += 1) {
+            queueDecode(job.trackIds[i + k]!);
+          }
+        }
         try {
-          await this.analyzeTrack(trackId, binaries, job.engines);
+          const overlap = prefetchN > 0 && i + 1 < job.trackIds.length
+            ? pcmCache.get(job.trackIds[i + 1]!)
+            : undefined;
+          await this.analyzeTrack(trackId, binaries, job.engines, pcmCache.get(trackId), overlap);
           completed.push(trackId);
         } catch (error) {
           failed.push(trackId);
           this.tracks.setAnalysisStatus(trackId, "failed");
           this.logger.warn({ err: error, trackId }, "Track analysis failed");
         }
+        pcmCache.delete(trackId);
         this.jobs.updateProgress(job.id, (i + 1) / job.trackIds.length, completed, failed);
+        if ((i + 1) % 25 === 0) {
+          this.logger.info(
+            { jobId: job.id, done: i + 1, total: job.trackIds.length },
+            "Analysis progress",
+          );
+        }
       }
       this.jobs.markSucceeded(job.id, completed, failed);
     } catch (error) {
@@ -192,6 +234,8 @@ export class AnalysisCoordinator {
     trackId: string,
     binaries: FfmpegBinaries | null,
     engines: AnalysisEngineId[],
+    preloaded?: Promise<PcmAudio>,
+    overlap?: Promise<PcmAudio>,
   ): Promise<void> {
     const track = this.tracks.findById(trackId);
     if (!track) {
@@ -200,7 +244,7 @@ export class AnalysisCoordinator {
     if (track.fileMissing) {
       throw new DomainError("AUDIO_FILE_UNAVAILABLE", `${track.title} is marked missing`);
     }
-    const pcm = await loadPcmForAnalysis(track.filePath, this.runner, binaries);
+    const pcm = await (preloaded ?? loadPcmForAnalysis(track.filePath, this.runner, binaries));
     const anchor = this.analyses.getBeatAnchorMs(trackId);
     const existing = this.analyses.findByTrackId(trackId);
     const canonical = resolveCanonicalBpm(track, existing);
@@ -213,29 +257,32 @@ export class AnalysisCoordinator {
       beatAnchorMs: anchor,
       referenceBpm,
     });
+    const loudnessPromise = binaries
+      ? this.runner.run({
+          executable: binaries.ffmpegPath,
+          args: [
+            "-nostdin",
+            "-hide_banner",
+            "-i",
+            track.filePath,
+            "-filter_complex",
+            "ebur128=peak=true",
+            "-f",
+            "null",
+            "-",
+          ],
+        })
+      : Promise.resolve(null);
+    const [loudness] = await Promise.all([loudnessPromise, overlap ?? Promise.resolve(null)]);
     let integratedLufs: number | null = null;
     let truePeakDb: number | null = null;
-    if (binaries) {
-      const loudness = await this.runner.run({
-        executable: binaries.ffmpegPath,
-        args: [
-          "-nostdin",
-          "-hide_banner",
-          "-i",
-          track.filePath,
-          "-filter_complex",
-          "ebur128=peak=true",
-          "-f",
-          "null",
-          "-",
-        ],
-      });
+    if (loudness) {
       const parsed = parseEbur128(loudness.stderr);
       integratedLufs = parsed.integratedLufs;
       truePeakDb = parsed.truePeakDb;
     }
     const requested = engines.length > 0 ? engines : [DEFAULT_ANALYSIS_ENGINE];
-    this.storeResult(trackId, dsp, anchor, integratedLufs, truePeakDb);
+    this.storeResult(trackId, dsp, anchor, integratedLufs, truePeakDb, referenceBpm ?? null);
     for (const engine of requested) {
       if (engine === "dnb-crate-dsp" || engine === "dnb-crate-envelope") {
         continue;
@@ -246,7 +293,14 @@ export class AnalysisCoordinator {
         engine === "allin1" ? "allin1" : "beat-this",
         track.filePath,
       );
-      this.storeResult(trackId, mergeAnalyzerResults(python, dsp), anchor, integratedLufs, truePeakDb);
+      this.storeResult(
+        trackId,
+        mergeAnalyzerResults(python, dsp),
+        anchor,
+        integratedLufs,
+        truePeakDb,
+        referenceBpm ?? null,
+      );
     }
     const preferred = this.analyses.findByTrackId(trackId) ?? this.analyses.findByTrackId(trackId, dsp.analyzerName);
     if (preferred && !preferred.gridRejected && preferred.bpm !== null) {
@@ -268,6 +322,7 @@ export class AnalysisCoordinator {
     anchor: number | null,
     integratedLufs: number | null,
     truePeakDb: number | null,
+    referenceBpm: number | null = null,
   ): StoredTrackAnalysis {
     const cues = attachBarIndices(result.suggestedCues, result.beatTimesMs);
     const suggestedCues: SuggestedCue[] = cues.map((cue) => ({
@@ -314,6 +369,7 @@ export class AnalysisCoordinator {
       analyzedAt: new Date().toISOString(),
       suggestedCues,
       sections: result.sections,
+      referenceBpm,
     });
   }
 }

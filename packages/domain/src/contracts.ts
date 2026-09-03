@@ -615,6 +615,7 @@ export const planningReadinessDataSchema = z.object({
       ready: z.boolean(),
       missing: z.array(z.string()),
       cuePointTypes: z.array(z.string()),
+      bpmSource: z.enum(["tag", "manual", "analyzed", "published", "hint"]).nullable().optional(),
     }),
   ),
   readyCount: z.number().int(),

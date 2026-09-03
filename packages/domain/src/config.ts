@@ -13,6 +13,7 @@ export const analysisEngineIdSchema = z.enum(ANALYSIS_ENGINE_IDS);
 export const analysisConfigSchema = z
   .object({
     defaultEngine: analysisEngineIdSchema.default(DEFAULT_ANALYSIS_ENGINE),
+    prefetch: z.number().int().min(0).max(4).optional(),
     engines: z
       .object({
         python: z

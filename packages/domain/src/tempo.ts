@@ -1,4 +1,11 @@
-import { DNB_BPM_MAX, DNB_BPM_MIN, MAX_TEMPO_DEVIATION } from "./constants.ts";
+import {
+  DNB_BPM_MAX,
+  DNB_BPM_MIN,
+  MAX_TEMPO_DEVIATION,
+  MIN_BPM_HINT_CONFIDENCE,
+  PUBLISHED_BPM_FRACTION_TOLERANCE,
+  PUBLISHED_BPM_INTEGER_TOLERANCE,
+} from "./constants.ts";
 import { DomainError } from "./errors.ts";
 
 export function beatPeriodMs(bpm: number): number {
@@ -68,6 +75,49 @@ export function normalizeDnbBpm(
   const chosen = inRange[0]!;
   const foldedFrom = Math.abs(chosen - bpm) < 1e-6 ? null : bpm;
   return { bpm: chosen, foldedFrom };
+}
+
+export function publishedBpmTolerance(referenceBpm: number): number {
+  return Number.isInteger(referenceBpm)
+    ? PUBLISHED_BPM_INTEGER_TOLERANCE
+    : PUBLISHED_BPM_FRACTION_TOLERANCE;
+}
+
+export function analyzerVersionLessThan(have: string, current: string): boolean {
+  const left = have.split(".").map((part) => Number(part) || 0);
+  const right = current.split(".").map((part) => Number(part) || 0);
+  const n = Math.max(left.length, right.length);
+  for (let i = 0; i < n; i += 1) {
+    if ((left[i] ?? 0) < (right[i] ?? 0)) {
+      return true;
+    }
+    if ((left[i] ?? 0) > (right[i] ?? 0)) {
+      return false;
+    }
+  }
+  return false;
+}
+
+export function resolveBpmHint(
+  analysis: {
+    gridRejected: boolean;
+    bpmRaw?: number | null;
+    bpmConfidence: number | null;
+  },
+  minBpm = DNB_BPM_MIN,
+  maxBpm = DNB_BPM_MAX,
+): { bpm: number | null; confidence: number | null } {
+  if (!analysis.gridRejected || analysis.bpmRaw == null) {
+    return { bpm: null, confidence: null };
+  }
+  if ((analysis.bpmConfidence ?? 0) < MIN_BPM_HINT_CONFIDENCE) {
+    return { bpm: null, confidence: null };
+  }
+  const folded = normalizeDnbBpm(analysis.bpmRaw, minBpm, maxBpm);
+  if (!folded) {
+    return { bpm: null, confidence: null };
+  }
+  return { bpm: folded.bpm, confidence: analysis.bpmConfidence };
 }
 
 export function reconstructGrid(

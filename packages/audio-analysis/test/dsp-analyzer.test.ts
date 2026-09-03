@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { dspAnalyzer } from "../src/dsp-analyzer.ts";
-import { buildChordPcm, buildKeyedDnbPcm, buildSyntheticDnbPcm } from "../src/synthetic-dnb.ts";
+import { resolveBpmHint } from "@dnb-crate/domain";
+
+import { buildChordPcm, buildKeyedDnbPcm, buildOffbeatHatPcm, buildSyntheticDnbPcm } from "../src/synthetic-dnb.ts";
 import { buildClickTrackPcm } from "../src/click-track.ts";
 
 function median(values: number[]): number {
@@ -220,6 +222,57 @@ describe("dnb-crate-dsp", () => {
     expect(result.gridRejected).toBe(true);
     expect(result.gridRejectionReason ?? "").toMatch(/Reference tempo 150 does not fit/i);
     expect(result.bpm).toBeNull();
+  });
+
+  it("keeps a free 175 grid as analyzed against published 176", () => {
+    const pcm = buildClickTrackPcm({ bpm: 175, durationMs: 12_000, sampleRateHz: 22_050 });
+    const result = dspAnalyzer.analyze(pcm, { referenceBpm: 176 });
+    expect(result.gridRejected).toBe(false);
+    expect(result.gridSource).toBe("analyzed");
+    expect(Math.abs((result.bpm ?? 0) - 175)).toBeLessThan(0.5);
+  });
+
+  it("rejects a 124-kick / 186-hat 3:2 confusion instead of accepting 186", () => {
+    const pcm = buildOffbeatHatPcm();
+    const result = dspAnalyzer.analyze(pcm);
+    expect(result.gridRejected).toBe(true);
+    expect(result.bpm).toBeNull();
+    expect(result.bpmRaw).not.toBeNull();
+    const raw = result.bpmRaw ?? 0;
+    const near124 = Math.abs(raw - 124) < 8 || Math.abs(raw * (2 / 3) - 124) < 8 || Math.abs(raw * (3 / 2) - 124) < 8;
+    expect(near124).toBe(true);
+    expect(result.bpm === 186 || Math.abs((result.bpm ?? 0) - 186) < 1).toBe(false);
+  });
+
+  it("keeps a free-accepted 186 click track as analyzed", () => {
+    const pcm = buildClickTrackPcm({ bpm: 186, durationMs: 12_000, sampleRateHz: 22_050 });
+    const result = dspAnalyzer.analyze(pcm);
+    expect(result.gridRejected).toBe(false);
+    expect(result.gridSource).toBe("analyzed");
+    expect(Math.abs((result.bpm ?? 0) - 186)).toBeLessThan(0.5);
+  });
+
+  it("exposes a bpmHint on a rejected in-range fixture and not below 0.3", () => {
+    const pcm = buildSyntheticDnbPcm({ bpm: 174 });
+    const rejected = dspAnalyzer.analyze(pcm, { referenceBpm: 150 });
+    expect(rejected.gridRejected).toBe(true);
+    const hint = resolveBpmHint(rejected);
+    expect(hint.bpm).not.toBeNull();
+    expect(Math.abs((hint.bpm ?? 0) - 174)).toBeLessThan(1);
+    expect(hint.confidence ?? 0).toBeGreaterThanOrEqual(0.3);
+
+    const samples = new Float32Array(22_050 * 4);
+    for (let i = 0; i < samples.length; i += 1) {
+      samples[i] = Math.sin((2 * Math.PI * 440 * i) / 22_050);
+    }
+    const sine = dspAnalyzer.analyze({
+      samples,
+      sampleRateHz: 22_050,
+      durationMs: 4000,
+      channels: 1,
+    });
+    expect(sine.gridRejected).toBe(true);
+    expect(resolveBpmHint(sine).bpm).toBeNull();
   });
 
   it("keeps a free-accepted click track as analyzed", () => {

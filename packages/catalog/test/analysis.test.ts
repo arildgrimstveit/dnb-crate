@@ -5,7 +5,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildClickTrackPcm, encodeMonoWav } from "@dnb-crate/audio-analysis";
-import type { AppConfig, SetPlanV1 } from "@dnb-crate/domain";
+import {
+  DSP_ANALYZER_NAME,
+  DSP_ANALYZER_VERSION,
+  type AppConfig,
+  type SetPlanV1,
+} from "@dnb-crate/domain";
 
 import { createCatalogRuntime, writeSineWav } from "../src/index.ts";
 
@@ -187,5 +192,203 @@ describe("track analysis and aligned transitions", () => {
     expect(report.needsReview.some((row) => row.reason === "out-of-range")).toBe(true);
     expect(report.engines.some((row) => row.trackId === inRange.id)).toBe(true);
     expect(report.dspWithinHalfBpm).toBe(report.inRange.withinHalf);
+  });
+
+  it("selects unanalyzed and stale scopes", async () => {
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-scope-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(library, "fresh.wav"), { title: "Fresh", durationMs: 2000 });
+    await writeSineWav(path.join(library, "oldver.wav"), { title: "OldVer", durationMs: 2000 });
+    await writeSineWav(path.join(library, "noref.wav"), { title: "NoRef", durationMs: 2000 });
+    await writeSineWav(path.join(library, "plain.wav"), { title: "Plain", durationMs: 2000 });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 10 }).tracks;
+    const fresh = tracks.find((item) => item.title === "Fresh")!;
+    const oldVer = tracks.find((item) => item.title === "OldVer")!;
+    const noRef = tracks.find((item) => item.title === "NoRef")!;
+    const plain = tracks.find((item) => item.title === "Plain")!;
+    catalog.service.updateTrackMetadata(fresh.id, { bpm: 174, bpmSource: "published" });
+    catalog.service.updateTrackMetadata(noRef.id, { bpm: 174, bpmSource: "published" });
+    const stub = (trackId: string, version: string, referenceBpm: number | null) => {
+      catalog.analyses.upsert({
+        trackId,
+        analyzerName: DSP_ANALYZER_NAME,
+        analyzerVersion: version,
+        bpm: 174,
+        bpmConfidence: 0.8,
+        bpmRaw: 174,
+        referenceBpm,
+        beatTimesMs: [],
+        downbeatTimesMs: [],
+        gridRejected: false,
+        gridRejectionReason: null,
+        gridSource: "analyzed",
+        musicalKey: null,
+        keyConfidence: null,
+        keyMode: null,
+        camelotKey: null,
+        tempoStability: null,
+        downbeatConfidence: null,
+        integratedLufs: null,
+        truePeakDb: null,
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        waveformSummary: null,
+        beatAnchorMs: null,
+        descriptors: null,
+        engineRuntimeMs: 1,
+        analyzedAt: new Date().toISOString(),
+        suggestedCues: [],
+        sections: [],
+      });
+      catalog.repository.setAnalysisStatus(trackId, "complete");
+    };
+    stub(fresh.id, DSP_ANALYZER_VERSION, 174);
+    stub(oldVer.id, "2.0.0", null);
+    stub(noRef.id, DSP_ANALYZER_VERSION, null);
+
+    const unanalyzed = catalog.analyses.listIdsForScope("unanalyzed");
+    expect(unanalyzed).toEqual([plain.id]);
+    const stale = new Set(catalog.analyses.listIdsForScope("stale"));
+    expect(stale.has(plain.id)).toBe(true);
+    expect(stale.has(oldVer.id)).toBe(true);
+    expect(stale.has(noRef.id)).toBe(true);
+    expect(stale.has(fresh.id)).toBe(false);
+    const all = catalog.analyses.listIdsForScope("all");
+    expect(all).toHaveLength(4);
+
+    const started = catalog.service.startTrackAnalysis({ scope: "unanalyzed" });
+    expect(started.job.trackIds).toEqual([plain.id]);
+  });
+
+  it("stores bpmHint on a rejected in-range analysis and keeps published 176 over free 175", async () => {
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-hint-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
+    cleanups.push(() => catalog.close());
+    const click175 = buildClickTrackPcm({ bpm: 175, durationMs: 12_000 });
+    const click174 = buildClickTrackPcm({ bpm: 174, durationMs: 12_000 });
+    await writeFile(path.join(library, "memory.wav"), encodeMonoWav(click175));
+    await writeFile(path.join(library, "mismatch.wav"), encodeMonoWav(click174));
+    await writeSineWav(path.join(library, "hintonly.wav"), { title: "HintOnly", durationMs: 2000 });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 10 }).tracks;
+    const memory = tracks.find((item) => item.title === "memory")!;
+    const mismatch = tracks.find((item) => item.title === "mismatch")!;
+    const hintOnly = tracks.find((item) => item.title === "HintOnly")!;
+    catalog.service.updateTrackMetadata(memory.id, { bpm: 176, bpmSource: "published" });
+    catalog.service.updateTrackMetadata(mismatch.id, { bpm: 150, bpmSource: "published" });
+    const started = catalog.service.startTrackAnalysis({
+      trackIds: [memory.id, mismatch.id],
+    });
+    await catalog.service.waitForAnalysisJob(started.job.id, 60_000);
+    const accepted = catalog.service.getTrackAnalysis(memory.id);
+    expect(accepted.gridRejected).toBe(false);
+    expect(accepted.gridSource).toBe("analyzed");
+    expect(accepted.canonicalBpm).toBe(176);
+    expect(accepted.referenceBpm).toBe(176);
+    expect(accepted.bpmHint).toBeNull();
+
+    const rejected = catalog.service.getTrackAnalysis(mismatch.id);
+    expect(rejected.gridRejected).toBe(true);
+    expect(rejected.bpmHint).not.toBeNull();
+    expect(Math.abs((rejected.bpmHint ?? 0) - 174)).toBeLessThan(1);
+
+    catalog.analyses.upsert({
+      trackId: hintOnly.id,
+      analyzerName: DSP_ANALYZER_NAME,
+      analyzerVersion: DSP_ANALYZER_VERSION,
+      bpm: null,
+      bpmConfidence: 0.45,
+      bpmRaw: 174,
+      referenceBpm: null,
+      beatTimesMs: [],
+      downbeatTimesMs: [],
+      gridRejected: true,
+      gridRejectionReason: "low confidence",
+      gridSource: "analyzed",
+      musicalKey: null,
+      keyConfidence: null,
+      keyMode: null,
+      camelotKey: null,
+      tempoStability: null,
+      downbeatConfidence: null,
+      integratedLufs: null,
+      truePeakDb: null,
+      lowBandEnergy: null,
+      midBandEnergy: null,
+      highBandEnergy: null,
+      waveformSummary: null,
+      beatAnchorMs: null,
+      descriptors: null,
+      engineRuntimeMs: 1,
+      analyzedAt: new Date().toISOString(),
+      suggestedCues: [],
+      sections: [],
+    });
+    const readiness = catalog.service.getPlanningReadiness(hintOnly.id).tracks[0]!;
+    expect(readiness.missing).not.toContain("bpm");
+    expect(readiness.bpmSource).toBe("hint");
+  });
+
+  it("pipelines prefetch without changing stored rows", async () => {
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-pipe-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const click = buildClickTrackPcm({ bpm: 174, durationMs: 12_000 });
+    await writeFile(path.join(library, "one.wav"), encodeMonoWav(click));
+    await writeFile(path.join(library, "two.wav"), encodeMonoWav(click));
+    const sequential = createCatalogRuntime(
+      { ...testConfig(root), analysis: { defaultEngine: "dnb-crate-dsp", prefetch: 0 } },
+      undefined,
+      { useFakeFfmpeg: true },
+    );
+    cleanups.push(() => sequential.close());
+    await sequential.service.scanLibrary();
+    const seqTracks = sequential.service.searchTracks({ limit: 10 }).tracks;
+    const seqStarted = sequential.service.startTrackAnalysis({
+      trackIds: seqTracks.map((item) => item.id),
+    });
+    await sequential.service.waitForAnalysisJob(seqStarted.job.id, 60_000);
+    const seqRows = seqTracks.map((item) => sequential.service.getTrackAnalysis(item.id));
+
+    const pipedRoot = path.join(
+      os.tmpdir(),
+      `dnb-pipe2-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const pipedLibrary = path.join(pipedRoot, "library");
+    await mkdir(pipedLibrary, { recursive: true });
+    await writeFile(path.join(pipedLibrary, "one.wav"), encodeMonoWav(click));
+    await writeFile(path.join(pipedLibrary, "two.wav"), encodeMonoWav(click));
+    const piped = createCatalogRuntime(
+      { ...testConfig(pipedRoot), analysis: { defaultEngine: "dnb-crate-dsp", prefetch: 1 } },
+      undefined,
+      { useFakeFfmpeg: true },
+    );
+    cleanups.push(() => piped.close());
+    await piped.service.scanLibrary();
+    const pipedTracks = piped.service.searchTracks({ limit: 10 }).tracks;
+    const pipedStarted = piped.service.startTrackAnalysis({
+      trackIds: pipedTracks.map((item) => item.id),
+    });
+    await piped.service.waitForAnalysisJob(pipedStarted.job.id, 60_000);
+    const pipedRows = pipedTracks.map((item) => piped.service.getTrackAnalysis(item.id));
+    expect(pipedRows.map((row) => row.bpm)).toEqual(seqRows.map((row) => row.bpm));
+    expect(pipedRows.map((row) => row.gridRejected)).toEqual(seqRows.map((row) => row.gridRejected));
+    expect(pipedRows.map((row) => row.gridSource)).toEqual(seqRows.map((row) => row.gridSource));
   });
 });

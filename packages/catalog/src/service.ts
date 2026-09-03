@@ -43,6 +43,7 @@ import {
   DNB_BPM_MIN,
   keyAgreement,
   normalizeDnbBpm,
+  resolveBpmHint,
   resolveCanonicalBpm,
   scoreCandidate,
   toPublicTrack,
@@ -262,15 +263,23 @@ export class CatalogService {
   startTrackAnalysis(input: {
     trackIds?: string[];
     planningReadyOnly?: boolean;
+    scope?: "ids" | "planningReady" | "unanalyzed" | "stale" | "all";
     engines?: AnalysisEngineId[];
   }): {
     job: AnalysisJob;
   } {
+    const scope =
+      input.scope ?? (input.planningReadyOnly === true ? "planningReady" : "ids");
     const ids = new Set<string>();
     for (const id of input.trackIds ?? []) {
       ids.add(id);
     }
-    if (input.planningReadyOnly === true) {
+    if (scope === "unanalyzed" || scope === "stale" || scope === "all") {
+      for (const id of this.analyses.listIdsForScope(scope)) {
+        ids.add(id);
+      }
+    }
+    if (scope === "planningReady" || input.planningReadyOnly === true) {
       for (const row of this.getPlanningReadiness().tracks) {
         if (row.ready) {
           ids.add(row.trackId);
@@ -280,7 +289,7 @@ export class CatalogService {
     if (ids.size === 0) {
       throw new DomainError(
         "ANALYSIS_FAILED",
-        "No tracks to analyze. Pass trackIds or planningReadyOnly=true with a ready catalog.",
+        "No tracks to analyze. Pass trackIds, planningReadyOnly=true, or scope unanalyzed|stale|all|planningReady.",
       );
     }
     return this.analysis.start(
@@ -648,7 +657,16 @@ export class CatalogService {
     const tracks = trackId ? [this.requireTrack(trackId)] : this.repository.listAll();
     const reports = tracks.map((track) => {
       const missing: string[] = [];
-      if (track.bpm === null) missing.push("bpm");
+      const stored = this.analyses.findByTrackId(track.id);
+      const hint = stored ? resolveBpmHint(stored) : { bpm: null, confidence: null };
+      let bpmSource: PlanningReadiness["bpmSource"] = track.bpmSource;
+      if (track.bpm === null) {
+        if (hint.bpm != null) {
+          bpmSource = "hint";
+        } else {
+          missing.push("bpm");
+        }
+      }
       if (track.camelotKey === null) missing.push("key");
       if (track.energy === null) missing.push("energy");
       if (track.fileMissing) missing.push("file");
@@ -659,6 +677,7 @@ export class CatalogService {
         ready: missing.length === 0,
         missing,
         cuePointTypes,
+        bpmSource,
       };
     });
     return {

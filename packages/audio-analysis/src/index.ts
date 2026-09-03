@@ -12,4 +12,9 @@ export { buildClickTrackPcm, encodeMonoWav } from "./click-track.ts";
 export { decodeWavPcm, mixToMono } from "./wav.ts";
 export { loadPcmFromWavFile } from "./load.ts";
 export { estimateKeyFromPitch } from "./key.ts";
-export { buildSyntheticDnbPcm, buildKeyedDnbPcm, buildChordPcm } from "./synthetic-dnb.ts";
+export {
+  buildSyntheticDnbPcm,
+  buildKeyedDnbPcm,
+  buildChordPcm,
+  buildOffbeatHatPcm,
+} from "./synthetic-dnb.ts";
