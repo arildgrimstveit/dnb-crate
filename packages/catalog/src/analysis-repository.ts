@@ -66,13 +66,19 @@ function mapAnalysis(row: AnalysisRow, sections: TrackSection[] = []): StoredTra
     gridRejected: row.grid_rejected === 1,
     gridRejectionReason: row.grid_rejection_reason,
     gridSource:
-      row.grid_source === "reference" || row.grid_source === "anchor" || row.grid_source === "analyzed"
+      row.grid_source === "reference" ||
+      row.grid_source === "anchor" ||
+      row.grid_source === "analyzed" ||
+      row.grid_source === "sidecar"
         ? row.grid_source
         : "analyzed",
     musicalKey: row.musical_key,
     keyConfidence: row.key_confidence,
     keyMode: row.key_mode,
     camelotKey: row.camelot_key,
+    keyCandidates: (row.descriptors_json
+      ? (JSON.parse(row.descriptors_json) as SonicDescriptors).keyCandidates
+      : null) ?? null,
     tempoStability: row.tempo_stability,
     downbeatConfidence: row.downbeat_confidence,
     integratedLufs: row.integrated_lufs,
@@ -280,8 +286,14 @@ export class AnalysisRepository {
     const key = resolveCanonicalKey(track, analysis);
     const availableEngines = this.listByTrackId(track.id).map((row) => row.analyzerName);
     const hint = resolveBpmHint(analysis);
+    const keyCandidates =
+      analysis.descriptors?.keyCandidates ??
+      ([analysis.musicalKey, analysis.keyCandidates?.[1]].filter(
+        (value): value is string => Boolean(value),
+      ) as string[]);
     return {
       ...analysis,
+      keyCandidates: keyCandidates.length > 0 ? keyCandidates.slice(0, 2) : null,
       canonicalBpm: bpm.bpm,
       canonicalBpmSource: bpm.source,
       canonicalKey: key.musicalKey,

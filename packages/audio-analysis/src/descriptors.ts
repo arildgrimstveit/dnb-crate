@@ -280,8 +280,10 @@ export function computeDescriptorPack(input: DescriptorPackInput): DescriptorPac
     ACOUSTIC_OUT_HI,
   );
   const keyConf = clamp(input.chroma.keyConfidence, 0, 1);
+  const keyWeight = clarity >= 0.45 ? 2.2 : 0.2;
+  const peakTerm = clarity >= 0.45 ? 0.15 * strongPeak * strongPeak : 0.04 * strongPeak;
   const melodicness = clamp(
-    2.2 * keyConf + 0.15 * strongPeak * strongPeak * (1 - clamp(input.onsetDensity, 0, 1)),
+    keyWeight * keyConf + peakTerm * (1 - clamp(input.onsetDensity, 0, 1)),
     0,
     1,
   );

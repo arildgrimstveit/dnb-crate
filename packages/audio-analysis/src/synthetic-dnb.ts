@@ -12,6 +12,8 @@ export type SyntheticDnbOptions = {
   padFrequencies?: number[];
   detuneCents?: number;
   includeSub?: boolean;
+  downbeatOffsetBeats?: number;
+  barAccentEvery?: number;
 };
 
 function addKick(samples: Float32Array, sampleRateHz: number, start: number, gain: number): void {
@@ -77,6 +79,7 @@ const KEY_PADS: Record<string, number[]> = {
   "F#m": [185.0, 220.0, 277.18, 369.99, 440.0, 554.37],
   Fm: [174.61, 220.0, 261.63, 349.23, 440.0, 523.25],
   C: [261.63, 329.63, 392.0, 523.25],
+  Em: [164.81, 196.0, 246.94, 329.63, 392.0],
 };
 
 /** Synthetic 4/4 DnB: kick on 1, snare on 2/4, hats on 8ths, optional pad + sub. */
@@ -111,10 +114,15 @@ export function buildSyntheticDnbPcm(options: SyntheticDnbOptions = {}): PcmAudi
     const inOutro = outroBars > 0 && tMs >= outroMs;
     const kickGain = inDrop ? 0.95 : inOutro ? 0.25 : 0.45;
     const snareGain = inDrop ? 0.7 : 0.35;
-    if (beat % 4 === 0) {
-      addKick(samples, sampleRateHz, start, kickGain);
+    const phase = options.downbeatOffsetBeats ?? 0;
+    const pos = ((beat - phase) % 4 + 4) % 4;
+    const barIndex = Math.floor((beat - phase) / 4);
+    const accentEvery = Math.max(1, options.barAccentEvery ?? 1);
+    const accent = barIndex % accentEvery === 0 ? 1 : 0.55;
+    if (pos === 0) {
+      addKick(samples, sampleRateHz, start, kickGain * accent);
     }
-    if (beat % 4 === 1 || beat % 4 === 3) {
+    if (pos === 1 || pos === 3) {
       addSnare(samples, sampleRateHz, start, snareGain);
     }
     addHat(samples, sampleRateHz, start, inDrop ? 0.12 : 0.06);

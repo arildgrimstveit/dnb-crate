@@ -1,5 +1,13 @@
 # Decisions
 
+## 2026-09-03 — beat-this is not the rhythm source
+
+`tools/analyzer-py/setup.ps1` now requires **Python 3.12** and CPU torch. This machine only has **3.14** (`py -0p` → `C:\Python314\python.exe`). beat-this / torch wheels cannot be installed, so `analysis:gate --engine beat-this` was not run.
+
+DSP downbeat v2 (analyzer **3.1.0**) ships as the always-available rhythm path. The sidecar stays optional: adopt beat-this as the rhythm source only if it is ≥ 2 tracks better on in-range published BPM and adds < 10 s/track. Until a 3.12 venv exists, `gridSource: "sidecar"` is unused on this crate.
+
+Merger still derives sidecar `downbeatConfidence` = downbeat-period IQR stability × DSP-phase agreement when a sidecar is present.
+
 ## 2026-09-03 — Mix FLACs carry the tracklist, not the first song
 
 FFmpeg copies tags from the first `-i` unless told not to, so hour renders were showing the opening track's title/artist. Published FLACs now strip source tags (`-map_metadata -1`) and write mix-level Vorbis comments: plan name as title/album, artist `dnb-crate`, the full numbered tracklist in `comment`/`description`, and an embedded `CUESHEET` for per-track markers (FFmpeg does not persist native chapters on FLAC). Cue-snippet WAVs under `previews/` are stripped only. Renderer **6.5.0**.

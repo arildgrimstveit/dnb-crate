@@ -23,12 +23,13 @@ export type AnalyzerResult = {
   downbeatTimesMs: number[];
   gridRejected: boolean;
   gridRejectionReason: string | null;
-  gridSource: "analyzed" | "reference" | "anchor";
+  gridSource: "analyzed" | "reference" | "anchor" | "sidecar";
   musicalKey: string | null;
   keyConfidence: number | null;
   keyMode: "major" | "minor" | null;
   camelotKey: string | null;
   keyRunnerUp: string | null;
+  keyCandidates?: string[] | null;
   tempoStability: number | null;
   downbeatConfidence: number | null;
   lowBandEnergy: number | null;
@@ -78,6 +79,8 @@ export const emptyDescriptors = (waveform: number[] = []): SonicDescriptors => (
   highBandEnergy: null,
   chromaVector: null,
   tempoEvidence: null,
+  bars: null,
+  keyCandidates: null,
 });
 
 export type { TrackSection, SonicDescriptors, MusicalKeyEstimate };

@@ -44,8 +44,12 @@ describe("descriptor pack", () => {
 
   it("scores white noise as non-melodic and not danceable", () => {
     const samples = new Float32Array(22_050 * 8);
+    let state = 1;
     for (let i = 0; i < samples.length; i += 1) {
-      samples[i] = ((i * 1103515245 + 12345) >>> 16) / 32768 - 1;
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      const a = state / 0xffffffff * 2 - 1;
+      const b = ((i * 1103515245 + 12345) >>> 16) / 32768 - 1;
+      samples[i] = (a + b) * 0.5;
     }
     const result = dspAnalyzer.analyze({
       samples,
@@ -81,7 +85,7 @@ describe("descriptor pack", () => {
     expect(a.descriptors?.acousticness).toBe(b.descriptors?.acousticness);
     expect(a.descriptors?.melodicness).toBe(b.descriptors?.melodicness);
     expect(a.descriptors?.valence).toBe(b.descriptors?.valence);
-    expect(a.analyzerVersion).toBe("3.0.0");
+    expect(a.analyzerVersion).toBe("3.1.0");
   });
 
   it("maps suggestedEnergy from continuous energy", () => {

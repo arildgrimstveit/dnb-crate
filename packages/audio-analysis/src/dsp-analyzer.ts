@@ -10,7 +10,7 @@ import {
   type TrackSection,
 } from "@dnb-crate/domain";
 
-import { estimateKeyFromChroma } from "./chroma.ts";
+import { dominantSubPitchClass, estimateKeyFromChroma } from "./chroma.ts";
 import { computeDescriptorPack } from "./descriptors.ts";
 import { stftMagnitude } from "./fft.ts";
 import type { AnalyzeOptions, AnalyzerCue, AnalyzerResult, AudioAnalyzer, PcmAudio } from "./types.ts";
@@ -523,13 +523,38 @@ function trackBeats(
   return times;
 }
 
+function positiveDelta(series: number[]): number[] {
+  const out = [0];
+  for (let i = 1; i < series.length; i += 1) {
+    out.push(Math.max(0, (series[i] ?? 0) - (series[i - 1] ?? 0)));
+  }
+  return out;
+}
+
+function snareFlux(mag: number[][], sampleRateHz: number, nfft: number): number[] {
+  const body0 = hzToBin(150, sampleRateHz, nfft);
+  const body1 = hzToBin(400, sampleRateHz, nfft);
+  const crack0 = hzToBin(1500, sampleRateHz, nfft);
+  const crack1 = hzToBin(4000, sampleRateHz, nfft);
+  const out: number[] = [];
+  for (let t = 1; t < mag.length; t += 1) {
+    const prev = mag[t - 1]!;
+    const next = mag[t]!;
+    out.push(bandFlux(prev, next, body0, body1) + bandFlux(prev, next, crack0, crack1));
+  }
+  return out;
+}
+
+function downbeatConfidenceFromMargin(marginZ: number): number {
+  return clamp(1 / (1 + Math.exp(-(marginZ - 0.12) * 10)), 0, 1);
+}
+
 function downbeatPhase(
   beats: number[],
-  low: number[],
-  mid: number[],
+  kick: number[],
+  snare: number[],
   hopMs: number,
-  dropMs: number | null,
-  beatAnchorMs: number | null,
+  anchorsMs: number[],
 ): { downbeats: number[]; confidence: number } {
   if (beats.length < 8) {
     return { downbeats: beats.filter((_, i) => i % 4 === 0), confidence: 0.3 };
@@ -543,62 +568,51 @@ function downbeatPhase(
     }
     return peak;
   };
-  let bestPhase = 0;
-  let bestScore = -Infinity;
-  const scores: number[] = [];
-  for (let phase = 0; phase < 4; phase += 1) {
+  const nearestBeat = (ms: number): number =>
+    beats.reduce(
+      (best, time, index) =>
+        Math.abs(time - ms) < Math.abs(beats[best]! - ms) ? index : best,
+      0,
+    );
+  const scorePhase = (phase: number, modulus: number): number => {
     let score = 0;
     for (let i = 0; i < beats.length; i += 1) {
       const t = beats[i]!;
-      const pos = (i - phase + 4) % 4;
-      const lowV = sampleAt(t, low);
-      const midV = sampleAt(t, mid);
+      const pos = ((i - phase) % modulus + modulus) % modulus;
+      const kickV = sampleAt(t, kick);
+      const snareV = sampleAt(t, snare);
       if (pos === 0) {
-        score += lowV;
-      } else if (pos === 1 || pos === 3) {
-        score += 0.5 * midV;
+        score += kickV + 0.2 * snareV;
+      } else if (pos === 2 || (modulus === 8 && pos === 6)) {
+        score += snareV + 0.15 * kickV;
+      } else if (modulus === 8 && pos === 4) {
+        score += 0.65 * kickV + 0.35 * snareV;
       } else {
-        score += 0.35 * midV - 0.35 * lowV;
+        score += 0.25 * snareV;
       }
     }
-    if (dropMs !== null) {
-      const nearest = beats.reduce(
-        (best, t, i) =>
-          Math.abs(t - dropMs) < Math.abs(beats[best]! - dropMs) ? i : best,
-        0,
-      );
-      if (Math.abs((beats[nearest] ?? 0) - dropMs) < 600 && (nearest - phase + 4) % 4 === 0) {
-        score *= 1.08;
+    for (const anchor of anchorsMs) {
+      const index = nearestBeat(anchor);
+      if (Math.abs((beats[index] ?? 0) - anchor) > 700) {
+        continue;
+      }
+      if (((index - phase) % modulus + modulus) % modulus === 0) {
+        score += Math.log(1 + beats.length) * (modulus === 8 ? 1.4 : 1);
       }
     }
-    if (beatAnchorMs !== null) {
-      const nearest = beats.reduce(
-        (best, t, i) =>
-          Math.abs(t - beatAnchorMs) < Math.abs(beats[best]! - beatAnchorMs) ? i : best,
-        0,
-      );
-      if ((nearest - phase + 4) % 4 === 0) {
-        score *= 1.35;
-      }
-    }
-    scores.push(score);
-    if (score > bestScore) {
-      bestScore = score;
-      bestPhase = phase;
-    }
-  }
-  const sorted = [...scores].sort((a, b) => b - a);
-  const threshold = (sorted[0] ?? 0) / 1.25;
-  const firstDownbeat = (phase: number): number =>
-    beats.find((_, i) => (i - phase + 4) % 4 === 0) ?? beats[0] ?? 0;
-  const close = scores
-    .map((score, phase) => ({ score, phase }))
-    .filter((item) => item.score >= threshold);
-  close.sort((a, b) => firstDownbeat(a.phase) - firstDownbeat(b.phase) || b.score - a.score);
-  const chosen = close[0]?.phase ?? bestPhase;
-  const confidence = clamp(1 - (sorted[1] ?? 0) / ((sorted[0] ?? 1) + 1e-9), 0, 1);
+    return score;
+  };
+  const scores4 = [0, 1, 2, 3].map((phase) => scorePhase(phase, 4));
+  const best4 = scores4.indexOf(Math.max(...scores4));
+  const eightPhases = [best4, (best4 + 4) % 8];
+  const scores8 = eightPhases.map((phase) => scorePhase(phase, 8));
+  const best8Index = scores8[0]! >= (scores8[1] ?? Number.NEGATIVE_INFINITY) ? 0 : 1;
+  const chosen = eightPhases[best8Index] ?? best4;
+  const sorted4 = [...scores4].sort((a, b) => b - a);
+  const spread4 = stddev(scores4) || 1e-6;
+  const confidence = downbeatConfidenceFromMargin(((sorted4[0] ?? 0) - (sorted4[1] ?? 0)) / spread4);
   return {
-    downbeats: beats.filter((_, i) => (i - chosen + 4) % 4 === 0),
+    downbeats: beats.filter((_, i) => ((i - chosen) % 4 + 4) % 4 === 0),
     confidence,
   };
 }
@@ -609,6 +623,7 @@ type BarFeatures = {
   sub: number;
   midFlux: number;
   highRatio: number;
+  onsetDensity: number;
 };
 
 function featureVec(bar: BarFeatures): number[] {
@@ -980,6 +995,8 @@ export const dspAnalyzer: AudioAnalyzer = {
     const { onset, low, mid } = onsetStrength(stft.mag, pcm.sampleRateHz, NFFT);
     const hopMs = stft.hopMs;
     const subEnergy = bandMagEnergy(stft.mag, 1, hzToBin(120, pcm.sampleRateHz, NFFT));
+    const kickOnset = positiveDelta(subEnergy.length > 0 ? subEnergy : low);
+    const snareOnset = snareFlux(stft.mag, pcm.sampleRateHz, NFFT);
     const tempoHop = 128;
     const tempoOnset = timeDomainOnset(pcm.samples, tempoHop);
     const tempoHopMs = (tempoHop / pcm.sampleRateHz) * 1000;
@@ -990,9 +1007,33 @@ export const dspAnalyzer: AudioAnalyzer = {
     let gridRejected = false;
     let gridRejectionReason: string | null = null;
     let bpm: number | null = folded?.bpm ?? null;
-    let gridSource: "analyzed" | "reference" | "anchor" = "analyzed";
+    let gridSource: "analyzed" | "reference" | "anchor" | "sidecar" = "analyzed";
     let gridOffsetMs = estimated?.offsetMs ?? 0;
-    let tempoEvidence = estimated?.tempoEvidence ?? null;
+    const subComb = peakBpm(kickOnset, hopMs, minBpm, maxBpm);
+    const subFolded = subComb ? normalizeDnbBpm(subComb.bpmRaw, minBpm, maxBpm) : null;
+    const agreement = (freeBpm: number | null): number => {
+      if (freeBpm == null || subFolded == null) {
+        return 0;
+      }
+      const delta = Math.abs(freeBpm - subFolded.bpm);
+      return delta <= 1 ? 1 : delta <= 3 ? 0.45 : 0;
+    };
+    const attachAgreement = (
+      evidence: {
+        prominence: number;
+        stability: number;
+        tempoConf: number;
+        onGridRatio: number;
+        agreement?: number;
+      } | null,
+      freeBpm: number | null,
+    ) => {
+      if (!evidence) {
+        return evidence;
+      }
+      return { ...evidence, agreement: Number(agreement(freeBpm).toFixed(3)) };
+    };
+    let tempoEvidence = attachAgreement(estimated?.tempoEvidence ?? null, folded?.bpm ?? null);
     if (!folded || bpmRaw === null) {
       gridRejected = true;
       gridRejectionReason = "No plausible DnB tempo (160–190 after half/double fold)";
@@ -1018,7 +1059,7 @@ export const dspAnalyzer: AudioAnalyzer = {
         gridOffsetMs = ratio.offsetMs;
         gridRejected = ratio.gridRejected;
         gridRejectionReason = ratio.gridRejectionReason;
-        tempoEvidence = ratio.tempoEvidence;
+        tempoEvidence = attachAgreement(ratio.tempoEvidence, ratio.bpm);
         if (!ratio.gridRejected) {
           gridSource = "analyzed";
         }
@@ -1039,7 +1080,7 @@ export const dspAnalyzer: AudioAnalyzer = {
         gridRejected = false;
         gridRejectionReason = null;
         gridSource = "reference";
-        tempoEvidence = ref.tempoEvidence;
+        tempoEvidence = attachAgreement(ref.tempoEvidence, bpm);
       } else {
         gridRejected = true;
         gridRejectionReason = `Reference tempo ${referenceBpm} does not fit onsets (confidence ${refConf.toFixed(2)})`;
@@ -1059,19 +1100,23 @@ export const dspAnalyzer: AudioAnalyzer = {
         gridOffsetMs,
         durationMs,
       );
-      const down = downbeatPhase(
-        beatTimesMs,
-        low,
-        mid,
-        hopMs,
-        dropHint,
-        options.beatAnchorMs ?? null,
+      const firstAnchors = [dropHint, options.beatAnchorMs].filter(
+        (value): value is number => value != null,
       );
+      const down = downbeatPhase(beatTimesMs, kickOnset, snareOnset, hopMs, firstAnchors);
       downbeatTimesMs = down.downbeats;
       downbeatConfidence = Number(down.confidence.toFixed(3));
     }
 
-    const key = estimateKeyFromChroma(stft.mag, pcm.sampleRateHz, NFFT);
+    const dropFrame = dropHint !== null ? Math.round(dropHint / hopMs) : 0;
+    const subRootPc = dominantSubPitchClass(
+      stft.mag,
+      pcm.sampleRateHz,
+      NFFT,
+      dropFrame,
+      Math.min(stft.mag.length, dropFrame + Math.round(16_000 / hopMs)),
+    );
+    const key = estimateKeyFromChroma(stft.mag, pcm.sampleRateHz, NFFT, { subRootPc });
     const nyquist = pcm.sampleRateHz / 2;
     const lowE = bandEnergyTime(pcm.samples, pcm.sampleRateHz, 0, 80);
     const midE = bandEnergyTime(pcm.samples, pcm.sampleRateHz, 80, 4000);
@@ -1084,23 +1129,43 @@ export const dspAnalyzer: AudioAnalyzer = {
       NFFT / 2,
     );
     const barMs = bpm ? (4 * 60_000) / bpm : 2000;
-    const gridStart = downbeatTimesMs[0] ?? 0;
-    const bars: BarFeatures[] = [];
-    for (let t = gridStart; t < durationMs; t += barMs) {
-      const start = Math.round((t / 1000) * pcm.sampleRateHz);
-      const end = Math.round(((t + barMs) / 1000) * pcm.sampleRateHz);
-      const e = rms(pcm.samples, start, end);
-      const frame = Math.round(t / hopMs);
-      const frameEnd = Math.round((t + barMs) / hopMs);
-      const lo = clamp(frame, 0, Math.max(0, subEnergy.length - 1));
-      const hi = clamp(frameEnd, lo + 1, subEnergy.length);
-      const sub = mean(subEnergy.slice(lo, hi));
-      const midFlux = mean(mid.slice(lo, Math.min(hi, mid.length)));
-      const high = mean(highEnergy.slice(lo, Math.min(hi, highEnergy.length)));
-      const highRatio = high / (sub + high + 1e-9);
-      bars.push({ startMs: t, rms: e, sub, midFlux, highRatio });
-    }
+    const onsetMeanAll = mean(onset);
+    const collectBars = (gridStart: number): BarFeatures[] => {
+      const collected: BarFeatures[] = [];
+      for (let t = gridStart; t < durationMs; t += barMs) {
+        const start = Math.round((t / 1000) * pcm.sampleRateHz);
+        const end = Math.round(((t + barMs) / 1000) * pcm.sampleRateHz);
+        const e = rms(pcm.samples, start, end);
+        const frame = Math.round(t / hopMs);
+        const frameEnd = Math.round((t + barMs) / hopMs);
+        const lo = clamp(frame, 0, Math.max(0, subEnergy.length - 1));
+        const hi = clamp(frameEnd, lo + 1, subEnergy.length);
+        const sub = mean(subEnergy.slice(lo, hi));
+        const midFlux = mean(mid.slice(lo, Math.min(hi, mid.length)));
+        const high = mean(highEnergy.slice(lo, Math.min(hi, highEnergy.length)));
+        const highRatio = high / (sub + high + 1e-9);
+        const onsetSlice = onset.slice(lo, Math.min(hi, onset.length));
+        const onsetDensity =
+          onsetSlice.length === 0
+            ? 0
+            : onsetSlice.filter((value) => value > onsetMeanAll).length / onsetSlice.length;
+        collected.push({ startMs: t, rms: e, sub, midFlux, highRatio, onsetDensity });
+      }
+      return collected;
+    };
+    let bars = collectBars(downbeatTimesMs[0] ?? 0);
     const sections = labelSections(bars, durationMs, dropHint, 0);
+    if (bpm !== null && !gridRejected && beatTimesMs.length >= 8) {
+      const refinedAnchors = [
+        dropHint,
+        options.beatAnchorMs,
+        ...sections.map((section) => section.startMs),
+      ].filter((value): value is number => value != null);
+      const refined = downbeatPhase(beatTimesMs, kickOnset, snareOnset, hopMs, refinedAnchors);
+      downbeatTimesMs = refined.downbeats;
+      downbeatConfidence = Number(refined.confidence.toFixed(3));
+      bars = collectBars(downbeatTimesMs[0] ?? 0);
+    }
     const cues = cuesFromSections(sections).map((cue) => ({
       ...cue,
       positionMs: snapToNearestBeat(cue.positionMs, beatTimesMs)?.positionMs ?? cue.positionMs,
@@ -1157,6 +1222,9 @@ export const dspAnalyzer: AudioAnalyzer = {
       keyMode: key.keyMode,
       camelotKey: key.camelotKey,
       keyRunnerUp: key.keyRunnerUp,
+      keyCandidates: [key.musicalKey, key.keyRunnerUp].filter(
+        (value): value is string => Boolean(value),
+      ),
       tempoStability: estimated ? Number(estimated.stability.toFixed(3)) : null,
       downbeatConfidence,
       lowBandEnergy: Number((lowE / totalE).toFixed(4)),
@@ -1184,9 +1252,18 @@ export const dspAnalyzer: AudioAnalyzer = {
         midBandEnergy: Number((midE / totalE).toFixed(4)),
         highBandEnergy: Number((highE / totalE).toFixed(4)),
         chromaVector: key.chromaVector,
+        keyCandidates: [key.musicalKey, key.keyRunnerUp].filter(
+          (value): value is string => Boolean(value),
+        ),
         tempoEvidence,
         audioStartMs: bounds.audioStartMs,
         audioEndMs: bounds.audioEndMs,
+        bars: {
+          rms: bars.map((bar) => Number(bar.rms.toFixed(2))),
+          sub: bars.map((bar) => Number(bar.sub.toFixed(2))),
+          midFlux: bars.map((bar) => Number(bar.midFlux.toFixed(2))),
+          onsetDensity: bars.map((bar) => Number(bar.onsetDensity.toFixed(2))),
+        },
       },
       engineRuntimeMs: Date.now() - started,
     };

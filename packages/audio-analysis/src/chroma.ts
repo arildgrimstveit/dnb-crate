@@ -141,11 +141,53 @@ function addToChroma(chroma: number[], hz: number, weight: number, tuningShift: 
   chroma[hi] = (chroma[hi] ?? 0) + weight * frac;
 }
 
+export function dominantSubPitchClass(
+  mag: number[][],
+  sampleRateHz: number,
+  nfft: number,
+  frameStart = 0,
+  frameEnd = mag.length,
+): number | null {
+  const lo = hzToBin(35, sampleRateHz, nfft);
+  const hi = hzToBin(110, sampleRateHz, nfft);
+  const votes = new Array<number>(12).fill(0);
+  const end = Math.min(mag.length, Math.max(frameStart + 1, frameEnd));
+  for (let t = Math.max(0, frameStart); t < end; t += 1) {
+    const frame = mag[t]!;
+    let best = 0;
+    let bestK = lo;
+    for (let k = lo; k <= hi && k < frame.length; k += 1) {
+      const value = frame[k] ?? 0;
+      if (value > best) {
+        best = value;
+        bestK = k;
+      }
+    }
+    if (best <= 1e-9) {
+      continue;
+    }
+    const hz = (bestK * sampleRateHz) / nfft;
+    const pc = Math.round(12 * Math.log2(hz / 440)) % 12;
+    const wrapped = ((pc % 12) + 12) % 12;
+    votes[wrapped] = (votes[wrapped] ?? 0) + best;
+  }
+  let bestPc = 0;
+  let bestVote = 0;
+  for (let i = 0; i < 12; i += 1) {
+    if ((votes[i] ?? 0) > bestVote) {
+      bestVote = votes[i] ?? 0;
+      bestPc = i;
+    }
+  }
+  return bestVote > 0 ? bestPc : null;
+}
+
 /** HPCP-style chroma: 165–3520 Hz, spectral peaks, tuning, harmonic suppression. */
 export function estimateKeyFromChroma(
   mag: number[][],
   sampleRateHz: number,
   nfft: number,
+  options: { subRootPc?: number | null } = {},
 ): ChromaKeyEstimate {
   const minBin = hzToBin(CHROMA_LOW_HZ, sampleRateHz, nfft);
   const maxBin = hzToBin(CHROMA_HIGH_HZ, sampleRateHz, nfft);
@@ -281,6 +323,17 @@ export function estimateKeyFromChroma(
     rankScore: -((kkRanks[index] ?? 24) + (tempRanks[index] ?? 24)) / 2,
     raw: (candidate.kk + candidate.temperley) / 2,
   }));
+  if (options.subRootPc != null) {
+    for (const row of scored) {
+      const tonic = PITCH_NAMES.findIndex((name) =>
+        row.key === name || row.key === `${name}m`,
+      );
+      if (tonic === options.subRootPc) {
+        row.raw += 0.06;
+        row.rankScore += 0.06;
+      }
+    }
+  }
   scored.sort((a, b) => b.rankScore - a.rankScore || b.raw - a.raw);
   const best = scored[0];
   const second = scored[1];
@@ -323,16 +376,16 @@ export function estimateKeyFromChroma(
     return empty;
   }
   const normalized = normalizeKey(best.key);
-  const margin = clamp(
-    (best.raw - (second?.raw ?? 0)) / (Math.abs(best.raw) + 1e-9),
-    0,
-    1,
-  );
+  const raws = scored.map((row) => row.raw);
+  const spread = stddev(raws) || 1e-6;
+  const marginZ = (best.raw - (second?.raw ?? 0)) / spread;
+  const logistic = clamp(1 / (1 + Math.exp(-(marginZ - 0.2) * 3.4)), 0, 1);
+  const clarityGate = chromaClarity < 0.45 ? chromaClarity * 0.08 : chromaClarity;
   return {
     musicalKey: normalized?.musicalKey ?? best.key,
     camelotKey: normalized?.camelotKey ?? null,
     keyMode: best.mode,
-    keyConfidence: Number((margin * chromaClarity).toFixed(3)),
+    keyConfidence: Number((logistic * clarityGate).toFixed(3)),
     keyRunnerUp: second?.key ?? null,
     chromaVector: chroma.map((v) => Number(v.toFixed(4))),
     chromaClarity: Number(chromaClarity.toFixed(4)),

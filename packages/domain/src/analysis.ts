@@ -54,6 +54,7 @@ export type TempoEvidence = {
   stability: number;
   tempoConf: number;
   onGridRatio: number;
+  agreement?: number;
 };
 
 export type SonicDescriptors = {
@@ -86,6 +87,7 @@ export type SonicDescriptors = {
     midFlux: number[];
     onsetDensity: number[];
   } | null;
+  keyCandidates?: string[] | null;
 };
 
 export type TrackAnalysis = {
@@ -100,11 +102,12 @@ export type TrackAnalysis = {
   downbeatTimesMs: number[];
   gridRejected: boolean;
   gridRejectionReason: string | null;
-  gridSource?: "analyzed" | "reference" | "anchor" | null;
+  gridSource?: "analyzed" | "reference" | "anchor" | "sidecar" | null;
   musicalKey: string | null;
   keyConfidence: number | null;
   keyMode: "major" | "minor" | null;
   camelotKey: string | null;
+  keyCandidates?: string[] | null;
   tempoStability: number | null;
   downbeatConfidence: number | null;
   integratedLufs: number | null;
@@ -216,7 +219,7 @@ export type BeatGridSummary = {
   tempoStability: number | null;
   gridRejected: boolean;
   gridRejectionReason: string | null;
-  gridSource?: "analyzed" | "reference" | "anchor" | null;
+  gridSource?: "analyzed" | "reference" | "anchor" | "sidecar" | null;
 };
 
 export type TrackAnalysisView = TrackAnalysis & {

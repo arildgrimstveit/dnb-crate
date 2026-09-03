@@ -15,7 +15,7 @@ function dspStub(): AnalyzerResult {
     bpmConfidence: 0.9,
     bpmRaw: 174,
     beatTimesMs: [0, 344],
-    downbeatTimesMs: [0],
+    downbeatTimesMs: [0, 1379, 2758, 4137],
     gridRejected: false,
     gridRejectionReason: null,
     gridSource: "analyzed",
@@ -88,6 +88,7 @@ describe("analysis merger and python adapter", () => {
     expect(merged.descriptors?.suggestedEnergy).toBe(8);
     expect(merged.suggestedCues[0]?.positionMs).toBe(1500);
     expect(merged.sections[0]?.type).toBe("drop");
+    expect(merged.downbeatConfidence).toBeGreaterThan(0);
   });
 
   it("maps canned sidecar JSON through a fake process runner", async () => {

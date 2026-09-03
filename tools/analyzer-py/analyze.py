@@ -80,6 +80,7 @@ def beat_this(path: Path, sample_rate: int) -> dict:
             if bpm < 120:
                 bpm *= 2
     confidence = bpm_confidence(beat_ms)
+    downbeat_confidence = bpm_confidence(down_ms) if down_ms else 0.0
     return {
         "analyzerName": "beat-this",
         "analyzerVersion": "sidecar",
@@ -88,6 +89,7 @@ def beat_this(path: Path, sample_rate: int) -> dict:
         "bpmRaw": bpm,
         "beatTimesMs": beat_ms,
         "downbeatTimesMs": down_ms,
+        "downbeatConfidence": downbeat_confidence,
         "gridRejected": bpm is None,
         "gridRejectionReason": None if bpm else "beat-this returned no tempo",
         "sections": [],

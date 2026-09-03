@@ -7,7 +7,7 @@ export const DEFAULT_RENDER_OUTPUT_EXTENSION = ".flac";
 export const ANALYZER_NAME = "dnb-crate-envelope";
 export const ANALYZER_VERSION = "1.0.0";
 export const DSP_ANALYZER_NAME = "dnb-crate-dsp";
-export const DSP_ANALYZER_VERSION = "3.0.0";
+export const DSP_ANALYZER_VERSION = "3.1.0";
 export const ANALYSIS_ENGINE_IDS = [
   "dnb-crate-dsp",
   "dnb-crate-envelope",
@@ -58,7 +58,16 @@ export const DEFAULT_SCORE_WEIGHTS = {
   recentlyUsed: 8,
   missingMetadata: 10,
   structure: 6,
+  joinLevel: 6,
+  joinStructure: 8,
+  joinAligned: 10,
+  joinHarmonic: 8,
+  genrePrior: 4,
 } as const;
+
+export const MIN_KEY_CONFIDENCE = 0.5;
+export const PLANNER_POOL_MIN_TRACKS = 12;
+export const PLANNER_POOL_RELAX_FACTOR = 3;
 
 export const DEFAULT_LOUDNESS_TARGET_LUFS = -14;
 export const DEFAULT_TRUE_PEAK_CEILING_DB = -1;

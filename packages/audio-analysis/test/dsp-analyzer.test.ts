@@ -101,6 +101,15 @@ describe("dnb-crate-dsp", () => {
     expect(result.musicalKey).toBe("F#m");
     expect(result.camelotKey).toBe("11A");
     expect(result.keyMode).toBe("minor");
+    expect(result.keyCandidates?.[0]).toBe("F#m");
+    expect(result.descriptors?.keyCandidates?.[0]).toBe("F#m");
+  });
+
+  it("keeps Em when a G sub sits under an Em pad", () => {
+    const pcm = buildKeyedDnbPcm({ key: "Em", subHz: 98 });
+    const result = dspAnalyzer.analyze(pcm);
+    expect(result.musicalKey === "Em" || result.keyRunnerUp === "Em").toBe(true);
+    expect(result.musicalKey).not.toBe("G");
   });
 
   it("ignores a foreign A sub at 55 Hz when the pad is F#m", () => {
@@ -280,6 +289,29 @@ describe("dnb-crate-dsp", () => {
     const result = dspAnalyzer.analyze(pcm);
     expect(result.gridRejected).toBe(false);
     expect(result.gridSource).toBe("analyzed");
+  });
+
+  it("recovers a 2-beat downbeat offset with high confidence", () => {
+    const pcm = buildSyntheticDnbPcm({ bpm: 174, downbeatOffsetBeats: 2 });
+    const result = dspAnalyzer.analyze(pcm);
+    const beatMs = 60_000 / 174;
+    expect(result.gridRejected).toBe(false);
+    expect(Math.abs((result.downbeatTimesMs[0] ?? 0) - 2 * beatMs)).toBeLessThan(10);
+    expect(result.downbeatConfidence ?? 0).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it("resolves 8-beat ambiguity to the accented bar 1", () => {
+    const pcm = buildSyntheticDnbPcm({ bpm: 174, barAccentEvery: 2 });
+    const result = dspAnalyzer.analyze(pcm);
+    const firstDown = result.downbeatTimesMs[0] ?? 99;
+    expect(firstDown).toBeLessThan(10);
+    expect(result.downbeatConfidence ?? 0).toBeGreaterThanOrEqual(0.9);
+    const bars = result.descriptors?.bars;
+    expect(bars).toBeTruthy();
+    expect(bars?.rms.length).toBeGreaterThan(8);
+    expect(bars?.rms.length).toBe(bars?.sub.length);
+    expect(bars?.rms.length).toBe(bars?.midFlux.length);
+    expect(bars?.rms.length).toBe(bars?.onsetDensity.length);
   });
 
   it("does not trim a 4s musical fade-out", () => {

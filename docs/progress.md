@@ -63,6 +63,15 @@ Peak v3.4: plan `5c5121fb-…`, job `ed06f32f-…`, `output/renders/hour-peak-v3
 | 13 | Tidal Wave → Streamline | 32 | landing | dropLanding | 0 | −1.4 | phrase |
 | 14 | Streamline → Vapourise | 16 | sequential | quietTail | 0 | −0.9 | phrase |
 
+### WP3 shipped
+
+Analyzer **3.1.0** stale re-run: job `71eb4f40-0b5f-4d3f-afe7-04fa4f6d3bc1`, **431 / 431** in **20.5 min**, `failedTrackIds: []`. Per-bar features on every DSP row. Downbeat v2 (kick/sub + snare, mod-4 then mod-8, drop/section log-priors).
+
+- Accepted grids **218** (library:stats **209** + **9** reference), rejected **213**. `gridSource` analyzed 422 / reference 9 / sidecar 0.
+- `downbeat_confidence` on accepted grids: p10 **0.79**, p50 **1.00**, p90 **1.00** (was max 0.322 on 3.0.0). **206 / 218** ≥ 0.5, so bar/phrase alignment can now fire from stored confidence.
+- beat-this not installed (host Python 3.14 only). `analysis:gate --engine beat-this` skipped. DSP stays the rhythm source — see `docs/decisions.md`.
+- Published/manual **140**: in-range **85**, accepted **57**, exact **56**. No accepted in-range grid disagrees with published by > 1.0.
+
 ## Crate v3 — baseline (2026-09-03)
 
 `library:stats` before WP1–WP5. Live crate, no re-analysis.

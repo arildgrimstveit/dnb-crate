@@ -140,6 +140,7 @@ export const tempoEvidenceSchema = z.object({
   stability: z.number(),
   tempoConf: z.number(),
   onGridRatio: z.number(),
+  agreement: z.number().optional(),
 });
 
 export const sonicDescriptorsSchema = z.object({
@@ -175,6 +176,7 @@ export const sonicDescriptorsSchema = z.object({
     })
     .nullable()
     .optional(),
+  keyCandidates: z.array(z.string()).max(2).nullable().optional(),
 });
 
 export const beatGridSummarySchema = z.object({
@@ -186,7 +188,7 @@ export const beatGridSummarySchema = z.object({
   tempoStability: z.number().nullable(),
   gridRejected: z.boolean(),
   gridRejectionReason: z.string().nullable(),
-  gridSource: z.enum(["analyzed", "reference", "anchor"]).nullable().optional(),
+  gridSource: z.enum(["analyzed", "reference", "anchor", "sidecar"]).nullable().optional(),
 });
 
 export const trackAnalysisSchema = z.object({
@@ -198,11 +200,12 @@ export const trackAnalysisSchema = z.object({
   bpmRaw: z.number().nullable(),
   gridRejected: z.boolean(),
   gridRejectionReason: z.string().nullable(),
-  gridSource: z.enum(["analyzed", "reference", "anchor"]).nullable().optional(),
+  gridSource: z.enum(["analyzed", "reference", "anchor", "sidecar"]).nullable().optional(),
   musicalKey: z.string().nullable(),
   keyConfidence: z.number().nullable(),
   keyMode: z.enum(["major", "minor"]).nullable(),
   camelotKey: z.string().nullable(),
+  keyCandidates: z.array(z.string()).max(2).nullable().optional(),
   tempoStability: z.number().nullable(),
   downbeatConfidence: z.number().nullable(),
   integratedLufs: z.number().nullable(),
@@ -274,8 +277,8 @@ export const analysisReportEngineRowSchema = z.object({
   bpm: z.number().nullable(),
   bpmConfidence: z.number().nullable(),
   gridRejected: z.boolean(),
-  gridSource: z.enum(["analyzed", "reference", "anchor"]).nullable().optional(),
-  keyAgreement: z.enum(["exact", "relative", "none"]).nullable(),
+  gridSource: z.enum(["analyzed", "reference", "anchor", "sidecar"]).nullable().optional(),
+  keyAgreement: z.enum(["exact", "relative", "number_pm1", "clash"]).nullable(),
   sectionCount: z.number().int(),
 });
 
@@ -293,6 +296,16 @@ export const analysisReportDataSchema = z.object({
       analyzed: z.number().int(),
       reference: z.number().int(),
       anchor: z.number().int(),
+      sidecar: z.number().int().optional(),
+    })
+    .optional(),
+  keyAgreementCounts: z
+    .object({
+      exact: z.number().int(),
+      relative: z.number().int(),
+      number_pm1: z.number().int(),
+      clash: z.number().int(),
+      unknown: z.number().int(),
     })
     .optional(),
   outOfRange: z.object({

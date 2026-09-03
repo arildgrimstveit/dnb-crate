@@ -20,6 +20,9 @@ export {
   COMPATIBLE_TRACKS_LIMIT_MAX,
   PLANNER_CANDIDATE_CAP,
   DEFAULT_SCORE_WEIGHTS,
+  MIN_KEY_CONFIDENCE,
+  PLANNER_POOL_MIN_TRACKS,
+  PLANNER_POOL_RELAX_FACTOR,
   DEFAULT_LOUDNESS_TARGET_LUFS,
   DEFAULT_TRUE_PEAK_CEILING_DB,
   DEFAULT_RENDER_SAMPLE_RATE_HZ,
@@ -104,6 +107,7 @@ export { loadConfig, type ConfigLoadOptions } from "./load-config.ts";
 export { DomainError, type DomainErrorCode, isDomainError } from "./errors.ts";
 export {
   camelotDistance,
+  camelotNumberDistance,
   keyAgreement,
   normalizeKey,
   parseCamelot,
@@ -196,7 +200,9 @@ export { interpolateEnergy, scoreCandidate, hashSeed, type ScoreContext } from "
 export {
   MOOD_PRESETS,
   moodPresetFor,
+  resolveDescriptorFilters,
   type DescriptorFilters,
+  type DescriptorPercentiles,
   type DescriptorRange,
 } from "./mood-presets.ts";
 export {
