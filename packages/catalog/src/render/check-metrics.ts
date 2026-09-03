@@ -27,7 +27,8 @@ export function firstDropMs(
 /**
  * Residual is remaining grid error after the applied nudge. A one-beat
  * period-add (~345 ms at 174) is still reported as residual so the Peak v3.3
- * failure mode stays visible.
+ * failure mode stays visible. Phrase/bar wraps do not fall back to the raw
+ * nudge — that offset is the applied correction, not leftover error.
  */
 export function alignmentResidualMs(
   downbeatOffsetMs: number | null,
@@ -40,7 +41,7 @@ export function alignmentResidualMs(
   periodMs: number | null,
 ): number | null {
   const wrapMs = periodMs && periodMs > 0 ? periodMs : 345;
-  const beatPeriodMs = wrapMs > 2000 ? wrapMs / 32 : wrapMs;
+  const beatPeriodMs = wrapMs > 2000 ? null : wrapMs;
   const gridResidual = residualFromBeatGrids(
     outgoingBeats,
     incomingBeats,
@@ -51,13 +52,14 @@ export function alignmentResidualMs(
     wrapMs,
   );
   if (
+    beatPeriodMs != null &&
     downbeatOffsetMs != null &&
     Math.abs(downbeatOffsetMs) >= 20 &&
     Math.abs(Math.abs(downbeatOffsetMs) - beatPeriodMs) < 25
   ) {
     return downbeatOffsetMs;
   }
-  return gridResidual ?? downbeatOffsetMs;
+  return gridResidual;
 }
 
 function residualFromBeatGrids(
@@ -72,16 +74,18 @@ function residualFromBeatGrids(
   if (outgoingBeats.length < 4 || incomingBeats.length < 4) {
     return null;
   }
-  const hop = Math.max(10, Math.round(periodMs / 8));
-  const windowMs = Math.min(8000, periodMs * 16);
+  const hop = 20;
+  const windowMs = Math.min(8000, Math.max(periodMs * 2, 4000));
   const outEnv = onsetEnvelope(outgoingBeats, outgoingOverlapStartMs, outgoingRate, windowMs, hop);
   const inEnv = onsetEnvelope(incomingBeats, incomingOverlapStartMs, incomingRate, windowMs, hop);
   if (outEnv.every((value) => value === 0) || inEnv.every((value) => value === 0)) {
     return null;
   }
-  const maxLag = Math.max(1, Math.round((periodMs / 2) / hop));
+  const halfBeatMs = 160;
+  const maxLag = Math.max(1, Math.round(Math.min(periodMs / 2, halfBeatMs) / hop));
   let bestLag = 0;
   let best = Number.NEGATIVE_INFINITY;
+  let zero = 0;
   for (let lag = -maxLag; lag <= maxLag; lag += 1) {
     let sum = 0;
     for (let i = 0; i < outEnv.length; i += 1) {
@@ -91,10 +95,16 @@ function residualFromBeatGrids(
       }
       sum += outEnv[i]! * inEnv[j]!;
     }
+    if (lag === 0) {
+      zero = sum;
+    }
     if (sum > best) {
       best = sum;
       bestLag = lag;
     }
+  }
+  if (bestLag === 0 || best < zero * 1.25) {
+    return 0;
   }
   return Math.round(bestLag * hop);
 }

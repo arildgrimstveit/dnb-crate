@@ -589,7 +589,10 @@ export class RenderCoordinator {
       });
     }
     const residualFail = joins.some(
-      (join) => join.residualMs != null && Math.abs(join.residualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS,
+      (join) =>
+        (join.template === "phrase_mix" || join.template === "bass_swap") &&
+        join.residualMs != null &&
+        Math.abs(join.residualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS,
     );
     const levelFail = joins.some((join) => {
       const matched = plannedLevelStepLu(

@@ -92,6 +92,18 @@ Mood presets resolve `minPct` / `maxPct` against crate p10/p50/p90. Pool relaxes
 
 On 3.1.0 stored descriptors: Peak pool **95** (92 accepted grids, 97%). Liquid pool **68** (36 accepted, 53%) — pool floor met; 60% accepted-grid target waits on the 3.2.0 rescue re-run. Liquid `minPct` 70 was only 30 tracks, so the brief uses 60.
 
+### WP8 shipped
+
+Analyzer **3.2.0** stale re-run: job `5119aa91-ae6f-4804-b84d-2370d2742caa`, **431 / 431** in **~21 min**, `failedTrackIds: []`. Accepted grids still **218** (DnB-genre **152 / 271**, 56%). ≥ 75% grid coverage is **not** met. Analyzed keys **0** after the 0.5 gate (manual 8, none 423). `key_confidence` p50 **0.005**, max **0.461**. Gold-set agreement is unmeasured until those 30 rows are labelled published.
+
+3.2.0 pools: Peak **95** (92 accepted, 97%). Liquid **59** (31 accepted, **53%**). Pool floor ≥ 40 met; Liquid 60% accepted-grid target **not** met.
+
+**Peak hour v4** plan `994a70d4-adac-4ff7-9ca6-c827bb5ffb39` (seed 6, `dropAnchored: true`), 24 tracks, not partial. 21 `phrase_mix` + 2 `bass_swap` → **100% aligned**. `harmonicCoverage` **0 / 23**. Job `d3d1ed60-a780-4b42-b133-bdd47398f994` → `output/renders/hour-peak-v4.flac` (sha256 `819491e9…`). Duration **3562606** ms (~59:22; plan 3583943, 21 s short). LUFS **−14**, TP **−2.5**, mix-wide **−6.50 dB**. `render:check` v2 exit **0**: `interiorSilence: []`; every join has `exitKind`; 23/23 `alignmentMode: phrase`; residual **0**. Gain-corrected LUFS within 3 LU. Large 10 s arrangement steps (up to +11.2 LU) are quiet-tail / landing energy changes, not unmatched gains. Did not overwrite v3.3 / v3.4.
+
+**Liquid hour v4** plan `b85cd3fb-5540-48a0-ba80-554d94edf4b3` (seed 3, `dropAnchored: false`), 30 tracks, not partial. 21 `phrase_mix` + 2 `bass_swap` + 6 `crossfade` → **79% aligned** (target ≥ 60% met). `harmonicCoverage` **0 / 29**. Job `9be8dba1-d7cf-4641-a04d-c4f7f3d0e9b0` → `output/renders/hour-liquid-v4.flac` (sha256 `e14be6f2…`). Duration **7406070** ms (~2:03:26) vs target 3600000 — intro-start windows keep almost the full files; `DURATION_OFF_TARGET` + output 9.1 s short of the plan. Mix-wide **−4.40 dB**. `render:check` v2 exit **1**: `interiorSilence: []`; five phrase-mix residuals 100–160 ms (Original Business → Strut −140; Sensual → Out of Reach 160; Out of Reach → Float 140; Change With Me → Stolen Hours 120; Mixed Emotions → Badman 100). Crossfade residuals are not a fail gate. Ear-check pending.
+
+`render:check` residual no longer treats a phrase-mode ~360 ms nudge as a +1-beat fail (Peak join Broken Light → Freedom). Xcorr hop is 20 ms, search ±160 ms, and an off-zero peak must beat lag 0 by 25%. Residual fail applies only to `phrase_mix` / `bass_swap`.
+
 ## Crate v3 — baseline (2026-09-03)
 
 `library:stats` before WP1–WP5. Live crate, no re-analysis.

@@ -31,16 +31,20 @@ pnpm cli library:scan --dry-run
 pnpm cli library:stats
 pnpm cli track:search --query "Technimatic" --limit 10
 pnpm cli analysis:start --track-id UUID --wait
+pnpm cli analysis:run --scope stale --wait --timeout-min 90
+pnpm cli analysis:gate
 pnpm cli analysis:get --track-id UUID
 pnpm cli analysis:compare --track-id UUID
 pnpm cli analysis:report
 pnpm cli analysis:cue-preview --track-id UUID --cue drop
 pnpm cli transition:plan --from UUID --to UUID --bars 32
 pnpm cli plan:create --name "Liquid hour" --duration-ms 3600000 --seed 1 --end-query "Nightfall"
+pnpm cli plan:create --brief-json docs/examples/peak-hour-v4.brief.json
 pnpm cli plan:list
 pnpm cli plan:get --id UUID
 pnpm cli plan:validate --id UUID
 pnpm cli render:start --plan-id UUID --wait
+pnpm cli render:check --id JOB
 pnpm cli render:status --id UUID
 pnpm cli render:manifest --id UUID
 ```
@@ -100,14 +104,14 @@ Set the same `DNB_CRATE_*` environment variables in the Inspector session. Confi
 | `get_track_analysis`        | Beat grid, confidence, canonical vs analyzed BPM/key, descriptor pack.               |
 | `compare_track_analyses`    | Per-engine BPM/key/sections plus the five descriptor sliders.                        |
 | `get_track_sections`        | Intro/build/drop/breakdown/outro labels.                                             |
-| `get_analysis_report`       | Engine agreement vs published/manual BPM.                                            |
+| `get_analysis_report`       | Engine agreement vs published/manual BPM, plus keyAgreement vs labelled keys.        |
 | `create_cue_preview`        | 8-second WAV around a detected cue.                                                  |
 | `start_metadata_enrichment` | MusicBrainz / Deezer / AcoustID lookup. Optional `dryRun`. Never writes file tags.   |
 | `get_enrichment_status`     | Poll enrichment jobs.                                                                |
 | `get_enrichment_report`     | Match counts, needsReview, published BPM writes, disagreements, duplicates.          |
 | `get_planning_readiness`    | Which tracks lack BPM/key/energy/file. A `bpmHint` counts as BPM.                    |
 | `find_compatible_tracks`    | Rank candidates (BPM/Camelot/energy/tags/descriptors).                               |
-| `create_set_plan`           | Deterministic draft from structured constraints, including descriptor/genre filters. |
+| `create_set_plan`           | Deterministic draft from structured constraints, including descriptor/genre filters and crate-percentile ranges. |
 | `get_set_plan`              | Load a saved plan.                                                                   |
 | `validate_set_plan`         | Errors vs warnings plus energy/duration diagnostics.                                 |
 | `update_set_plan`           | Explicit replace/trim/transition/rate/applyTransition/reorder edits.                 |
@@ -126,7 +130,7 @@ Resources: `dnbcrate://tracks/{trackId}`, `dnbcrate://tracks/{trackId}/analysis`
 
 Prompt: `build-dnb-set` (optional; the tool workflow works without it).
 
-Scoring details: `docs/scoring.md`. Analysis / templates: `docs/analysis.md`. Rendering / loudness / jobs: `docs/rendering.md`. Ear-check lessons for later mixes: `docs/mixing-lessons.md`. Example plan JSON: `docs/examples/one-hour-plan.example.json`.
+Scoring details: `docs/scoring.md`. Analysis / templates: `docs/analysis.md`. Rendering / loudness / jobs: `docs/rendering.md`. Ear-check lessons for later mixes: `docs/mixing-lessons.md`. Example plan JSON: `docs/examples/peak-hour-v4.brief.json`, `docs/examples/liquid-hour-v4.brief.json`.
 
 ## Tests
 

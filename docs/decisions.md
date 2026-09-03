@@ -4,7 +4,7 @@
 
 `applyAnalyzedMetadata` used to write every analyzed key as canonical (216 rows, `key_confidence` p50 0.012). That bypassed `resolveCanonicalKey`’s 0.5 gate and fed noise into `harmonicScore`.
 
-Analyzed keys now write only when `keyConfidence ≥ MIN_KEY_CONFIDENCE` (0.5). Below that, an existing analyzed key is cleared. Published and manual keys are untouched. The 3.1.0 stale pass loaded the old writer, so the 216 rows remain until the next version bump.
+Analyzed keys now write only when `keyConfidence ≥ MIN_KEY_CONFIDENCE` (0.5). Below that, an existing analyzed key is cleared. Published and manual keys are untouched. The 3.1.0 stale pass loaded the old writer; **3.2.0** cleared the 216 ungated rows. After that pass: analyzed **0**, manual **8**, none **423**. `key_confidence` p50 **0.005**, max **0.461**, **0** rows ≥ 0.5. Peak/Liquid v4 `harmonicCoverage` is therefore 0 / N until the gold set is labelled or confidence improves.
 
 Harmony scores Camelot **number** distance first (5A vs 5B is 0). Unknown keys score 0 and count toward `harmonicCoverage`. Aligned overlaps ≥ 16 bars with number distance ≥ 3 get `KEY_CLASH` and a shorter phrase.
 
@@ -14,7 +14,7 @@ Harmony scores Camelot **number** distance first (5A vs 5B is 0). Unknown keys s
 
 beat-this labels are unavailable, so `calibrate-confidence.mts` was not given sidecar tempos. The 2026-09-03 synthetic weights and `MIN_ANALYSIS_CONFIDENCE` **0.6** stay. A rejected free grid is rescued only when agreement is **1**, prominence is **≥ 0.35**, logistic confidence is **≥ 0.45**, and the reject reason is the 0.6 floor — not a failed reference fit. Constant-sine fixtures stay rejected (logistic < 0.45) even when the two combs agree.
 
-DnB-genre accepted grids on the 3.1.0 pass were **152 / 271** (56%), short of the 75% target. The rescue needs a stale re-run to count. No accepted in-range grid disagreed with published by > 1.0.
+DnB-genre accepted grids stay **152 / 271** (56%) after the 3.2.0 rescue re-run — the ≥ 75% target is **not** met. No accepted in-range grid disagreed with published by > 1.0.
 
 ## 2026-09-03 — beat-this is not the rhythm source
 
@@ -23,6 +23,18 @@ DnB-genre accepted grids on the 3.1.0 pass were **152 / 271** (56%), short of th
 DSP downbeat v2 (analyzer **3.1.0**) ships as the always-available rhythm path. The sidecar stays optional: adopt beat-this as the rhythm source only if it is ≥ 2 tracks better on in-range published BPM and adds < 10 s/track. Until a 3.12 venv exists, `gridSource: "sidecar"` is unused on this crate.
 
 Merger still derives sidecar `downbeatConfidence` = downbeat-period IQR stability × DSP-phase agreement when a sidecar is present.
+
+## 2026-09-03 — Level matching uses the set median, not −14
+
+`gainDb` was always 0 even though the renderer already applied `volume=`. Plans now write `gainDb = clamp(setMedianLufs − trackLufs, −6, +3)`. The mix-wide −14 LUFS / −1.0 dBTP post-process is unchanged. A non-zero manual `gainDb` survives `--replan`. `render:check` gates the **gain-corrected** LUFS delta (3 LU); the 10 s arrangement step can be larger on quiet-tail and landing joins.
+
+## 2026-09-03 — Intro-start Liquid hours overshoot the target
+
+`dropAnchored: false` keeps mix-in at the intro start. Combined with phrase-boundary mix-outs, each playable window is nearly the full track. Liquid v4 planned **30** tracks and rendered **2:03:26** against a 1-hour target (`DURATION_OFF_TARGET`). Peak v4 (`dropAnchored: true`) stayed at **59:22**. Do not treat the Liquid v4 file as a one-hour listen.
+
+## 2026-09-03 — Mix-out is a phrase boundary, not audioEnd − overlap
+
+`constrainMixOut` used to snap mix-out to `audioEnd − overlap` whenever the outro was shorter than the phrase, which put Peak v3’s rough opening joins inside the final drop. Aligned windows now pick the latest phrase-grid boundary that fits `B`. `constrainMixOut` only clamps to `audioEndMs`; it never relocates a mix-out into a drop. `exitKind` is `quietTail` or `dropLanding`.
 
 ## 2026-09-03 — Mix FLACs carry the tracklist, not the first song
 

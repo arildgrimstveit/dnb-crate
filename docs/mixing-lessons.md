@@ -18,6 +18,8 @@ Do not overwrite:
 
 | File | Why |
 | --- | --- |
+| `output/renders/hour-peak-v4.flac` | Peak v4 mood hour (phrase-anchored, level-matched). Structural pass; ear-check pending |
+| `output/renders/hour-liquid-v4.flac` | Liquid v4 mood hour. Structural pass; ear-check pending |
 | `output/renders/hour-peak-v3.4.flac` | Peak v3 order re-planned with phrase windows (plan `5c5121fb-…`, job `ed06f32f-…`). Structural pass; ear-check pending |
 | `output/renders/hour-peak-v3.3.flac` | Canonical Peak hour (mix 6.4.0; tags 6.5.0). Closer listen: joins 1–4 rough; from 20:26 much better |
 | `output/renders/hour-peak-v3.2.flac` | Complementary-curve A/B (12:08 still bad) |
@@ -139,6 +141,48 @@ Plan `c93a9f56-…`, `output/renders/hour-liquid-v3.wav`, **1:06:42**. User: **a
 
 Only 1→2 is a phrase mix. The rest are crossfades. That is a feature: liquid intros/outros do not need a 3-band kit hand-over.
 
+## Peak / Liquid hour v4
+
+Listen copies (do not overwrite keep-table files): `output/renders/hour-peak-v4.flac` and `output/renders/hour-liquid-v4.flac`. Ear-check is **pending** — judge joins against the v3.3 back-half bar (no “rough”, first 20 minutes of Peak as good as 20:26 onward; Liquid stays “nice” with more aligned joins).
+
+`dropAnchored: true` on Peak (mix-in at the incoming drop). `dropAnchored: false` on Liquid (intro-start windows). Analyzer **3.2.0**. Canonical keys were gated off, so both hours warn “missing key” on almost every track and `harmonicCoverage` is 0 / N.
+
+### Peak v4 — structural
+
+Plan `994a70d4-adac-4ff7-9ca6-c827bb5ffb39`, job `d3d1ed60-a780-4b42-b133-bdd47398f994`, **24** tracks, **59:22** (3562606 ms). 21 `phrase_mix` + 2 `bass_swap`. `render:check` v2 exit **0**: every join `exitKind` set, `alignmentMode: phrase`, residual **0**. Opens Technimatic feat. Pat Fulgoni — Like a Memory → Logistics — Hayling → Sub Focus — Timewarp; ends Pendulum — Sounds Of Life.
+
+| # | Outgoing → incoming | Bars | Shape | Exit | Residual | Arr. step LU |
+| --- | --- | ---: | --- | --- | ---: | ---: |
+| 0 | Like a Memory → Hayling | 32 | landing | dropLanding | 0 | +0.2 |
+| 1 | Hayling → Timewarp | 16 | sequential | quietTail | 0 | +0.8 |
+| 2 | Timewarp → Picton Blues | 16 | sequential | quietTail | 0 | +10.1 |
+| 3 | Picton Blues → The Fountain | 8 | landing | dropLanding | 0 | −3.7 |
+| 4 | The Fountain → Tidal Wave | 16 | sequential | quietTail | 0 | +0.7 |
+| 5 | Tidal Wave → Broken Light | 32 | landing | dropLanding | 0 | −0.2 |
+| 6 | Broken Light → Freedom | 16 | sequential | quietTail | 0 | +3.3 |
+| 7 | Freedom → Triple X | 8 | sequential | quietTail | 0 | +5.9 |
+| 8 | Triple X → Hologram | 8 | complementary | quietTail | 0 | +5.2 |
+| 9 | Hologram → Hold Your Colour | 32 | complementary | quietTail | 0 | +4.9 |
+| 10 | Hold Your Colour → Deep Space | 16 | sequential | quietTail | 0 | +6.7 |
+| 11 | Deep Space → Breathe In | 8 | complementary | quietTail | 0 | +6.4 |
+| 12 | Breathe In → Red Velvet | 32 | complementary | quietTail | 0 | +7.4 |
+| 13 | Red Velvet → Let The Story Begin | 16 | sequential | quietTail | 0 | +11.2 |
+| 14 | Let The Story Begin → Heatwave | 32 | landing | dropLanding | 0 | +0.8 |
+| 15 | Heatwave → Propane Nightmares | 32 | complementary | quietTail | 0 | +11.2 |
+| 16 | Propane Nightmares → Rock It | 8 | landing | dropLanding | 0 | +0.7 |
+| 17 | Rock It → Safe In Your Arms | 8 | complementary | quietTail | 0 | +5.3 |
+| 18 | Safe In Your Arms → 9,000 Miles | 8 | sequential | quietTail | 0 | +1.6 |
+| 19 | 9,000 Miles → In Your Eyes | 16 | landing | dropLanding | 0 | +2.4 |
+| 20 | In Your Eyes → Waiting | 8 | complementary | quietTail | 0 | +0.1 |
+| 21 | Waiting → Been Dreaming | 32 | complementary | quietTail | 0 | +8.9 |
+| 22 | Been Dreaming → Sounds Of Life | 16 | sequential | quietTail | 0 | +4.1 |
+
+Joins 16 and 19 are `bass_swap`. Arrangement steps ≥ 5 LU are phrase-window energy changes (quiet tail into a drop), not gain mismatch.
+
+### Liquid v4 — structural
+
+Plan `b85cd3fb-5540-48a0-ba80-554d94edf4b3`, job `9be8dba1-d7cf-4641-a04d-c4f7f3d0e9b0`, **30** tracks, **2:03:26** (7406070 ms) — overshoots the hour because intro-start playable windows stay long. 21 `phrase_mix` + 2 `bass_swap` + 6 `crossfade` (**79% aligned**). Opens Technimatic feat. Lucy Kitchen — Looking for Diversion → Nu:Logic — Side By Side. `render:check` v2 exit **1** on five phrase-mix residuals (100–160 ms). Pathways and Microdot have no accepted grid (30 s crossfades). Ear-check pending — do not treat the extra hour of runtime as a listen of the same shape as Liquid v3.
+
 ## v2.2 hour (keep for pairing)
 
 `output/renders/hour-mix-v2.2.wav`. Overall better than v2.1. Full join list is in `docs/progress.md`. Carry-forward:
@@ -177,7 +221,7 @@ These showed up in ear-check or analysis dumps; they are not implemented:
 - **Drop hanging over a quiet intro.** Under The Waves → Chant and Let It Fall → Inemuri mix out of drops (0.33 / 0.41) into intros ~0.07. Do not sequential those blindly (Breathe In → Hold on a While is the same shape and was perfect). Prefer an earlier mix-out or a shorter phrase on the next Peak pass.
 - **Drum-aware mix-in.** Detect kit-on-from-bar-1 even when the section is labelled `intro` (onset density / mid energy in the first 8 bars of the incoming window). Sequential thresholds are a coarse proxy.
 - **32-bar policy.** Do not auto-extend to 32 bars solely because the intro is long if that intro is already a kit. Consider 16 bars + sequential instead.
-- **Bar-phase alignment on this crate.** Peak still uses `alignmentMode: beat` because downbeat confidence is &lt; 0.5. Joins 9–10 are ~one beat off; accepted anyway.
+- **Bar-phase alignment on this crate.** Downbeat v2 put accepted-grid p50 at **1.0**, so Peak v4 is `alignmentMode: phrase` on every join. Liquid v4 still has five phrase-mix residuals 100–160 ms (sparse onsets / interludes).
 - **Planner `bothHot` vs sequential.** `bass_swap` on both-hot (≥ 0.6) never fired on Story Begin → Let It Fall. Either lower that gate or route this pattern to sequential phrase-mix in the planner, not only at render time.
 - **Midpoint hole.** Sequential can leave a short drum gap at the handoff. Accepted on 12:08; if a later join feels empty, overlap the kits by a few bars rather than going back to full complementary.
 - **Forced bass_swap.** Witchcraft → Tidal Wave is still the liked Tidal Wave *in*; the planner’s `phrase_mix` on that pair is the wrong call.

@@ -46,6 +46,8 @@ Aligned templates **fail closed** when a required grid is missing, rejected, or 
 
 `render:check --id JOB` runs `silencedetect` (−50 dB, ≥ 1 s) and prints interior spans plus per-join template, bars, rates, `downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode`, `windowInSilence`, alignment residual (grid xcorr after the applied nudge; a one-beat period-add still fails), 10 s arrangement step (LUFS 10 s before the overlap vs 10 s after it ends), low-overlap proxy, Camelot distance, `exitKind`, mix windows, and per-track LUFS/gain. Exit 1 if any interior span, window sits in silence, residual > 40 ms, or the gain-corrected LUFS delta (`incomingLufs + incomingGainDb − outgoingLufs − outgoingGainDb`) exceeds 3 LU. Quiet-tail and landing joins can show a large 10 s arrangement step; that is not the level-match gate.
 
+The one-beat residual heuristic only fires when the wrap period is a **beat** (~345 ms). Phrase-mode wraps are ~8 bars (~11 s), so a 360 ms phrase nudge is not treated as a +1-period failure. Grid xcorr uses a 20 ms hop and searches only ±160 ms (half a beat). A wider lag window on phrase/bar wraps locks onto the next periodic replica (~345 ms) on sparse liquid grids. The off-zero peak must beat lag 0 by 25% or the residual is 0 — otherwise liquid/ambient onsets report the search-edge lag. Missing beat grids do not fall back to the raw nudge. Residual > 40 ms fails only on `phrase_mix` / `bass_swap`.
+
 ## Known limitations
 
 - Envelope analysis is advisory on real music; click-track fixtures are the automated grid gate.

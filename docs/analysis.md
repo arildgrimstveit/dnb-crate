@@ -114,7 +114,7 @@ pnpm cli transition:plan --from UUID --to UUID --bars 32
 
 Chroma is still HPCP in 165–3520 Hz. Key v3 adds a **sub-root prior**: the dominant 35–110 Hz pitch class over drop frames boosts that tonic in both modes (+0.06). Confidence is a logistic of the score-margin z-score, times a clarity gate (`clarity < 0.45` → `clarity * 0.08`) so broadband noise cannot look confident. `keyCandidates` is `[best, runnerUp]`.
 
-`applyAnalyzedMetadata` writes an analyzed canonical key only when `keyConfidence ≥ MIN_KEY_CONFIDENCE` (0.5). Rejected-grid tracks can still get a key. Existing ungated analyzed keys are cleared on the next stale pass. Analysis stays advisory; false “confident” keys are worse than unknown keys.
+`applyAnalyzedMetadata` writes an analyzed canonical key only when `keyConfidence ≥ MIN_KEY_CONFIDENCE` (0.5). Rejected-grid tracks can still get a key. The **3.2.0** stale pass cleared the 216 ungated analyzed keys. Analysis stays advisory; false “confident” keys are worse than unknown keys.
 
 Melodicness uses the calibrated key confidence: when `chromaClarity < 0.45` the key term is weighted 0.2.
 
@@ -126,4 +126,4 @@ Liquid v3 (12): Form Form — New Element; Goldie — Sensual; Gavin Bryars — 
 
 Also: Alone; Complicated.
 
-Agreement target: ≥ 70 % on Camelot **number** (relative major/minor counts as agreement). Not measured until those rows are labelled published. On the 3.1.0 pass `key_confidence` p50 is still **0.012** and **0** rows are ≥ 0.5, so the gate writes no new canonical keys until confidence improves or labels exist.
+Agreement target: ≥ 70 % on Camelot **number** (relative major/minor counts as agreement). Not measured until those rows are labelled published. After **3.2.0**, `key_confidence` p50 is **0.005**, max **0.461**, and **0** rows are ≥ 0.5, so the gate writes no analyzed canonical keys. Label the gold set with `update_track_metadata` before measuring agreement.

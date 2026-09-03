@@ -55,7 +55,7 @@ describe("track analysis and aligned transitions", () => {
     expect(analysis.gridRejected).toBe(true);
     expect(analysis.gridRejectionReason ?? "").toMatch(/Reference tempo 170 does not fit/i);
     expect(analysis.suggestedCues.length).toBeGreaterThan(0);
-    expect(analysis.analyzerVersion).toBe("3.1.0");
+    expect(analysis.analyzerVersion).toBe("3.2.0");
     expect(analysis.descriptors?.energy).toBeTypeOf("number");
     expect(analysis.descriptors?.danceability).toBeTypeOf("number");
   });
