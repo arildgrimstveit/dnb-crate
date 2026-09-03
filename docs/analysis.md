@@ -103,7 +103,7 @@ pnpm cli analysis:gate [--engine dsp|beat-this] [--previews]
 pnpm cli enrich:run --scope unmatched --wait
 pnpm cli enrich:status
 pnpm cli enrich:report
-pnpm cli plan:create --brief-json docs/examples/liquid-hour-v3.brief.json
+pnpm cli plan:create --brief-json docs/examples/liquid-hour-v5.brief.json
 pnpm cli analysis:cue-preview --track-id UUID --cue drop
 pnpm cli transition:plan --from UUID --to UUID --bars 32
 ```

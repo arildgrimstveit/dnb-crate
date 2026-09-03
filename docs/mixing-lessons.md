@@ -18,6 +18,9 @@ Do not overwrite:
 
 | File | Why |
 | --- | --- |
+| `output/renders/hour-peak-v3.5.flac` | v3.4 order A/B after WP1–WP4 (plan `5691b0fa-…`, job `02c32e2e-…`). Join 1 is 16-bar complementary. Ear-check pending (user) |
+| `output/renders/hour-peak-v5.flac` | Peak mood hour v5, 174 lock, drop-anchored. Ear-check pending (user) |
+| `output/renders/hour-liquid-v5.flac` | Liquid mood hour v5, drop-anchored phrase-mix (~59:46, not 2 h). Ear-check pending (user) |
 | `output/renders/hour-peak-v3.5-diag.flac` | v3.4 order replan on analyzer 3.2.0 (Mixing v5 WP0). Do not overwrite v3.4 |
 | `output/renders/hour-peak-v4.flac` | Peak v4 mood hour. Ear-check **fail**: stutters on almost every transition and early in the mix |
 | `output/renders/hour-liquid-v4.flac` | Liquid v4 mood hour. Ear-check **fail**: same stutter regression; 2:03 intro-start pad |
@@ -225,6 +228,22 @@ Joins 16 and 19 are `bass_swap`. Arrangement steps ≥ 5 LU are phrase-window en
 ### Liquid v4 — structural
 
 Plan `b85cd3fb-5540-48a0-ba80-554d94edf4b3`, job `9be8dba1-d7cf-4641-a04d-c4f7f3d0e9b0`, **30** tracks, **2:03:26** (7406070 ms) — overshoots the hour because intro-start playable windows stay long. 21 `phrase_mix` + 2 `bass_swap` + 6 `crossfade` (**79% aligned**). Opens Technimatic feat. Lucy Kitchen — Looking for Diversion → Nu:Logic — Side By Side. `render:check` v2 exit **1** on five phrase-mix residuals (100–160 ms). Pathways and Microdot have no accepted grid (30 s crossfades). Ear-check pending — do not treat the extra hour of runtime as a listen of the same shape as Liquid v3.
+
+## Peak / Liquid hour v5
+
+Listen copies (do not overwrite): `output/renders/hour-peak-v3.5.flac`, `hour-peak-v5.flac`, `hour-liquid-v5.flac`. Quality bar remains **v3.4**. Agent cannot ear-check; user should A/B Peak v3.5 vs v3.4 (no stutter, join 1 better or equal, do not regress Dreamweaver→Colour or the Breathe In breather) and confirm Liquid v5 stays “nice” without the 2-hour pad.
+
+### Peak v3.5 — v3.4 order A/B
+
+Plan `5691b0fa-4b73-40fe-960b-eff50c9f6a73` (`plan:clone --replan` of `5c5121fb-…`), job `02c32e2e-ce97-4ac8-b35b-8842f613ce9f`, sha256 `93509f32…`. **16** tracks, **39:09** (2349993 ms). All rates **1.0** at **174**. 15/15 `phrase_mix`. Join 1 Under The Waves → Chant is **16-bar complementary `quietTail`** (was 32-bar duck). Landings kept at render (joins 2, 4, 5, 12, 13). Breathe In → Hold on a While is still complementary `quietTail` (16 bars). `render:check` exit **0**, residuals 0. Mix-wide **−6.60 dB**.
+
+### Peak v5 — new mood hour
+
+Plan `d596840d-c22e-400a-bd95-ccb2aaa3db9c` (`docs/examples/peak-hour-v5.brief.json`, `targetBpm: 174`), job `08729da2-25ad-4ff5-a901-289968753f8c`, sha256 `d541f2e8…`. **24** tracks, **58:35** (3515154 ms), not partial. 21 `phrase_mix` + 2 `bass_swap` → **100% aligned**. First track Like a Memory is the only stretch (`0.9886`, 176→174). Opens Like a Memory → Hayling → Timewarp; ends Sounds Of Life. `render:check` exit **0**. Mix-wide **−6.60 dB**.
+
+### Liquid v5 — same depth recipe
+
+Plan `6733872f-44aa-4ef7-8dfd-6b66c6ecd0be` (`docs/examples/liquid-hour-v5.brief.json`, `dropAnchored: true`), job `fb2897ab-bb92-49fe-b604-81d218f3d230`, sha256 `1dfa91f9…`. **30** tracks, **59:46** (3586614 ms) — not the v4 2:03 intro-start pad. 21 `phrase_mix` + 2 `bass_swap` + 6 `crossfade` (**79% aligned**). Crossfades: 2 tempo-out-of-range, 4 missing grid. Opens Looking for Diversion → Side By Side. Mix-wide **−4.80 dB**. `render:check` exit **1** on five sparse-grid residuals (same class as Liquid v4): Good Times → One Way (−60); Stay Like This → Original Business (−120); Groove Therapy → Sensual (−160); Out of Reach → Float (140); New Element → Wrong (120). Those are liquid onset residuals, not the v4 phrase-wrap stutter.
 
 ## v2.2 hour (keep for pairing)
 

@@ -39,7 +39,7 @@ pnpm cli analysis:report
 pnpm cli analysis:cue-preview --track-id UUID --cue drop
 pnpm cli transition:plan --from UUID --to UUID --bars 32
 pnpm cli plan:create --name "Liquid hour" --duration-ms 3600000 --seed 1 --end-query "Nightfall"
-pnpm cli plan:create --brief-json docs/examples/peak-hour-v4.brief.json
+pnpm cli plan:create --brief-json docs/examples/peak-hour-v5.brief.json
 pnpm cli plan:list
 pnpm cli plan:get --id UUID
 pnpm cli plan:validate --id UUID
@@ -130,7 +130,7 @@ Resources: `dnbcrate://tracks/{trackId}`, `dnbcrate://tracks/{trackId}/analysis`
 
 Prompt: `build-dnb-set` (optional; the tool workflow works without it).
 
-Scoring details: `docs/scoring.md`. Analysis / templates: `docs/analysis.md`. Rendering / loudness / jobs: `docs/rendering.md`. Ear-check lessons for later mixes: `docs/mixing-lessons.md`. Example plan JSON: `docs/examples/peak-hour-v4.brief.json`, `docs/examples/liquid-hour-v4.brief.json`.
+Scoring details: `docs/scoring.md`. Analysis / templates: `docs/analysis.md`. Rendering / loudness / jobs: `docs/rendering.md`. Ear-check lessons for later mixes: `docs/mixing-lessons.md`. Example plan JSON: `docs/examples/peak-hour-v5.brief.json`, `docs/examples/liquid-hour-v5.brief.json`.
 
 ## Tests
 

@@ -10,6 +10,22 @@ Documented the v4 stutter fail. Clone-replan of v3.4 order `5c5121fb-…` on ana
 
 Render warnings show `choosePhraseShape` overwrote planned landing/complementary with **sequential** on Under The Waves → Chant, Story Begin → Let It Fall, Inemuri → Calling for a Sign, Calling for a Sign → Dreamweaver, and Breathe In → Hold on a While. Phrase offsets include **1725 ms** (joins 4 and 9). WP1–WP3 still required: this isolate says 175-atempo is not why the v3.4 *order* would stutter on 3.2.0 — landing wipe + post-plan phrase wrap remain. Agent cannot ear-check the diag file.
 
+### WP1–WP5 shipped
+
+- WP1: planned `landing` / `dropLanding` survives render (`resolveRenderPhraseShape`).
+- WP2: phrase/bar/beat nudge is baked into `mixInMs` / `mixOutMs`; large phrase wraps fall back to bar then beat; outgoing-end fallback recomputes overlap.
+- WP3: same-integer pairs stay on that BPM; a later 176 does not average the chain to 175; `|rate − 1| < 0.002` skips `atempo`.
+- WP4: `quietTail` into a quiet incoming head uses 16 bars, not a 32-bar duck.
+- WP5: `docs/examples/liquid-hour-v5.brief.json` sets `dropAnchored: true`. Phrase-mix is the Liquid default; crossfade is the mismatch fallback.
+
+### WP6 shipped
+
+**Peak v3.5** plan `5691b0fa-4b73-40fe-960b-eff50c9f6a73`, job `02c32e2e-ce97-4ac8-b35b-8842f613ce9f` → `output/renders/hour-peak-v3.5.flac` (sha256 `93509f32…`). **39:09**, rates 1.0 @ 174, join 1 is 16-bar complementary. `render:check` exit **0**.
+
+**Peak v5** plan `d596840d-c22e-400a-bd95-ccb2aaa3db9c`, job `08729da2-25ad-4ff5-a901-289968753f8c` → `output/renders/hour-peak-v5.flac` (sha256 `d541f2e8…`). **24** tracks, **58:35**, 100% aligned, `targetBpm` 174. `render:check` exit **0**.
+
+**Liquid v5** plan `6733872f-44aa-4ef7-8dfd-6b66c6ecd0be`, job `fb2897ab-bb92-49fe-b604-81d218f3d230` → `output/renders/hour-liquid-v5.flac` (sha256 `1dfa91f9…`). **30** tracks, **59:46** (not 2:03). 79% aligned. `render:check` exit **1** on five sparse-grid residuals (same class as Liquid v4). Ear-check of all three files is pending (user).
+
 ## Mixing v4 — baseline (2026-09-03)
 
 Live crate after the v3 whole-library pass. Docs that still say **583** tracks are stale; `library:stats` now reports **431** (430 FLAC, 1 MP3, 34.5 h). The drop is a later library/dedupe pass, not an analysis regression.

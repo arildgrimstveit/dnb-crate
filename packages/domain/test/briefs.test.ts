@@ -17,4 +17,14 @@ describe("hour briefs", () => {
     expect(parsed.name).toBe("Liquid hour v5");
     expect(parsed.preferredSubgenres).toContain("liquid funk");
   });
+
+  it("parses Peak v5 with a 174 chain lock", () => {
+    const raw = JSON.parse(
+      readFileSync(path.join(process.cwd(), "docs/examples/peak-hour-v5.brief.json"), "utf8"),
+    ) as unknown;
+    const parsed = createSetPlanInputSchema.parse(raw);
+    expect(parsed.dropAnchored).toBe(true);
+    expect(parsed.targetBpm).toBe(174);
+    expect(parsed.name).toBe("Peak hour v5");
+  });
 });

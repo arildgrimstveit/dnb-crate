@@ -4,6 +4,8 @@
 
 Both Peak v4 and Liquid v4 are ear-check **fails**: stutters on almost every transition and early in the mix. `render:check` exit 0 on Peak v4 did not catch it. The direction is drop-anchored phrase-mix depth as on `hour-peak-v3.4.flac` (36:55), for Peak **and** Liquid. Do not pad Liquid with intro-start windows. Do not overwrite v3.4 or the v4 negatives.
 
+Mixing v5 shipped the stutter fixes (keep landing, bake alignment, lock 174, no 32-bar duck on a quiet incoming) and new listen copies: `hour-peak-v3.5.flac` (v3.4-order A/B, 39:09), `hour-peak-v5.flac` (58:35), `hour-liquid-v5.flac` (59:46). Liquid v5 `render:check` still fails five sparse-grid residuals; that is not the v4 phrase-wrap stutter. Ear-check of the new files is the user’s.
+
 ## 2026-09-03 — Analyzed keys are gated at 0.5
 
 `applyAnalyzedMetadata` used to write every analyzed key as canonical (216 rows, `key_confidence` p50 0.012). That bypassed `resolveCanonicalKey`’s 0.5 gate and fed noise into `harmonicScore`.
