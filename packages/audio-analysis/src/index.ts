@@ -17,4 +17,7 @@ export {
   buildKeyedDnbPcm,
   buildChordPcm,
   buildOffbeatHatPcm,
+  buildDrumsOnlyDnbPcm,
+  buildPadOnlyPcm,
 } from "./synthetic-dnb.ts";
+export { computeDescriptorPack, dfaDanceabilityTerm } from "./descriptors.ts";

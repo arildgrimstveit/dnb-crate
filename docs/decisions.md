@@ -1,5 +1,9 @@
 # Decisions
 
+## 2026-09-03 — Descriptor pack is heuristic
+
+`energy`, `danceability`, `acousticness`, `melodicness`, and `valence` are same-pass DSP heuristics on the existing STFT/chroma/onset features. They are not trained mood models. `valence` in particular is low-confidence (major-vs-minor chroma margin plus brightness). Values are advisory, 0–1, and nullable on old rows. Integer `suggestedEnergy` is now `round(1 + 9·energy)`.
+
 ## 2026-09-02 — `-filter_complex` fallback
 
 `-filter_complex_script` is probed at detect time (`ffmpeg -filter_complex_script` with no file). If FFmpeg reports `Unrecognized option`, mixes use inline `-filter_complex` instead. Observed on Windows nightly `N-125875` (2026-07-31), which has `acrossfade`/`atempo`/`ebur128` but not the script option. The script path stays preferred when present so long graphs do not inflate argv.

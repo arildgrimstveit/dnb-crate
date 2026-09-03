@@ -108,7 +108,28 @@ export type ChromaKeyEstimate = {
   keyConfidence: number | null;
   keyRunnerUp: string | null;
   chromaVector: number[];
+  chromaClarity: number;
+  tonalStability: number;
+  tonalPeakRatio: number;
+  strongPeakRatio: number;
+  majorness: number;
+  modeConfidence: number;
 };
+
+function cosineSimilarity(left: number[], right: number[]): number {
+  let dot = 0;
+  let leftNorm = 0;
+  let rightNorm = 0;
+  const n = Math.min(left.length, right.length);
+  for (let i = 0; i < n; i += 1) {
+    const a = left[i] ?? 0;
+    const b = right[i] ?? 0;
+    dot += a * b;
+    leftNorm += a * a;
+    rightNorm += b * b;
+  }
+  return dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm) + 1e-12);
+}
 
 function addToChroma(chroma: number[], hz: number, weight: number, tuningShift: number): void {
   const midi = 12 * Math.log2(hz / 440) + 69 - tuningShift;
@@ -132,10 +153,35 @@ export function estimateKeyFromChroma(
   const tuningHist = new Array<number>(centsBins).fill(0);
   const frameEnergy: number[] = [];
   const peakFrames: Array<Array<{ hz: number; power: number }>> = [];
+  let peakPowerSum = 0;
+  let bandPowerSum = 0;
+  let flatLogSum = 0;
+  let flatLinSum = 0;
+  let flatCount = 0;
 
   for (const frame of mag) {
     const peaks: Array<{ hz: number; power: number }> = [];
     let energy = 0;
+    let frameBand = 0;
+    let frameMax = 0;
+    for (let k = minBin; k <= maxBin && k < frame.length; k += 1) {
+      const magK = frame[k] ?? 0;
+      frameBand += magK * magK;
+      if (magK > frameMax) {
+        frameMax = magK;
+      }
+    }
+    const floor = Math.max(1e-9, frameMax * 0.02);
+    for (let k = minBin; k <= maxBin && k < frame.length; k += 1) {
+      const magK = frame[k] ?? 0;
+      if (magK < floor) {
+        continue;
+      }
+      flatLogSum += Math.log(magK);
+      flatLinSum += magK;
+      flatCount += 1;
+    }
+    bandPowerSum += frameBand;
     for (let k = minBin + 1; k < maxBin - 1 && k < frame.length - 1; k += 1) {
       const cur = frame[k] ?? 0;
       if (cur < (frame[k - 1] ?? 0) || cur < (frame[k + 1] ?? 0) || cur <= 0) {
@@ -150,6 +196,7 @@ export function estimateKeyFromChroma(
       const power = cur * cur;
       peaks.push({ hz, power });
       energy += power;
+      peakPowerSum += power;
       const midi = 12 * Math.log2(hz / 440) + 69;
       const frac = ((midi % 1) + 1) % 1;
       const histBin = Math.min(centsBins - 1, Math.floor(frac * centsBins));
@@ -237,6 +284,27 @@ export function estimateKeyFromChroma(
   scored.sort((a, b) => b.rankScore - a.rankScore || b.raw - a.raw);
   const best = scored[0];
   const second = scored[1];
+  const chromaClarity = clamp(1 - entropy(chroma) / Math.log(12), 0, 1);
+  let stabilitySum = 0;
+  let stabilityCount = 0;
+  for (let i = 1; i < frameChromas.length; i += 1) {
+    stabilitySum += cosineSimilarity(frameChromas[i - 1]!, frameChromas[i]!);
+    stabilityCount += 1;
+  }
+  const tonalStability = stabilityCount === 0 ? 0 : clamp(stabilitySum / stabilityCount, 0, 1);
+  const tonalPeakRatio = clamp(peakPowerSum / (bandPowerSum + 1e-12), 0, 1);
+  const flatness =
+    flatCount === 0 ? 1 : Math.exp(flatLogSum / flatCount) / (flatLinSum / flatCount + 1e-12);
+  const strongPeakRatio = clamp(1 - flatness, 0, 1);
+  const bestMajor = scored.find((row) => row.mode === "major");
+  const bestMinor = scored.find((row) => row.mode === "minor");
+  const modeMargin = (bestMajor?.raw ?? 0) - (bestMinor?.raw ?? 0);
+  const majorness = clamp(0.5 + modeMargin / 0.8, 0, 1);
+  const modeConfidence = clamp(
+    Math.abs(modeMargin) / (Math.abs(bestMajor?.raw ?? 0) + Math.abs(bestMinor?.raw ?? 0) + 1e-9),
+    0,
+    1,
+  );
   const empty = {
     musicalKey: null,
     camelotKey: null,
@@ -244,12 +312,17 @@ export function estimateKeyFromChroma(
     keyConfidence: 0,
     keyRunnerUp: second?.key ?? null,
     chromaVector: chroma.map((v) => Number(v.toFixed(4))),
+    chromaClarity: Number(chromaClarity.toFixed(4)),
+    tonalStability: Number(tonalStability.toFixed(4)),
+    tonalPeakRatio: Number(tonalPeakRatio.toFixed(4)),
+    strongPeakRatio: Number(strongPeakRatio.toFixed(4)),
+    majorness: Number(majorness.toFixed(4)),
+    modeConfidence: Number(modeConfidence.toFixed(4)),
   };
   if (!best || best.raw <= 0) {
     return empty;
   }
   const normalized = normalizeKey(best.key);
-  const clarity = clamp(1 - entropy(chroma) / Math.log(12), 0, 1);
   const margin = clamp(
     (best.raw - (second?.raw ?? 0)) / (Math.abs(best.raw) + 1e-9),
     0,
@@ -259,8 +332,14 @@ export function estimateKeyFromChroma(
     musicalKey: normalized?.musicalKey ?? best.key,
     camelotKey: normalized?.camelotKey ?? null,
     keyMode: best.mode,
-    keyConfidence: Number((margin * clarity).toFixed(3)),
+    keyConfidence: Number((margin * chromaClarity).toFixed(3)),
     keyRunnerUp: second?.key ?? null,
     chromaVector: chroma.map((v) => Number(v.toFixed(4))),
+    chromaClarity: Number(chromaClarity.toFixed(4)),
+    tonalStability: Number(tonalStability.toFixed(4)),
+    tonalPeakRatio: Number(tonalPeakRatio.toFixed(4)),
+    strongPeakRatio: Number(strongPeakRatio.toFixed(4)),
+    majorness: Number(majorness.toFixed(4)),
+    modeConfidence: Number(modeConfidence.toFixed(4)),
   };
 }

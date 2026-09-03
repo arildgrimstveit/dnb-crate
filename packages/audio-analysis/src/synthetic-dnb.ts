@@ -11,6 +11,7 @@ export type SyntheticDnbOptions = {
   subHz?: number;
   padFrequencies?: number[];
   detuneCents?: number;
+  includeSub?: boolean;
 };
 
 function addKick(samples: Float32Array, sampleRateHz: number, start: number, gain: number): void {
@@ -124,11 +125,14 @@ export function buildSyntheticDnbPcm(options: SyntheticDnbOptions = {}): PcmAudi
       inDrop ? 0.08 : 0.04,
     );
   }
+  const includeSub = options.includeSub !== false;
   const subHz = options.subHz ?? 87.31;
   const dropStart = Math.round((dropMs / 1000) * sampleRateHz);
   const dropEnd = Math.round((breakdownMs / 1000) * sampleRateHz);
-  addSub(samples, sampleRateHz, dropStart, dropEnd, subHz, 0.35);
-  if (drop2Ms !== null) {
+  if (includeSub) {
+    addSub(samples, sampleRateHz, dropStart, dropEnd, subHz, 0.35);
+  }
+  if (includeSub && drop2Ms !== null) {
     const d2s = Math.round((drop2Ms / 1000) * sampleRateHz);
     const d2e = Math.round((outroMs / 1000) * sampleRateHz);
     addSub(samples, sampleRateHz, d2s, d2e, subHz, 0.35);
@@ -144,6 +148,33 @@ export function buildSyntheticDnbPcm(options: SyntheticDnbOptions = {}): PcmAudi
     channels: 1,
     expected: { bpm, dropMs, drop2Ms, breakdownMs, outroMs },
   };
+}
+
+/** Drum loop only — no pad, no sub bed. */
+export function buildDrumsOnlyDnbPcm(options: SyntheticDnbOptions = {}): PcmAudio & {
+  expected: { bpm: number; dropMs: number; drop2Ms: number | null; breakdownMs: number; outroMs: number };
+} {
+  return buildSyntheticDnbPcm({
+    ...options,
+    includeSub: false,
+    padFrequencies: undefined,
+  });
+}
+
+/** Sustained triad pad, no drums. */
+export function buildPadOnlyPcm(options: {
+  key: string;
+  durationMs?: number;
+  sampleRateHz?: number;
+  gain?: number;
+}): PcmAudio & { expected: { key: string } } {
+  const durationMs = options.durationMs ?? 12_000;
+  const sampleRateHz = options.sampleRateHz ?? 22_050;
+  const n = Math.round((sampleRateHz * durationMs) / 1000);
+  const samples = new Float32Array(n);
+  const frequencies = options.key === "C" ? KEY_PADS.C! : (KEY_PADS[options.key] ?? KEY_PADS["F#m"]!);
+  addPad(samples, sampleRateHz, frequencies, 0, options.gain ?? 0.16);
+  return { samples, sampleRateHz, durationMs, channels: 1, expected: { key: options.key } };
 }
 
 /** Synthetic DnB plus a sustained triad pad. Sub defaults below the chroma band (46 Hz F#1). */

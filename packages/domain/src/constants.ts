@@ -5,7 +5,7 @@ export const RENDERER_VERSION = "6.0.0";
 export const ANALYZER_NAME = "dnb-crate-envelope";
 export const ANALYZER_VERSION = "1.0.0";
 export const DSP_ANALYZER_NAME = "dnb-crate-dsp";
-export const DSP_ANALYZER_VERSION = "2.1.0";
+export const DSP_ANALYZER_VERSION = "3.0.0";
 export const ANALYSIS_ENGINE_IDS = [
   "dnb-crate-dsp",
   "dnb-crate-envelope",

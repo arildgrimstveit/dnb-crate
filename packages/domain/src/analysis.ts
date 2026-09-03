@@ -67,6 +67,11 @@ export type SonicDescriptors = {
   dynamicRange: number | null;
   dropIntensity: number | null;
   suggestedEnergy: number | null;
+  energy: number | null;
+  danceability: number | null;
+  acousticness: number | null;
+  melodicness: number | null;
+  valence: number | null;
   waveformSummary: number[];
   lowBandEnergy: number | null;
   midBandEnergy: number | null;

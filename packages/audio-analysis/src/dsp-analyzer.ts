@@ -11,6 +11,7 @@ import {
 } from "@dnb-crate/domain";
 
 import { estimateKeyFromChroma } from "./chroma.ts";
+import { computeDescriptorPack } from "./descriptors.ts";
 import { stftMagnitude } from "./fft.ts";
 import type { AnalyzeOptions, AnalyzerCue, AnalyzerResult, AudioAnalyzer, PcmAudio } from "./types.ts";
 import { emptyDescriptors } from "./types.ts";
@@ -1110,13 +1111,35 @@ export const dspAnalyzer: AudioAnalyzer = {
     const drop = sections.find((s) => s.type === "drop");
     const intro = sections.find((s) => s.type === "intro");
     const dropIntensity =
-      drop && intro ? clamp((drop.sectionEnergy - intro.sectionEnergy + 1) / 2, 0, 1) : 0.5;
+      drop && intro ? clamp((drop.sectionEnergy - intro.sectionEnergy + 1) / 2, 0, 1) : 0.35;
     const onsetDensity = onset.length === 0 ? 0 : onset.filter((v) => v > mean(onset)).length / onset.length;
-    const suggestedEnergy = clamp(
-      Math.round(1 + 9 * (0.45 * dropIntensity + 0.3 * onsetDensity + 0.25 * clamp(rmsAll * 4, 0, 1))),
-      1,
-      10,
+    const dynamicRange =
+      peak > 0 ? Number((20 * Math.log10((peak + 1e-9) / (rmsAll + 1e-9))).toFixed(3)) : 0;
+    const stftSub = mean(subEnergy);
+    const stftHigh = mean(highEnergy);
+    const stftMid = mean(
+      bandMagEnergy(stft.mag, hzToBin(120, pcm.sampleRateHz, NFFT), hzToBin(4000, pcm.sampleRateHz, NFFT)),
     );
+    const stftTotal = stftSub + stftMid + stftHigh + 1e-12;
+    const pack = computeDescriptorPack({
+      samples: pcm.samples,
+      sampleRateHz: pcm.sampleRateHz,
+      rms: rmsAll,
+      dropIntensity,
+      onsetDensity,
+      subBassRatio: stftSub / stftTotal,
+      brightness: highE / totalE,
+      dynamicRangeDb: dynamicRange,
+      tempoEvidence,
+      chroma: {
+        chromaClarity: key.chromaClarity,
+        tonalStability: key.tonalStability,
+        tonalPeakRatio: key.tonalPeakRatio,
+        strongPeakRatio: key.strongPeakRatio,
+        majorness: key.majorness,
+        keyConfidence: key.keyConfidence ?? 0,
+      },
+    });
 
     return {
       analyzerName: DSP_ANALYZER_NAME,
@@ -1147,9 +1170,16 @@ export const dspAnalyzer: AudioAnalyzer = {
         subBassRatio: Number((lowE / totalE).toFixed(4)),
         brightness: Number((highE / totalE).toFixed(4)),
         onsetDensity: Number(onsetDensity.toFixed(4)),
-        dynamicRange: peak > 0 ? Number((20 * Math.log10((peak + 1e-9) / (rmsAll + 1e-9))).toFixed(3)) : null,
+        dynamicRange,
         dropIntensity: Number(dropIntensity.toFixed(3)),
-        suggestedEnergy,
+        suggestedEnergy: pack.suggestedEnergy,
+        energy: pack.energy,
+        danceability: pack.danceability,
+        acousticness: pack.acousticness,
+        melodicness: pack.melodicness,
+        valence: pack.valence,
+        shortTermLufsMean: pack.shortTermLufsMean,
+        shortTermLufsMax: pack.shortTermLufsMax,
         lowBandEnergy: Number((lowE / totalE).toFixed(4)),
         midBandEnergy: Number((midE / totalE).toFixed(4)),
         highBandEnergy: Number((highE / totalE).toFixed(4)),

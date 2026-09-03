@@ -336,6 +336,11 @@ export class CatalogService {
       engineRuntimeMs: number | null;
       analyzedAt: string;
       chromaVector: number[] | null;
+      energy: number | null;
+      danceability: number | null;
+      acousticness: number | null;
+      melodicness: number | null;
+      valence: number | null;
     }>;
   } {
     this.requireTrack(trackId);
@@ -355,6 +360,11 @@ export class CatalogService {
         engineRuntimeMs: row.engineRuntimeMs,
         analyzedAt: row.analyzedAt,
         chromaVector: row.descriptors?.chromaVector ?? null,
+        energy: row.descriptors?.energy ?? null,
+        danceability: row.descriptors?.danceability ?? null,
+        acousticness: row.descriptors?.acousticness ?? null,
+        melodicness: row.descriptors?.melodicness ?? null,
+        valence: row.descriptors?.valence ?? null,
       })),
     };
   }

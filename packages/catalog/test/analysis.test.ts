@@ -55,6 +55,9 @@ describe("track analysis and aligned transitions", () => {
     expect(analysis.gridRejected).toBe(true);
     expect(analysis.gridRejectionReason ?? "").toMatch(/Reference tempo 170 does not fit/i);
     expect(analysis.suggestedCues.length).toBeGreaterThan(0);
+    expect(analysis.analyzerVersion).toBe("3.0.0");
+    expect(analysis.descriptors?.energy).toBeTypeOf("number");
+    expect(analysis.descriptors?.danceability).toBeTypeOf("number");
   });
 
   it("ranks bass_swap when energy rises and blocks aligned render on a rejected grid", async () => {
@@ -207,14 +210,17 @@ describe("track analysis and aligned transitions", () => {
     await writeSineWav(path.join(library, "oldver.wav"), { title: "OldVer", durationMs: 2000 });
     await writeSineWav(path.join(library, "noref.wav"), { title: "NoRef", durationMs: 2000 });
     await writeSineWav(path.join(library, "plain.wav"), { title: "Plain", durationMs: 2000 });
+    await writeSineWav(path.join(library, "v210.wav"), { title: "V210", durationMs: 2000 });
     await catalog.service.scanLibrary();
     const tracks = catalog.service.searchTracks({ limit: 10 }).tracks;
     const fresh = tracks.find((item) => item.title === "Fresh")!;
     const oldVer = tracks.find((item) => item.title === "OldVer")!;
     const noRef = tracks.find((item) => item.title === "NoRef")!;
     const plain = tracks.find((item) => item.title === "Plain")!;
+    const v210 = tracks.find((item) => item.title === "V210")!;
     catalog.service.updateTrackMetadata(fresh.id, { bpm: 174, bpmSource: "published" });
     catalog.service.updateTrackMetadata(noRef.id, { bpm: 174, bpmSource: "published" });
+    catalog.service.updateTrackMetadata(v210.id, { bpm: 174, bpmSource: "published" });
     const stub = (trackId: string, version: string, referenceBpm: number | null) => {
       catalog.analyses.upsert({
         trackId,
@@ -253,6 +259,7 @@ describe("track analysis and aligned transitions", () => {
     stub(fresh.id, DSP_ANALYZER_VERSION, 174);
     stub(oldVer.id, "2.0.0", null);
     stub(noRef.id, DSP_ANALYZER_VERSION, null);
+    stub(v210.id, "2.1.0", 174);
 
     const unanalyzed = catalog.analyses.listIdsForScope("unanalyzed");
     expect(unanalyzed).toEqual([plain.id]);
@@ -260,9 +267,10 @@ describe("track analysis and aligned transitions", () => {
     expect(stale.has(plain.id)).toBe(true);
     expect(stale.has(oldVer.id)).toBe(true);
     expect(stale.has(noRef.id)).toBe(true);
+    expect(stale.has(v210.id)).toBe(true);
     expect(stale.has(fresh.id)).toBe(false);
     const all = catalog.analyses.listIdsForScope("all");
-    expect(all).toHaveLength(4);
+    expect(all).toHaveLength(5);
 
     const started = catalog.service.startTrackAnalysis({ scope: "unanalyzed" });
     expect(started.job.trackIds).toEqual([plain.id]);

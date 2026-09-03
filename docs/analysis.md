@@ -8,12 +8,26 @@ Canonical BPM/key precedence: **manual > published > analyzed > tag**.
 
 | Engine | Runtime | What it produces |
 | --- | --- | --- |
-| `dnb-crate-dsp` 2.1 (default) | TypeScript in-process | STFT spectral-flux onsets, tempogram, comb-locked sub-hop beats, downbeats, HPCP chroma key (165–3520 Hz, spectral peaks, tuning, Temperley+KK), downbeat-anchored sections, sonic descriptors |
+| `dnb-crate-dsp` 3.0 (default) | TypeScript in-process | STFT spectral-flux onsets, tempogram, comb-locked sub-hop beats, downbeats, HPCP chroma key (165–3520 Hz, spectral peaks, tuning, Temperley+KK), downbeat-anchored sections, sonic descriptors including a same-pass pack (`energy`, `danceability`, `acousticness`, `melodicness`, `valence`) |
 | `beat-this` | Optional Python sidecar | Beats / downbeats / tempo (IQR confidence; 180 s timeout) |
 | `allin1` | Optional Python sidecar (slow; Demucs) | Beats / downbeats / tempo / section labels (900 s timeout) |
 | `dnb-crate-envelope` 1.0 | Legacy | Peak-amplitude envelope; kept for migrated Stage 4 rows |
 
-Key and descriptors always come from `dnb-crate-dsp` even when a sidecar supplies rhythm. Rows are stored per `(track_id, analyzer_name)`. Descriptors include `chromaVector` (12-bin) and `tempoEvidence` `{ prominence, stability, tempoConf, onGridRatio }`.
+Key and descriptors always come from `dnb-crate-dsp` even when a sidecar supplies rhythm. Rows are stored per `(track_id, analyzer_name)`. Descriptors include `chromaVector` (12-bin), `tempoEvidence` `{ prominence, stability, tempoConf, onGridRatio }`, and the 3.0 pack below. The pack is **heuristic** (deterministic per file, not a trained model).
+
+### Descriptor pack (analyzer 3.0.0)
+
+Computed in the existing `analyze` pass. Every slider is 0–1. `suggestedEnergy = round(1 + 9·energy)` stays 1–10. `shortTermLufsMean` / `shortTermLufsMax` are 3 s RMS windows in dBFS (a loudness proxy; ebur128 still fills `integratedLufs` later).
+
+| Field | Formula (sketch) |
+| --- | --- |
+| `energy` | `0.4·loud + 0.3·dropIntensity + 0.3·onsetDensityNorm` — `loud` maps file RMS dBFS from −24…−8 → 0…1; `onsetDensityNorm` blends onset fraction with tempo prominence |
+| `danceability` | `0.5·dfa + 0.3·prominence + 0.2·stability` — Essentia-style DFA on a 10 ms frame-stddev envelope after a 180 Hz high-pass (tau 310–8800 ms, ×1.1). Flat envelopes (CV < 0.18) score 0 |
+| `acousticness` | Uses STFT sub-band ratio, strong spectral peaks, chroma clarity, and onset density (see `descriptors.ts`) |
+| `melodicness` | Mostly key-confidence (how clearly pitched the chroma is) plus a small spectral-tonal term. Drums without a pad stay low. |
+| `valence` | **Low-confidence.** `0.35·majorness + 0.25·(brightness/0.15) + 0.2·melodicness + 0.2·danceability` |
+
+Reference ranges live in `packages/audio-analysis/src/descriptors.ts` (dated 2026-09-03). Re-tune once after the whole-library run if a crate spread is narrower than 0.3.
 
 Python is **off by default**. Enable with `analysis.engines.python.enabled` and run `tools/analyzer-py/setup.ps1` (Python 3.12 venv). The product runs without it.
 

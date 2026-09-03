@@ -12,7 +12,11 @@
 
 ### WP1 shipped
 
-Analysis scopes (`unanalyzed` / `stale` / `all` / `planningReady`), `reference_bpm`, decode/ebur128 prefetch, 2/3–3/2 fold, integer published tolerance 1.0 BPM, `bpmHint` on rejected in-range rows, CLI `analysis:run`. Analyzer version still **2.1.0**. Suite 18 files / 126 passed.
+Analysis scopes (`unanalyzed` / `stale` / `all` / `planningReady`), `reference_bpm`, decode/ebur128 prefetch, 2/3–3/2 fold, integer published tolerance 1.0 BPM, `bpmHint` on rejected in-range rows, CLI `analysis:run`.
+
+### WP2 shipped
+
+Descriptor pack on the DSP path (`energy`, `danceability`, `acousticness`, `melodicness`, `valence`), `shortTermLufs*` from 3 s RMS, analyzer **3.0.0**. `scope: stale` now selects every 2.1.0 row. Suite 19 files / 133 passed.
 
 ## Mixing v2.2 (2026-09-03)
 
