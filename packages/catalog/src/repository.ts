@@ -1,6 +1,7 @@
 import type {
   CuePoint,
   CuePointType,
+  FieldSource,
   LibraryStats,
   PublicTrack,
   SearchTracksInput,
@@ -13,9 +14,13 @@ import {
   DSP_ANALYZER_NAME,
   SEARCH_LIMIT_DEFAULT,
   SEARCH_LIMIT_MAX,
+  normalizeGenres,
   normalizeKey,
+  normalizePersonName,
+  recordingKeyFrom,
   resolveBpmHint,
   toPublicTrack,
+  yearFromDate,
 } from "@dnb-crate/domain";
 
 import type { SqliteDatabase } from "./db.ts";
@@ -43,6 +48,13 @@ type TrackRow = {
   file_missing: number;
   created_at: string;
   updated_at: string;
+  label?: string | null;
+  release_date?: string | null;
+  isrc?: string | null;
+  recording_mbid?: string | null;
+  artist_canonical?: string | null;
+  recording_key?: string | null;
+  field_sources_json?: string | null;
 };
 
 const SORT_COLUMNS: Record<SortField, string> = {
@@ -72,6 +84,11 @@ export type UpsertTrackInput = Omit<
   | "updatedAt"
 > & {
   id?: string;
+  label?: string | null;
+  releaseDate?: string | null;
+  isrc?: string | null;
+  recordingMbid?: string | null;
+  genres?: string[];
 };
 
 function nowIso(): string {
@@ -80,6 +97,42 @@ function nowIso(): string {
 
 function likePattern(query: string): string {
   return `%${query.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+}
+
+function parseFieldSources(raw: string | null | undefined): Record<string, FieldSource> {
+  if (!raw) {
+    return {};
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const out: Record<string, FieldSource> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (value === "tag" || value === "published" || value === "manual") {
+        out[key] = value;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function canWriteField(
+  sources: Record<string, FieldSource>,
+  field: string,
+  incoming: FieldSource,
+): boolean {
+  const current = sources[field];
+  if (incoming === "manual") {
+    return true;
+  }
+  if (incoming === "published") {
+    return current !== "manual";
+  }
+  return current == null || current === "tag";
 }
 
 export class TrackRepository {
@@ -314,6 +367,7 @@ export class TrackRepository {
         timestamp,
         timestamp,
       );
+    this.applyTagFields(id, input);
     const created = this.findById(id);
     if (!created) {
       throw new DomainError("SCAN_FAILED", "Failed to read track after insert");
@@ -371,11 +425,30 @@ export class TrackRepository {
       notes = notes ? `${notes}\n${stamp}` : stamp;
     }
     const timestamp = nowIso();
+    const sources = { ...(existing.fieldSources ?? {}) };
+    const album = patch.album === undefined ? existing.album : patch.album;
+    const label = patch.label === undefined ? existing.label ?? null : patch.label;
+    const releaseDate =
+      patch.releaseDate === undefined ? existing.releaseDate ?? null : patch.releaseDate;
+    const isrc = patch.isrc === undefined ? existing.isrc ?? null : patch.isrc;
+    if (patch.album !== undefined) {
+      sources.album = "manual";
+    }
+    if (patch.label !== undefined) {
+      sources.label = "manual";
+    }
+    if (patch.releaseDate !== undefined) {
+      sources.releaseDate = "manual";
+    }
+    if (patch.isrc !== undefined) {
+      sources.isrc = "manual";
+    }
     const run = this.db.transaction(() => {
       this.db
         .prepare(
           `UPDATE tracks SET energy = ?, rating = ?, notes = ?, bpm = ?, bpm_source = ?,
-            musical_key = ?, camelot_key = ?, key_source = ?, updated_at = ? WHERE id = ?`,
+            musical_key = ?, camelot_key = ?, key_source = ?, album = ?, label = ?,
+            release_date = ?, isrc = ?, field_sources_json = ?, updated_at = ? WHERE id = ?`,
         )
         .run(
           energy,
@@ -386,6 +459,11 @@ export class TrackRepository {
           musicalKey,
           camelotKey,
           keySource,
+          album,
+          label,
+          releaseDate,
+          isrc,
+          JSON.stringify(sources),
           timestamp,
           id,
         );
@@ -399,8 +477,16 @@ export class TrackRepository {
       if (patch.tags !== undefined) {
         this.replaceList("track_tags", "tag", id, patch.tags);
       }
+      if (patch.genres !== undefined) {
+        this.replaceGenres(id, patch.genres, "manual");
+        sources.genres = "manual";
+        this.db
+          .prepare("UPDATE tracks SET field_sources_json = ? WHERE id = ?")
+          .run(JSON.stringify(sources), id);
+      }
     });
     run();
+    this.refreshRecordingIdentity(id);
 
     const updated = this.findById(id);
     if (!updated) {
@@ -839,13 +925,166 @@ export class TrackRepository {
     }
   }
 
+  applyTagFields(
+    id: string,
+    input: {
+      album?: string | null;
+      label?: string | null;
+      releaseDate?: string | null;
+      isrc?: string | null;
+      recordingMbid?: string | null;
+      genres?: string[];
+    },
+  ): void {
+    const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(id) as TrackRow | undefined;
+    if (!row) {
+      return;
+    }
+    const sources = parseFieldSources(row.field_sources_json);
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    const setIf = (column: string, field: string, value: string | null | undefined): void => {
+      if (value == null || value === "") {
+        return;
+      }
+      if (!canWriteField(sources, field, "tag")) {
+        return;
+      }
+      assignments.push(`${column} = ?`);
+      values.push(value);
+      sources[field] = "tag";
+    };
+    setIf("album", "album", input.album);
+    setIf("label", "label", input.label);
+    setIf("release_date", "releaseDate", input.releaseDate);
+    setIf("isrc", "isrc", input.isrc);
+    setIf("recording_mbid", "recordingMbid", input.recordingMbid);
+    if (assignments.length > 0) {
+      assignments.push("field_sources_json = ?", "updated_at = ?");
+      values.push(JSON.stringify(sources), nowIso(), id);
+      this.db.prepare(`UPDATE tracks SET ${assignments.join(", ")} WHERE id = ?`).run(...values);
+    }
+    if ((input.genres?.length ?? 0) > 0 && canWriteField(sources, "genres", "tag")) {
+      this.replaceGenres(id, input.genres ?? [], "tag");
+      sources.genres = "tag";
+      this.writeFieldSources(id, sources);
+    }
+    this.refreshRecordingIdentity(id);
+  }
+
+  refreshRecordingIdentity(trackId: string): void {
+    const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(trackId) as
+      | TrackRow
+      | undefined;
+    if (!row) {
+      return;
+    }
+    const sources = parseFieldSources(row.field_sources_json);
+    const artistCanonical =
+      sources.artistCanonical === "published" && row.artist_canonical
+        ? row.artist_canonical
+        : row.artist
+          ? normalizePersonName(row.artist)
+          : (row.artist_canonical ?? null);
+    const recordingKey = recordingKeyFrom({
+      recordingMbid: row.recording_mbid ?? null,
+      isrc: row.isrc ?? null,
+      artistCanonical,
+      artist: row.artist,
+      title: row.title,
+      durationMs: row.duration_ms,
+    });
+    this.db
+      .prepare(
+        `UPDATE tracks SET artist_canonical = ?, recording_key = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(artistCanonical, recordingKey, nowIso(), trackId);
+  }
+
+  applyPublishedEnrichment(
+    trackId: string,
+    patch: {
+      album: string | null;
+      label: string | null;
+      releaseDate: string | null;
+      isrc: string | null;
+      recordingMbid: string | null;
+      artistCanonical: string | null;
+      genres: string[];
+      bpm: number | null;
+    },
+  ): void {
+    const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(trackId) as
+      | TrackRow
+      | undefined;
+    if (!row) {
+      throw new DomainError("TRACK_NOT_FOUND", `No track with id ${trackId}`);
+    }
+    const sources = parseFieldSources(row.field_sources_json);
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    const set = (column: string, field: string, value: unknown): void => {
+      if (value == null || value === "") {
+        return;
+      }
+      if (!canWriteField(sources, field, "published")) {
+        return;
+      }
+      assignments.push(`${column} = ?`);
+      values.push(value);
+      sources[field] = "published";
+    };
+    set("album", "album", patch.album);
+    set("label", "label", patch.label);
+    set("release_date", "releaseDate", patch.releaseDate);
+    set("isrc", "isrc", patch.isrc);
+    set("recording_mbid", "recordingMbid", patch.recordingMbid);
+    if (patch.artistCanonical && canWriteField(sources, "artistCanonical", "published")) {
+      assignments.push("artist_canonical = ?");
+      values.push(patch.artistCanonical);
+      sources.artistCanonical = "published";
+    }
+    if (patch.bpm != null && row.bpm_source !== "manual" && row.bpm_source !== "published") {
+      assignments.push("bpm = ?", "bpm_source = ?");
+      values.push(patch.bpm, "published");
+    }
+    assignments.push("field_sources_json = ?", "updated_at = ?");
+    values.push(JSON.stringify(sources), nowIso(), trackId);
+    this.db.prepare(`UPDATE tracks SET ${assignments.join(", ")} WHERE id = ?`).run(...values);
+    if (patch.genres.length > 0 && canWriteField(sources, "genres", "published")) {
+      this.replaceGenres(trackId, patch.genres, "published");
+      sources.genres = "published";
+      this.writeFieldSources(trackId, sources);
+    }
+    this.refreshRecordingIdentity(trackId);
+  }
+
+  private writeFieldSources(trackId: string, sources: Record<string, FieldSource>): void {
+    this.db
+      .prepare("UPDATE tracks SET field_sources_json = ?, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(sources), nowIso(), trackId);
+  }
+
+  private replaceGenres(trackId: string, genres: string[], source: FieldSource): void {
+    this.db.prepare("DELETE FROM track_genres WHERE track_id = ?").run(trackId);
+    const insert = this.db.prepare(
+      "INSERT INTO track_genres (track_id, genre, source) VALUES (?, ?, ?)",
+    );
+    for (const genre of normalizeGenres(genres)) {
+      insert.run(trackId, genre, source);
+    }
+  }
+
   private updateScanFields(id: string, input: UpsertTrackInput): Track {
     const existing = this.findById(id);
     const keepBpm =
       existing?.bpmSource === "manual" ||
       existing?.bpmSource === "analyzed" ||
       existing?.bpmSource === "published";
-    const keepKey = existing?.keySource === "manual" || existing?.keySource === "analyzed";
+    const keepKey =
+      existing?.keySource === "manual" ||
+      existing?.keySource === "analyzed" ||
+      existing?.keySource === "published";
     const timestamp = nowIso();
     this.db
       .prepare(
@@ -854,7 +1093,6 @@ export class TrackRepository {
           file_fingerprint = ?,
           artist = ?,
           title = ?,
-          album = ?,
           duration_ms = ?,
           sample_rate_hz = ?,
           channels = ?,
@@ -872,7 +1110,6 @@ export class TrackRepository {
         input.fileFingerprint,
         input.artist,
         input.title,
-        input.album,
         input.durationMs,
         input.sampleRateHz,
         input.channels,
@@ -884,6 +1121,7 @@ export class TrackRepository {
         timestamp,
         id,
       );
+    this.applyTagFields(id, input);
     const updated = this.findById(id);
     if (!updated) {
       throw new DomainError("SCAN_FAILED", "Failed to read track after upsert");
@@ -901,6 +1139,26 @@ export class TrackRepository {
     const tags = this.db
       .prepare("SELECT tag FROM track_tags WHERE track_id = ? ORDER BY tag")
       .all(row.id) as { tag: string }[];
+    const genres = this.tableExists("track_genres")
+      ? (
+          this.db
+            .prepare("SELECT genre FROM track_genres WHERE track_id = ? ORDER BY genre")
+            .all(row.id) as { genre: string }[]
+        ).map((item) => item.genre)
+      : [];
+    const fieldSources = parseFieldSources(row.field_sources_json);
+    const artistCanonical =
+      row.artist_canonical ?? (row.artist ? normalizePersonName(row.artist) : null);
+    const recordingKey =
+      row.recording_key ??
+      recordingKeyFrom({
+        recordingMbid: row.recording_mbid ?? null,
+        isrc: row.isrc ?? null,
+        artistCanonical,
+        artist: row.artist,
+        title: row.title,
+        durationMs: row.duration_ms,
+      });
 
     return {
       id: row.id,
@@ -927,6 +1185,15 @@ export class TrackRepository {
       fileMissing: row.file_missing === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      label: row.label ?? null,
+      releaseDate: row.release_date ?? null,
+      year: yearFromDate(row.release_date ?? null),
+      isrc: row.isrc ?? null,
+      recordingMbid: row.recording_mbid ?? null,
+      artistCanonical,
+      recordingKey,
+      genres,
+      fieldSources,
     };
   }
 }

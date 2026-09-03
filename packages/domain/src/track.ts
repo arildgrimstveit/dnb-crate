@@ -1,5 +1,6 @@
 export type BpmSource = "tag" | "manual" | "analyzed" | "published";
 export type KeySource = "tag" | "manual" | "analyzed" | "published";
+export type FieldSource = "tag" | "published" | "manual";
 export type AnalysisStatus = "not_analyzed" | "pending" | "complete" | "failed";
 export type AnalysisEngineId = "dnb-crate-dsp" | "dnb-crate-envelope" | "beat-this" | "allin1";
 
@@ -28,6 +29,15 @@ export type Track = {
   fileMissing: boolean;
   createdAt: string;
   updatedAt: string;
+  label?: string | null;
+  releaseDate?: string | null;
+  year?: number | null;
+  isrc?: string | null;
+  recordingMbid?: string | null;
+  artistCanonical?: string | null;
+  recordingKey?: string | null;
+  genres?: string[];
+  fieldSources?: Record<string, FieldSource>;
 };
 
 /** Track as returned by tools and resources. Source paths stay internal. */
@@ -62,6 +72,11 @@ export type TrackMetadataPatch = {
   /** When setting musicalKey, defaults to "manual". */
   keySource?: "manual" | "published";
   metadataSourceNote?: string | null;
+  album?: string | null;
+  label?: string | null;
+  releaseDate?: string | null;
+  isrc?: string | null;
+  genres?: string[];
 };
 
 export function toPublicTrack(track: Track): PublicTrack {

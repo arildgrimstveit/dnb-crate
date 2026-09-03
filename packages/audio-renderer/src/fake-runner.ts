@@ -143,6 +143,14 @@ export function createFakeFfmpegRunner(
           stderr: "",
         };
       }
+      if (request.args.includes("chromaprint")) {
+        return {
+          exitCode: 0,
+          signal: null,
+          stdout: JSON.stringify({ duration: 180, fingerprint: "FAKECHROMAPRINT" }),
+          stderr: "",
+        };
+      }
       if (isEbur) {
         const text = `Summary:\n  Integrated loudness:\n    I:         -14.2 LUFS\n  True peak:\n    Peak:       -1.20 dBFS\n`;
         request.onStderr?.(text);

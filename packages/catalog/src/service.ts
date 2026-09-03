@@ -9,6 +9,9 @@ import type {
   CreateSetPlanResult,
   CuePoint,
   CuePointType,
+  EnrichmentJob,
+  EnrichmentReport,
+  EnrichmentScope,
   LibraryStats,
   Logger,
   PlanningReadiness,
@@ -63,6 +66,7 @@ import type { SetPlanRepository } from "./set-plan-repository.ts";
 import type { RenderCoordinator } from "./render/coordinator.ts";
 import type { AnalysisCoordinator } from "./analysis/coordinator.ts";
 import type { AnalysisRepository } from "./analysis-repository.ts";
+import type { EnrichmentCoordinator } from "./enrichment/coordinator.ts";
 import { planTransition, validateTransition } from "./planning/transition-planner.ts";
 import { probePythonEngine } from "./analysis/python-engine.ts";
 
@@ -89,6 +93,7 @@ export class CatalogService {
     private readonly renders: RenderCoordinator,
     private readonly analysis: AnalysisCoordinator,
     private readonly analyses: AnalysisRepository,
+    private readonly enrichment: EnrichmentCoordinator,
     private readonly logger: Logger,
   ) {}
 
@@ -120,6 +125,12 @@ export class CatalogService {
       supportedExtensions: this.config.supportedExtensions,
       pythonAnalyzerAvailable: python.available,
       pythonAnalyzerEngines: python.engines,
+      enrichment: {
+        enabled: this.config.enrichment?.enabled === true,
+        musicbrainz: this.config.enrichment?.musicbrainz?.enabled !== false,
+        deezer: this.config.enrichment?.deezer?.enabled !== false,
+        acoustidConfigured: Boolean(this.config.enrichment?.acoustid?.apiKey),
+      },
     };
   }
 
@@ -163,6 +174,11 @@ export class CatalogService {
           musicalKey: metadata.musicalKey,
           camelotKey: metadata.camelotKey,
           keySource: metadata.keySource,
+          label: metadata.label,
+          releaseDate: metadata.releaseDate,
+          isrc: metadata.isrc,
+          recordingMbid: metadata.recordingMbid,
+          genres: metadata.genres,
         });
         upserted += 1;
         if (written.moved) {
@@ -657,6 +673,28 @@ export class CatalogService {
 
   waitForAnalysisJob(analysisJobId: string, timeoutMs?: number) {
     return this.analysis.waitForJob(analysisJobId, timeoutMs);
+  }
+
+  startMetadataEnrichment(input: {
+    scope?: EnrichmentScope;
+    trackIds?: string[];
+    dryRun?: boolean;
+    limit?: number;
+  }): { job: EnrichmentJob } {
+    const trackIds = this.enrichment.selectTrackIds(input);
+    return this.enrichment.start({ trackIds, dryRun: input.dryRun === true });
+  }
+
+  getEnrichmentStatus(enrichmentJobId?: string): { jobs: EnrichmentJob[] } {
+    return this.enrichment.getStatus(enrichmentJobId);
+  }
+
+  getEnrichmentReport(): EnrichmentReport {
+    return this.enrichment.getReport();
+  }
+
+  waitForEnrichmentJob(enrichmentJobId: string, timeoutMs?: number) {
+    return this.enrichment.waitForJob(enrichmentJobId, timeoutMs);
   }
 
   getPlanningReadiness(trackId?: string): {

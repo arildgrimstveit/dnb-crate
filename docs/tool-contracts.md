@@ -11,7 +11,8 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 ## `get_server_status`
 
 - Input: `{}`
-- Output data: `{ name, version, databaseReady, libraryRootCount, libraryRootsReady, outputRootConfigured, ffmpegAvailable, ffprobeAvailable, ffmpegVersion, ffprobeVersion, supportedExtensions }`
+- Output data: `{ name, version, databaseReady, libraryRootCount, libraryRootsReady, outputRootConfigured, ffmpegAvailable, ffprobeAvailable, ffmpegVersion, ffprobeVersion, supportedExtensions, enrichment?: { enabled, musicbrainz, deezer, acoustidConfigured } }`
+- Never includes API keys, contact strings, or absolute paths
 
 ## `scan_library`
 
@@ -32,8 +33,8 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `update_track_metadata`
 
-- Input: `{ trackId }` plus at least one of `energy`, `rating`, `moods`, `subgenres`, `tags`, `notes`, `bpm`, `musicalKey`
-- Manual BPM/key set provenance to `manual` and survive a later file scan
+- Input: `{ trackId }` plus at least one of `energy`, `rating`, `moods`, `subgenres`, `tags`, `notes`, `bpm`, `musicalKey`, `album`, `label`, `releaseDate`, `isrc`, `genres`
+- Manual fields set provenance to `manual` and survive a later file scan and enrichment
 - Errors: `TRACK_NOT_FOUND`, `INVALID_METADATA`
 
 ## `get_library_stats`
@@ -71,6 +72,25 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 ## `get_track_sections`
 
 - Input: `{ trackId, engine? }`
+
+## `start_metadata_enrichment`
+
+- Input: `{ scope?: unmatched|all|ids, trackIds?, dryRun?, limit? }` — default scope `unmatched`
+- Output: enrichment job
+- `dryRun` looks up and reports without writing track fields
+- Errors: `ENRICHMENT_FAILED`, `TRACK_NOT_FOUND`
+- Never writes tags to audio files; never overwrites `manual`
+
+## `get_enrichment_status`
+
+- Input: `{ enrichmentJobId? }`
+- Output: `{ jobs: EnrichmentJob[] }`
+- Errors: `ENRICHMENT_JOB_NOT_FOUND`
+
+## `get_enrichment_report`
+
+- Input: `{}`
+- Output: `{ matchedByMethod, unmatched, needsReview, bpmWritten, bpmDisagreements, duplicateGroups, rows[] }`
 
 ## `get_analysis_report`
 

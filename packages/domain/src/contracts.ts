@@ -91,6 +91,15 @@ export const publicTrackSchema = z.object({
   fileMissing: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  label: z.string().nullable().optional(),
+  releaseDate: z.string().nullable().optional(),
+  year: z.number().int().nullable().optional(),
+  isrc: z.string().nullable().optional(),
+  recordingMbid: z.string().nullable().optional(),
+  artistCanonical: z.string().nullable().optional(),
+  recordingKey: z.string().nullable().optional(),
+  genres: z.array(z.string()).optional(),
+  fieldSources: z.record(z.string(), z.enum(["tag", "published", "manual"])).optional(),
 });
 
 export const searchTracksDataSchema = z.object({
@@ -138,6 +147,11 @@ export const updateTrackMetadataInputSchema = z
       .nullable()
       .optional()
       .describe("Optional note about where published/manual values came from"),
+    album: z.string().max(200).nullable().optional(),
+    label: z.string().max(200).nullable().optional(),
+    releaseDate: z.string().max(32).nullable().optional(),
+    isrc: z.string().max(16).nullable().optional(),
+    genres: stringListSchema.optional(),
   })
   .refine(
     (value) =>
@@ -149,7 +163,12 @@ export const updateTrackMetadataInputSchema = z
       value.notes !== undefined ||
       value.bpm !== undefined ||
       value.musicalKey !== undefined ||
-      value.metadataSourceNote !== undefined,
+      value.metadataSourceNote !== undefined ||
+      value.album !== undefined ||
+      value.label !== undefined ||
+      value.releaseDate !== undefined ||
+      value.isrc !== undefined ||
+      value.genres !== undefined,
     { message: "Provide at least one metadata field to update" },
   );
 
@@ -227,6 +246,14 @@ export const serverStatusDataSchema = z.object({
   supportedExtensions: z.array(z.string()),
   pythonAnalyzerAvailable: z.boolean(),
   pythonAnalyzerEngines: z.array(z.string()),
+  enrichment: z
+    .object({
+      enabled: z.boolean(),
+      musicbrainz: z.boolean(),
+      deezer: z.boolean(),
+      acoustidConfigured: z.boolean(),
+    })
+    .optional(),
 });
 
 export const toolErrorSchema = z.object({

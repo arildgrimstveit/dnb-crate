@@ -46,6 +46,28 @@ export const appConfigSchema = z.object({
   ffmpegPath: z.string().min(1).optional(),
   ffprobePath: z.string().min(1).optional(),
   analysis: analysisConfigSchema,
+  enrichment: z
+    .object({
+      enabled: z.boolean().default(false),
+      contact: z.string().max(200).optional(),
+      musicbrainz: z
+        .object({
+          enabled: z.boolean().default(true),
+        })
+        .optional(),
+      deezer: z
+        .object({
+          enabled: z.boolean().default(true),
+        })
+        .optional(),
+      acoustid: z
+        .object({
+          apiKey: z.string().max(128).optional(),
+        })
+        .optional(),
+      writePublishedBpm: z.boolean().default(true),
+    })
+    .optional(),
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;

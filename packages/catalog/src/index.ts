@@ -10,6 +10,10 @@ import { AnalysisCoordinator } from "./analysis/coordinator.ts";
 import { AnalysisJobRepository } from "./analysis-job-repository.ts";
 import { AnalysisRepository } from "./analysis-repository.ts";
 import { openDatabase, type SqliteDatabase } from "./db.ts";
+import { EnrichmentCoordinator } from "./enrichment/coordinator.ts";
+import type { HttpClient } from "./enrichment/http-client.ts";
+import { EnrichmentJobRepository } from "./enrichment-job-repository.ts";
+import { EnrichmentRepository } from "./enrichment-repository.ts";
 import { TrackRepository } from "./repository.ts";
 import { CatalogService } from "./service.ts";
 import { RenderJobRepository } from "./render-job-repository.ts";
@@ -20,6 +24,12 @@ export type CatalogRuntimeOptions = {
   processRunner?: ProcessRunner;
   /** When true, skip FFmpeg detection at startup by injecting the in-process fake. */
   useFakeFfmpeg?: boolean;
+  http?: HttpClient;
+  enrichmentIntervals?: {
+    musicbrainz?: number;
+    deezer?: number;
+    acoustid?: number;
+  };
 };
 
 export function createCatalogRuntime(
@@ -62,10 +72,27 @@ export function createCatalogRuntime(
     runner,
     logger,
   );
+  const enrichments = new EnrichmentRepository(db);
+  const enrichmentJobs = new EnrichmentJobRepository(db);
+  const enrichment = new EnrichmentCoordinator(
+    config,
+    repository,
+    enrichments,
+    enrichmentJobs,
+    analyses,
+    runner,
+    logger,
+    {
+      http: options.http,
+      intervals: options.enrichmentIntervals,
+    },
+  );
   renders.recoverInterrupted();
   analysis.recoverInterrupted();
+  enrichment.recoverInterrupted();
   renders.kick();
   analysis.kick();
+  enrichment.kick();
   const service = new CatalogService(
     config,
     repository,
@@ -73,6 +100,7 @@ export function createCatalogRuntime(
     renders,
     analysis,
     analyses,
+    enrichment,
     logger,
   );
   return {
@@ -86,6 +114,7 @@ export function createCatalogRuntime(
     close: () => {
       renders.stop();
       analysis.stop();
+      enrichment.stop();
       db.close();
     },
   };
@@ -107,5 +136,9 @@ export { walkLibrary } from "./scanner.ts";
 export { isPathInsideRoot, isPathInsideAnyRoot, relativeToRoots } from "./paths.ts";
 export { fingerprintFile } from "./fingerprint.ts";
 export { extractAudioMetadata } from "./metadata.ts";
+export { EnrichmentCoordinator } from "./enrichment/coordinator.ts";
+export { createFakeHttpClient, createFetchHttpClient, redactUrl } from "./enrichment/http-client.ts";
+export { RateLimiter } from "./enrichment/rate-limiter.ts";
+export { pickBestMatch, scoreMatch } from "./enrichment/matcher.ts";
 export { buildSineWav, writeSineWav, type WavFixtureOptions } from "./wav-fixture.ts";
 export { buildClickTrackPcm, encodeMonoWav } from "@dnb-crate/audio-analysis";

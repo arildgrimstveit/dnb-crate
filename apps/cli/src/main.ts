@@ -39,6 +39,9 @@ Commands:
   track:search [--query TEXT] [--artist TEXT] [--limit N]
   analysis:start --track-id UUID [--engine dsp|beat-this|allin1] [--wait]
   analysis:run --scope stale|unanalyzed|all|planningReady [--wait] [--timeout-min N]
+  enrich:run --scope unmatched|all|ids [--dry-run] [--limit N] [--wait] [--timeout-min N]
+  enrich:status [--id UUID]
+  enrich:report
   analysis:status [--id UUID]
   analysis:get --track-id UUID
   analysis:compare --track-id UUID
@@ -155,6 +158,53 @@ async function main(): Promise<void> {
         }
         break;
       }
+      case "enrich:run": {
+        const scopeRaw = option(args, "--scope") ?? "unmatched";
+        if (scopeRaw !== "unmatched" && scopeRaw !== "all" && scopeRaw !== "ids") {
+          throw new Error("enrich:run requires --scope unmatched|all|ids");
+        }
+        const limitRaw = option(args, "--limit");
+        const limit = limitRaw === undefined ? undefined : Number(limitRaw);
+        if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+          throw new Error("enrich:run --limit must be a positive number");
+        }
+        const timeoutMinRaw = option(args, "--timeout-min");
+        const timeoutMin = timeoutMinRaw === undefined ? 90 : Number(timeoutMinRaw);
+        if (!Number.isFinite(timeoutMin) || timeoutMin <= 0) {
+          throw new Error("enrich:run --timeout-min must be a positive number");
+        }
+        const started = runtime.service.startMetadataEnrichment({
+          scope: scopeRaw,
+          dryRun: flag(args, "--dry-run"),
+          limit,
+        });
+        if (flag(args, "--wait")) {
+          const done = await runtime.service.waitForEnrichmentJob(
+            started.job.id,
+            timeoutMin * 60_000,
+          );
+          const report = runtime.service.getEnrichmentReport();
+          for (const row of report.rows) {
+            if (row.method || row.needsReview) {
+              process.stderr.write(
+                `${row.title} method=${row.method ?? "none"} score=${row.score ?? "n/a"}${row.needsReview ? " needsReview" : ""}\n`,
+              );
+            }
+          }
+          printJson({ ok: true, data: { job: done, report } });
+        } else {
+          printJson({ ok: true, data: started.job });
+        }
+        break;
+      }
+      case "enrich:status": {
+        const id = option(args, "--id");
+        printJson({ ok: true, data: runtime.service.getEnrichmentStatus(id) });
+        break;
+      }
+      case "enrich:report":
+        printJson({ ok: true, data: runtime.service.getEnrichmentReport() });
+        break;
       case "analysis:status": {
         const id = option(args, "--id");
         printJson({ ok: true, data: runtime.service.getAnalysisStatus(id) });

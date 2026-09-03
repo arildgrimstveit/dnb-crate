@@ -66,6 +66,29 @@ describe("loadConfig", () => {
     expect(config.outputRoot).toBe(path.resolve(cwd, "output"));
   });
 
+  it("overlays AcoustID key and enrichment contact from the environment", () => {
+    const cwd = path.join(os.tmpdir(), `dnb-crate-enrich-config-${Date.now()}`);
+    mkdirSync(cwd, { recursive: true });
+    writeFileSync(
+      path.join(cwd, "dnb-crate.config.json"),
+      JSON.stringify({
+        databasePath: "./data/db.sqlite",
+        libraryRoots: ["./library"],
+        outputRoot: "./output",
+        enrichment: { enabled: true, acoustid: { apiKey: "from-file" } },
+      }),
+    );
+    const config = loadConfig({
+      cwd,
+      env: {
+        DNB_CRATE_ACOUSTID_API_KEY: "from-env",
+        DNB_CRATE_ENRICHMENT_CONTACT: "crate@example.com",
+      },
+    });
+    expect(config.enrichment?.acoustid?.apiKey).toBe("from-env");
+    expect(config.enrichment?.contact).toBe("crate@example.com");
+  });
+
   it("fails with CONFIG_INVALID when required fields are missing", () => {
     expect(() => loadConfig({ cwd: os.tmpdir(), env: {} })).toThrow(DomainError);
     try {

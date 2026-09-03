@@ -21,7 +21,9 @@ export type DomainErrorCode =
   | "INVALID_CURSOR"
   | "INVALID_METADATA"
   | "CONFIG_INVALID"
-  | "SCAN_FAILED";
+  | "SCAN_FAILED"
+  | "ENRICHMENT_FAILED"
+  | "ENRICHMENT_JOB_NOT_FOUND";
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;

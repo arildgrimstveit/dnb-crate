@@ -17,9 +17,12 @@ import {
   deleteSetPlanDataSchema,
   deleteSetPlanInputSchema,
   emptyInputSchema,
+  enrichmentJobSchema,
+  enrichmentReportDataSchema,
   findCompatibleTracksDataSchema,
   findCompatibleTracksInputSchema,
   getAnalysisStatusInputSchema,
+  getEnrichmentStatusInputSchema,
   getPlanningReadinessInputSchema,
   getRenderManifestInputSchema,
   getRenderStatusInputSchema,
@@ -31,6 +34,7 @@ import {
   getTrackInputSchema,
   libraryStatsDataSchema,
   listAnalysisJobsDataSchema,
+  listEnrichmentJobsDataSchema,
   listRenderJobsDataSchema,
   listRenderJobsInputSchema,
   listSetPlansDataSchema,
@@ -49,6 +53,7 @@ import {
   setCuePointsDataSchema,
   setCuePointsInputSchema,
   setPlanV1Schema,
+  startMetadataEnrichmentInputSchema,
   startSetRenderInputSchema,
   startTrackAnalysisInputSchema,
   toolResultSchema,
@@ -86,7 +91,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Get server status",
       description:
-        "Confirm process, database, configured library-root count, and whether ffmpeg/ffprobe are on PATH. Use for health checks. Does not expose absolute paths, secrets, or environment values.",
+        "Confirm process, database, configured library-root count, ffmpeg/ffprobe, and enrichment flags (enabled/musicbrainz/deezer/acoustidConfigured). Use for health checks. Does not expose absolute paths, secrets, API keys, or contact strings.",
       inputSchema: emptyInputSchema,
       outputSchema: toolResultSchema(serverStatusDataSchema),
       annotations: { readOnlyHint: true, idempotentHint: true },
@@ -163,7 +168,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Update track metadata",
       description:
-        "Add or correct personal metadata: energy (1–10), rating (1–5), moods, subgenres, tags, notes, plus optional manual BPM and musical key. Manual BPM/key survive a later file scan. Replacing moods/subgenres/tags overwrites the previous list. Never accepts a file path. Requires a track UUID.",
+        "Add or correct personal metadata: energy (1–10), rating (1–5), moods, subgenres, tags, notes, album, label, releaseDate, isrc, genres, plus optional manual BPM and musical key. Manual fields survive a later file scan and enrichment. Replacing list fields overwrites the previous list. Never accepts a file path. Requires a track UUID.",
       inputSchema: updateTrackMetadataInputSchema,
       outputSchema: toolResultSchema(publicTrackSchema),
       annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false },
@@ -322,6 +327,63 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     () => {
       try {
         return toolSuccess(service.getAnalysisReport());
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "start_metadata_enrichment",
+    {
+      title: "Start metadata enrichment",
+      description:
+        "Look up MusicBrainz / Deezer / AcoustID metadata. scope unmatched (default) skips already matched rows; all re-checks; ids uses trackIds. dryRun looks up without writing track fields. Never overwrites manual fields. Does not write tags to audio files. Secrets never appear in results.",
+      inputSchema: startMetadataEnrichmentInputSchema,
+      outputSchema: toolResultSchema(enrichmentJobSchema),
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    (input) => {
+      try {
+        const started = service.startMetadataEnrichment(input);
+        return toolSuccess(started.job);
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_enrichment_status",
+    {
+      title: "Get enrichment status",
+      description: "Poll enrichment jobs. Pass enrichmentJobId for one job, or omit to list recent jobs.",
+      inputSchema: getEnrichmentStatusInputSchema,
+      outputSchema: toolResultSchema(listEnrichmentJobsDataSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    },
+    ({ enrichmentJobId }) => {
+      try {
+        return toolSuccess(service.getEnrichmentStatus(enrichmentJobId));
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_enrichment_report",
+    {
+      title: "Get enrichment report",
+      description:
+        "Library-wide match counts by method, unmatched, needsReview, published BPM writes, BPM disagreements, and duplicate recording groups. Does not include API keys or contact strings.",
+      inputSchema: emptyInputSchema,
+      outputSchema: toolResultSchema(enrichmentReportDataSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    },
+    () => {
+      try {
+        return toolSuccess(service.getEnrichmentReport());
       } catch (error) {
         return toolFailure(error);
       }

@@ -96,6 +96,9 @@ Set the same `DNB_CRATE_*` environment variables in the Inspector session. Confi
 | `get_library_stats`         | Counts and missing-metadata summary.                                                 |
 | `set_cue_points`            | Replace manual cue points; optional beat anchor.                                     |
 | `start_track_analysis`      | Queue analysis for explicit UUIDs or the planning-ready subset.                      |
+| `start_metadata_enrichment` | MusicBrainz / Deezer / AcoustID lookup. Optional `dryRun`. Never writes file tags.   |
+| `get_enrichment_status`     | Poll enrichment jobs.                                                                |
+| `get_enrichment_report`     | Match counts, needsReview, published BPM writes, disagreements, duplicates.          |
 | `get_analysis_status`       | Poll analysis jobs.                                                                  |
 | `get_track_analysis`        | Beat grid, confidence, canonical vs analyzed BPM/key.                                |
 | `get_planning_readiness`    | Which tracks lack BPM/key/energy/file.                                               |

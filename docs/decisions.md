@@ -1,5 +1,19 @@
 # Decisions
 
+## 2026-09-03 — Metadata enrichment is network opt-in
+
+MusicBrainz, Deezer, and AcoustID run only when `enrichment.enabled` is true. Tests never hit the network (injectable `HttpClient`). The AcoustID key and contact string never appear in logs, tool results, `get_server_status`, reports, cache file names, or docs. `get_server_status` reports only `{ enabled, musicbrainz, deezer, acoustidConfigured }`. Logged URLs redact `client=`. Example config keeps `apiKey` empty.
+
+Source files stay read-only: enrichment never writes tags to audio files.
+
+## 2026-09-03 — Deezer published BPM
+
+Write `tracks.bpm` with `bpmSource: "published"` only when the track has no `manual`/`published` BPM and Deezer `bpm > 0`. Fold ×2/÷2 into 160–190 when genres say drum and bass; round to the nearest integer when within 0.3 (173.7 → 174). If an accepted DSP grid disagrees by more than 1.0 BPM, do not write; record `bpmDisagreement` in the enrichment report. Published values never replace `manual`.
+
+## 2026-09-03 — Enrichment matcher threshold
+
+Score = 0.5·title + 0.3·artist + 0.2·duration. Accept ≥ 0.85 with artist Jaccard ≥ 0.6 and a duration hit. 0.6–0.85 is `needsReview` and writes no track fields. Remix/edit/VIP tokens must match, so a remix never matches an original.
+
 ## 2026-09-03 — Descriptor pack is heuristic
 
 `energy`, `danceability`, `acousticness`, `melodicness`, and `valence` are same-pass DSP heuristics on the existing STFT/chroma/onset features. They are not trained mood models. `valence` in particular is low-confidence (major-vs-minor chroma margin plus brightness). Values are advisory, 0–1, and nullable on old rows. Integer `suggestedEnergy` is now `round(1 + 9·energy)`.

@@ -65,6 +65,33 @@ export {
   ANALYSIS_JOB_LIST_LIMIT_MAX,
 } from "./constants.ts";
 export { type AppConfig, appConfigSchema, type LogLevel, logLevelSchema, analysisEngineIdSchema } from "./config.ts";
+export {
+  hasDrumAndBassGenre,
+  isDrumAndBassGenre,
+  normalizeGenre,
+  normalizeGenres,
+} from "./genres.ts";
+export {
+  artistTokens,
+  jaccard,
+  normalizePersonName,
+  recordingKeyFrom,
+  remixTokens,
+  stripFeaturing,
+  titleTokens,
+  yearFromDate,
+} from "./identity.ts";
+export {
+  enrichmentJobSchema,
+  enrichmentReportDataSchema,
+  getEnrichmentReportInputSchema,
+  getEnrichmentStatusInputSchema,
+  listEnrichmentJobsDataSchema,
+  startMetadataEnrichmentInputSchema,
+  type EnrichmentJob,
+  type EnrichmentReport,
+  type EnrichmentScope,
+} from "./enrichment-contracts.ts";
 export { loadConfig, type ConfigLoadOptions } from "./load-config.ts";
 export { DomainError, type DomainErrorCode, isDomainError } from "./errors.ts";
 export {
@@ -157,6 +184,7 @@ export {
   type AnalysisEngineId,
   type AnalysisStatus,
   type BpmSource,
+  type FieldSource,
   type CuePoint,
   type CuePointType,
   type KeySource,

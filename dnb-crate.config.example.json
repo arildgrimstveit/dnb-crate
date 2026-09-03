@@ -14,5 +14,13 @@
         "enabled": false
       }
     }
+  },
+  "enrichment": {
+    "enabled": false,
+    "contact": "",
+    "musicbrainz": { "enabled": true },
+    "deezer": { "enabled": true },
+    "acoustid": { "apiKey": "" },
+    "writePublishedBpm": true
   }
 }
