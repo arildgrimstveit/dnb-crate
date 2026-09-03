@@ -18,6 +18,29 @@ Analysis scopes (`unanalyzed` / `stale` / `all` / `planningReady`), `reference_b
 
 Descriptor pack on the DSP path (`energy`, `danceability`, `acousticness`, `melodicness`, `valence`), `shortTermLufs*` from 3 s RMS, analyzer **3.0.0**. `scope: stale` now selects every 2.1.0 row. Suite 19 files / 133 passed.
 
+## Crate v3 (2026-09-03)
+
+Whole-library analysis, enrichment, descriptor retune, and two hours from the full crate.
+
+### WP0–WP4
+
+Coverage stats, analysis scopes, descriptor pack 3.0.0, MusicBrainz/Deezer/AcoustID enrichment, planner descriptor/genre/dedupe filters. See the headings above and `docs/plans/crate-v3-handover.md`.
+
+### WP5 whole-library run
+
+- `library:scan` then `analysis:run --scope stale` (first 3.0.0 pass): **583 / 583** in **27.4 min**, `failedTrackIds: []`. Accepted **292**, rejected **290**, reference **1**, `bpmHintOnly` **102**.
+- Descriptor p10 / p50 / p90 before retune: energy 0.531 / 0.690 / 0.760 (spread **0.228**); danceability 0.273 / 0.485 / 0.673; valence 0.228 / 0.345 / 0.649; acousticness 0.047 / 0.074 / 0.282; melodicness 0.024 / 0.052 / 0.136; subBass 0.522 / 0.540 / 0.578; brightness 0.061 / 0.095 / 0.123.
+- Energy and acousticness were stretched once (constants dated 2026-09-03). Melodicness stayed on key-confidence (chromaClarity ranks noise above the crate; key-confidence calibration is deferred). After stretch: energy 0.479 / 0.721 / 0.832 (spread **0.353**); acousticness 0.106 / 0.163 / 0.602.
+- Enrichment: first pass hit MusicBrainz ISRC HTTP 400 (`inc=release-groups+genres+tags`) and never reached AcoustID. After the ISRC 4xx fall-through, URL-safe chromaprint parse, 120 s fingerprint window, and AcoustID accept (score ≥ 0.85 + remix tokens + duration ≤ 6 s): **555 / 583 matched** (file-tags 30, isrc 38, acoustid 134, search 353), unmatched 28, needsReview 6, published BPM written 152, disagreements 29, `duplicateGroups` 151. `library:stats` metadata: genres 499, isrc 547, label 554, releaseDate 583, recordingMbid 555, bpm published 187 / analyzed 210 / NULL 186.
+- `analysis:run --scope stale` after enrichment: **173** tracks, **5.8 min**, 0 failed (new published BPM reference grids).
+- `analysis:gate`: in-range accepted **80/117** exact **79**, `gridSource` `{"analyzed":585,"reference":12,"anchor":0}`.
+- `calibrate-confidence.mts --config dnb-crate.config.json`: keep existing logistic weights and `MIN_ANALYSIS_CONFIDENCE` **0.6**. Fitted unconstrained MIN 0.962 would drop accepted-correct from 79 to 4. Prominence weight on the fitted curve went negative; not adopted.
+
+### Hours
+
+- **Liquid hour v3** plan `c93a9f56-…` — 12 tracks, **12** outside the original 14, **11** canonical artists. Brief: exclude idm/ambient/rock; `melodicness.min` **0.12** (crate p80; 0.55 matches zero rows); energy 0.35–0.7; arc 4 → 7 → 5; seed 3. Job `abeb7577-…`, `render:check` exit **0**, `interiorSilence: []`, duration **4001988 ms** (~66:42, +402 s vs target). Copy `output/renders/hour-liquid-v3.wav` (sha256 `abb8021e…`). Did not overwrite older hours.
+- **Peak hour v3** plan `5cb141aa-…` — 16 tracks, **15** outside the original 14 (Tidal Wave is the one overlap), **10** canonical artists. Brief: energy ≥ 0.7, danceability ≥ 0.6, arc 6 → 9 → 7, seed **6** (seed 5 failed `render:check` on a 2 s quiet hole). Job `2eff4a40-…`, `render:check` exit **0**, `interiorSilence: []`, duration **3583076 ms** (~59:43). Copy `output/renders/hour-peak-v3.wav` (sha256 `ce578306…`). First seed-5 render also needed a mix-wide true-peak limiter pass (aligned overlaps hit +1.5 dBTP). Did not overwrite older hours.
+
 ## Mixing v2.2 (2026-09-03)
 
 Set plans now consume analysis: mix windows from mix-in/mix-out + silence bounds, beat-or-bar alignment, reference grids, 3-band presets, and join type from head/tail energy. WP0–WP6 notes sit below.

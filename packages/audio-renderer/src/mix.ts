@@ -275,11 +275,42 @@ export async function renderMix(
       }
 
       if (measured.truePeakDb !== null && measured.truePeakDb > request.truePeakCeilingDb + 0.3) {
-        throw new DomainError(
-          "RENDER_FAILED",
-          `True peak ${measured.truePeakDb.toFixed(2)} dB exceeds ceiling ${request.truePeakCeilingDb} dB`,
-          { retryable: false, details: { truePeakDb: measured.truePeakDb } },
+        const peakGainDb = request.truePeakCeilingDb - measured.truePeakDb - 0.2;
+        const limited = `${request.outputPath}.peak-limited.wav`;
+        const peakArgs = [
+          "-nostdin",
+          "-hide_banner",
+          "-y",
+          "-i",
+          workingPath,
+          "-af",
+          `volume=${peakGainDb}dB,alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50`,
+          "-c:a",
+          "pcm_s24le",
+          limited,
+        ];
+        invocation = `${invocation} ; ${redactInvocation(binaries.ffmpegPath, peakArgs)}`;
+        const peakRun = await runner.run({
+          executable: binaries.ffmpegPath,
+          args: peakArgs,
+          abortSignal: request.abortSignal,
+        });
+        if (peakRun.exitCode !== 0) {
+          mapRunFailure(peakRun, request.abortSignal);
+        }
+        await removeIfPresent(workingPath);
+        workingPath = limited;
+        warnings.push(
+          `Applied mix-wide ${peakGainDb.toFixed(2)} dB peak reduction so true peak meets ${request.truePeakCeilingDb} dBTP.`,
         );
+        measured = await measureLoudness(runner, binaries, workingPath, request.abortSignal);
+        if (measured.truePeakDb !== null && measured.truePeakDb > request.truePeakCeilingDb + 0.3) {
+          throw new DomainError(
+            "RENDER_FAILED",
+            `True peak ${measured.truePeakDb.toFixed(2)} dB exceeds ceiling ${request.truePeakCeilingDb} dB`,
+            { retryable: false, details: { truePeakDb: measured.truePeakDb } },
+          );
+        }
       }
 
       const silenceArgs = [
@@ -323,6 +354,7 @@ export async function renderMix(
   } catch (error) {
     await removeIfPresent(partialPath);
     await removeIfPresent(`${request.outputPath}.attenuated.wav`);
+    await removeIfPresent(`${request.outputPath}.peak-limited.wav`);
     throw error;
   } finally {
     await removeIfPresent(filterPath);

@@ -1,0 +1,15 @@
+{
+  "name": "Peak hour v3",
+  "targetDurationMs": 3600000,
+  "seed": 6,
+  "artistRepeatSpacing": 2,
+  "requestedArc": [
+    { "atFraction": 0, "targetEnergy": 6 },
+    { "atFraction": 0.65, "targetEnergy": 9 },
+    { "atFraction": 1, "targetEnergy": 7 }
+  ],
+  "descriptors": {
+    "energy": { "min": 0.7 },
+    "danceability": { "min": 0.6 }
+  }
+}

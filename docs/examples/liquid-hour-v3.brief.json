@@ -1,0 +1,16 @@
+{
+  "name": "Liquid hour v3",
+  "targetDurationMs": 3600000,
+  "seed": 3,
+  "artistRepeatSpacing": 2,
+  "requestedArc": [
+    { "atFraction": 0, "targetEnergy": 4 },
+    { "atFraction": 0.55, "targetEnergy": 7 },
+    { "atFraction": 1, "targetEnergy": 5 }
+  ],
+  "genres": { "exclude": ["idm", "ambient", "rock"] },
+  "descriptors": {
+    "melodicness": { "min": 0.12 },
+    "energy": { "min": 0.35, "max": 0.7 }
+  }
+}

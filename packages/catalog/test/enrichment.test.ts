@@ -13,6 +13,7 @@ import {
   scoreMatch,
   writeSineWav,
 } from "../src/index.ts";
+import { fingerprintFile } from "../src/enrichment/acoustid.ts";
 
 const MBID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const RELEASE = "ffffffff-1111-2222-3333-444444444444";
@@ -129,6 +130,40 @@ describe("enrichment matcher", () => {
   });
 });
 
+describe("chromaprint fingerprint", () => {
+  it("parses bare base64 stdout from FFmpeg", async () => {
+    const fp = await fingerprintFile(
+      {
+        run: async () => ({
+          exitCode: 0,
+          signal: null,
+          stdout: "AQAAC0mUaEkSZSoAAAAA\n",
+          stderr: "",
+        }),
+      },
+      "ffmpeg",
+      "clip.wav",
+    );
+    expect(fp?.fingerprint).toBe("AQAAC0mUaEkSZSoAAAAA");
+  });
+
+  it("parses URL-safe base64 chromaprint stdout", async () => {
+    const fp = await fingerprintFile(
+      {
+        run: async () => ({
+          exitCode: 0,
+          signal: null,
+          stdout: "AQAAC0mU_EkS-SoAAAAA\n",
+          stderr: "",
+        }),
+      },
+      "ffmpeg",
+      "clip.wav",
+    );
+    expect(fp?.fingerprint).toBe("AQAAC0mU_EkS-SoAAAAA");
+  });
+});
+
 describe("rate limiter", () => {
   it("spaces calls with an injectable clock", async () => {
     let now = 0;
@@ -193,6 +228,28 @@ describe("metadata enrichment", () => {
           ],
         },
       },
+      { match: `/release/${RELEASE}`, body: mbRelease() },
+      { match: "/track/isrc:", body: deezerTrack({ bpm: 0 }) },
+    ]);
+    const { catalog, library } = await workspace(http);
+    const seeded = await seedTrack(catalog, library);
+    catalog.db.prepare("UPDATE tracks SET isrc = ? WHERE id = ?").run(ISRC, seeded.id);
+    const started = catalog.service.startMetadataEnrichment({
+      scope: "ids",
+      trackIds: [seeded.id],
+    });
+    await catalog.service.waitForEnrichmentJob(started.job.id, 15_000);
+    expect(catalog.service.getTrack(seeded.id).recordingMbid).toBe(MBID);
+  });
+
+  it("falls through to search when the ISRC endpoint returns 400", async () => {
+    const http = createFakeHttpClient([
+      { match: `/isrc/${ISRC}`, status: 400, body: { error: "bad request" } },
+      {
+        match: "isrc%3A",
+        body: { recordings: [mbRecording()] },
+      },
+      { match: `/recording/${MBID}`, body: mbRecording() },
       { match: `/release/${RELEASE}`, body: mbRelease() },
       { match: "/track/isrc:", body: deezerTrack({ bpm: 0 }) },
     ]);

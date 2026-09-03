@@ -21,13 +21,13 @@ Computed in the existing `analyze` pass. Every slider is 0–1. `suggestedEnergy
 
 | Field | Formula (sketch) |
 | --- | --- |
-| `energy` | `0.4·loud + 0.3·dropIntensity + 0.3·onsetDensityNorm` — `loud` maps file RMS dBFS from −24…−8 → 0…1; `onsetDensityNorm` blends onset fraction with tempo prominence |
+| `energy` | `0.4·loud + 0.3·dropIntensity + 0.3·onsetDensityNorm`, then a 0.25…0.84 → 0.05…0.95 stretch (WP5, 2026-09-03). `loud` maps file RMS dBFS from −24…−8 → 0…1 |
 | `danceability` | `0.5·dfa + 0.3·prominence + 0.2·stability` — Essentia-style DFA on a 10 ms frame-stddev envelope after a 180 Hz high-pass (tau 310–8800 ms, ×1.1). Flat envelopes (CV < 0.18) score 0 |
-| `acousticness` | Uses STFT sub-band ratio, strong spectral peaks, chroma clarity, and onset density (see `descriptors.ts`) |
-| `melodicness` | Mostly key-confidence (how clearly pitched the chroma is) plus a small spectral-tonal term. Drums without a pad stay low. |
+| `acousticness` | STFT sub-band ratio, strong spectral peaks, chroma clarity, and onset density, then a 0.02…0.40 → 0.05…0.85 stretch (WP5) |
+| `melodicness` | `2.2·keyConfidence` plus a small spectral-tonal term. The plan’s chromaClarity blend was not adopted: on fixtures, chromaClarity ranks white noise above most crate tracks. Key confidence on this crate still clusters (p90 ≈ 0.05); a 0.55 liquid cutoff matches nobody. |
 | `valence` | **Low-confidence.** `0.35·majorness + 0.25·(brightness/0.15) + 0.2·melodicness + 0.2·danceability` |
 
-Reference ranges live in `packages/audio-analysis/src/descriptors.ts` (dated 2026-09-03). Re-tune once after the whole-library run if a crate spread is narrower than 0.3.
+Reference ranges live in `packages/audio-analysis/src/descriptors.ts` (retuned 2026-09-03). Energy and acousticness were stretched once so crate p10–p90 ≥ 0.3. Melodicness, sub-bass, and brightness were left unstretched so fixture floors stay green (key-confidence calibration is deferred).
 
 Python is **off by default**. Enable with `analysis.engines.python.enabled` and run `tools/analyzer-py/setup.ps1` (Python 3.12 venv). The product runs without it.
 
@@ -98,6 +98,10 @@ pnpm cli analysis:get --track-id UUID
 pnpm cli analysis:compare --track-id UUID
 pnpm cli analysis:report
 pnpm cli analysis:gate [--engine dsp|beat-this] [--previews]
+pnpm cli enrich:run --scope unmatched --wait
+pnpm cli enrich:status
+pnpm cli enrich:report
+pnpm cli plan:create --brief-json docs/examples/liquid-hour-v3.brief.json
 pnpm cli analysis:cue-preview --track-id UUID --cue drop
 pnpm cli transition:plan --from UUID --to UUID --bars 32
 ```

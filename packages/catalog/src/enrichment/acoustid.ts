@@ -24,7 +24,19 @@ export async function fingerprintFile(
 ): Promise<{ durationSec: number; fingerprint: string } | null> {
   const result = await runner.run({
     executable: ffmpegPath,
-    args: ["-nostdin", "-hide_banner", "-i", filePath, "-f", "chromaprint", "-fp_format", "2", "-"],
+    args: [
+      "-nostdin",
+      "-hide_banner",
+      "-i",
+      filePath,
+      "-t",
+      "120",
+      "-f",
+      "chromaprint",
+      "-fp_format",
+      "2",
+      "-",
+    ],
   });
   const text = `${result.stdout}\n${result.stderr}`;
   try {
@@ -39,11 +51,15 @@ export async function fingerprintFile(
       };
     }
   } catch {
-    // FFmpeg may emit DURATION=/FINGERPRINT= text instead of JSON.
+    // Nightly FFmpeg writes bare base64 on stdout, not JSON.
+  }
+  const bare = result.stdout.trim().replace(/\s+/g, "");
+  if (/^[A-Za-z0-9+\-/=_]+$/.test(bare) && bare.length >= 16) {
+    return { durationSec: 0, fingerprint: bare };
   }
   const duration = /DURATION=([0-9.]+)/i.exec(text);
   const fp =
-    /FINGERPRINT=([A-Za-z0-9+/=]+)/i.exec(text) ?? /fingerprint=([A-Za-z0-9+/=]+)/i.exec(text);
+    /FINGERPRINT=([A-Za-z0-9+\-/=_]+)/i.exec(text) ?? /fingerprint=([A-Za-z0-9+\-/=_]+)/i.exec(text);
   if (!fp) {
     return null;
   }

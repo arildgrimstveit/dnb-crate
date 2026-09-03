@@ -6,6 +6,7 @@ import {
   isDomainError,
   normalizeDnbBpm,
   normalizePersonName,
+  remixTokens,
   type AppConfig,
   type EnrichmentJob,
   type EnrichmentReport,
@@ -269,103 +270,141 @@ export class EnrichmentCoordinator {
     const mbOn = this.config.enrichment?.musicbrainz?.enabled !== false;
     const deezerOn = this.config.enrichment?.deezer?.enabled !== false;
 
-    if (mbOn && track.recordingMbid) {
-      recording = await clients.mb.lookupRecording(track.recordingMbid);
-      method = "file-tags";
-      score = 1;
-    }
-    if (!recording && mbOn && track.isrc) {
-      const hits = await clients.mb.lookupIsrc(track.isrc);
-      const picked = pickBestMatch(
-        query,
-        hits.map((hit) => ({
-          ...hit,
-          artist: hit.artist,
-          durationMs: hit.length,
-        })),
-      );
-      if (picked?.match.accept) {
-        recording = hits.find((hit) => hit.id === picked.candidate.id) ?? null;
-        method = "isrc";
-        score = picked.match.score;
-        needsReview = false;
-      } else if (picked?.match.needsReview) {
-        needsReview = true;
-        raw.needsReview = true;
-        raw.reviewScore = picked.match.score;
+    try {
+      if (mbOn && track.recordingMbid) {
+        recording = await clients.mb.lookupRecording(track.recordingMbid);
+        method = "file-tags";
+        score = 1;
       }
+    } catch (error) {
+      raw.mbLookupError = error instanceof Error ? error.message : "lookupRecording failed";
     }
-    if (!recording && clients.acoustid && binaries) {
-      const fp = await fingerprintFile(this.runner, binaries.ffmpegPath, track.filePath);
-      if (fp) {
-        const hits = await clients.acoustid.lookup(fp.durationSec || track.durationMs / 1000, fp.fingerprint);
-        const accepted = hits.find((hit) => hit.score >= 0.85 && hit.recordingMbids[0]);
-        if (accepted && mbOn) {
-          const looked = await clients.mb.lookupRecording(accepted.recordingMbids[0]!);
-          if (looked) {
-            const match = pickBestMatch(query, [
-              { ...looked, durationMs: looked.length, artist: looked.artist },
-            ]);
-            if (match?.match.accept) {
-              recording = looked;
-              method = "acoustid";
-              score = accepted.score;
-              acoustidId = accepted.acoustidId;
-              needsReview = false;
-            } else if (match?.match.needsReview) {
-              needsReview = true;
-              raw.needsReview = true;
+    try {
+      if (!recording && mbOn && track.isrc) {
+        const hits = await clients.mb.lookupIsrc(track.isrc);
+        const picked = pickBestMatch(
+          query,
+          hits.map((hit) => ({
+            ...hit,
+            artist: hit.artist,
+            durationMs: hit.length,
+          })),
+        );
+        if (picked?.match.accept) {
+          recording = hits.find((hit) => hit.id === picked.candidate.id) ?? null;
+          method = "isrc";
+          score = picked.match.score;
+          needsReview = false;
+        } else if (picked?.match.needsReview) {
+          needsReview = true;
+          raw.needsReview = true;
+          raw.reviewScore = picked.match.score;
+        }
+      }
+    } catch (error) {
+      raw.mbIsrcError = error instanceof Error ? error.message : "lookupIsrc failed";
+    }
+    try {
+      if (!recording && clients.acoustid && binaries) {
+        const fp = await fingerprintFile(this.runner, binaries.ffmpegPath, track.filePath);
+        if (fp) {
+          const durationSec = track.durationMs > 0 ? track.durationMs / 1000 : fp.durationSec;
+          const hits = await clients.acoustid.lookup(durationSec, fp.fingerprint);
+          const accepted = hits.find((hit) => hit.score >= 0.85 && hit.recordingMbids[0]);
+          if (accepted && mbOn) {
+            const looked = await clients.mb.lookupRecording(accepted.recordingMbids[0]!);
+            if (looked) {
+              const match = pickBestMatch(query, [
+                { ...looked, durationMs: looked.length, artist: looked.artist },
+              ]);
+              const queryRemix = remixTokens(query.title);
+              const candRemix = remixTokens(looked.title);
+              const remixOk =
+                queryRemix.size === candRemix.size &&
+                [...queryRemix].every((token) => candRemix.has(token));
+              const durationOk =
+                looked.length == null || Math.abs(looked.length - query.durationMs) <= 6000;
+              if (match?.match.accept || (accepted.score >= 0.85 && remixOk && durationOk)) {
+                recording = looked;
+                method = "acoustid";
+                score = accepted.score;
+                acoustidId = accepted.acoustidId;
+                needsReview = false;
+              } else if (match?.match.needsReview) {
+                needsReview = true;
+                raw.needsReview = true;
+              }
             }
           }
         }
       }
+    } catch (error) {
+      raw.acoustidError = error instanceof Error ? error.message : "acoustid failed";
     }
-    if (!recording && mbOn && track.artist) {
-      const hits = await clients.mb.searchRecordings(track.title, track.artist, track.durationMs);
-      const picked = pickBestMatch(
-        query,
-        hits.map((hit) => ({ ...hit, durationMs: hit.length, artist: hit.artist })),
-      );
-      if (picked?.match.accept) {
-        recording = (await clients.mb.lookupRecording(picked.candidate.id)) ?? picked.candidate;
-        method = "search";
-        score = picked.match.score;
-        needsReview = false;
-      } else if (picked?.match.needsReview) {
-        needsReview = true;
-        raw.needsReview = true;
-        raw.reviewScore = picked.match.score;
-      }
-    }
-
-    let release = recording?.releaseMbid ? await clients.mb.lookupRelease(recording.releaseMbid) : null;
-    const knownIsrc = track.isrc ?? recording?.isrcs[0] ?? null;
-    let deezer = knownIsrc && deezerOn ? await clients.deezer.byIsrc(knownIsrc) : null;
-    if (!deezer && deezerOn && track.artist) {
-      const search = await clients.deezer.search(track.artist, track.title);
-      const picked = pickBestMatch(
-        query,
-        search.map((hit) => ({ ...hit, durationMs: hit.durationMs })),
-      );
-      if (picked?.match.accept) {
-        deezer = (await clients.deezer.byId(picked.candidate.id)) ?? picked.candidate;
-      }
-    }
-    if (!recording && mbOn && deezer?.isrc) {
-      const hits = await clients.mb.lookupIsrc(deezer.isrc);
-      const picked = pickBestMatch(
-        query,
-        hits.map((hit) => ({ ...hit, durationMs: hit.length })),
-      );
-      if (picked?.match.accept) {
-        recording = hits.find((hit) => hit.id === picked.candidate.id) ?? null;
-        method = method ?? "isrc";
-        score = picked.match.score;
-        needsReview = false;
-        if (recording?.releaseMbid) {
-          release = await clients.mb.lookupRelease(recording.releaseMbid);
+    try {
+      if (!recording && mbOn && track.artist) {
+        const hits = await clients.mb.searchRecordings(track.title, track.artist, track.durationMs);
+        const picked = pickBestMatch(
+          query,
+          hits.map((hit) => ({ ...hit, durationMs: hit.length, artist: hit.artist })),
+        );
+        if (picked?.match.accept) {
+          recording = (await clients.mb.lookupRecording(picked.candidate.id)) ?? picked.candidate;
+          method = "search";
+          score = picked.match.score;
+          needsReview = false;
+        } else if (picked?.match.needsReview) {
+          needsReview = true;
+          raw.needsReview = true;
+          raw.reviewScore = picked.match.score;
         }
       }
+    } catch (error) {
+      raw.mbSearchError = error instanceof Error ? error.message : "searchRecordings failed";
+    }
+
+    let release = null;
+    try {
+      release = recording?.releaseMbid ? await clients.mb.lookupRelease(recording.releaseMbid) : null;
+    } catch {
+      release = null;
+    }
+    const knownIsrc = track.isrc ?? recording?.isrcs[0] ?? null;
+    let deezer = null;
+    try {
+      deezer = knownIsrc && deezerOn ? await clients.deezer.byIsrc(knownIsrc) : null;
+      if (!deezer && deezerOn && track.artist) {
+        const search = await clients.deezer.search(track.artist, track.title);
+        const picked = pickBestMatch(
+          query,
+          search.map((hit) => ({ ...hit, durationMs: hit.durationMs })),
+        );
+        if (picked?.match.accept) {
+          deezer = (await clients.deezer.byId(picked.candidate.id)) ?? picked.candidate;
+        }
+      }
+    } catch (error) {
+      raw.deezerError = error instanceof Error ? error.message : "deezer failed";
+    }
+    try {
+      if (!recording && mbOn && deezer?.isrc) {
+        const hits = await clients.mb.lookupIsrc(deezer.isrc);
+        const picked = pickBestMatch(
+          query,
+          hits.map((hit) => ({ ...hit, durationMs: hit.length })),
+        );
+        if (picked?.match.accept) {
+          recording = hits.find((hit) => hit.id === picked.candidate.id) ?? null;
+          method = method ?? "isrc";
+          score = picked.match.score;
+          needsReview = false;
+          if (recording?.releaseMbid) {
+            release = await clients.mb.lookupRelease(recording.releaseMbid);
+          }
+        }
+      }
+    } catch (error) {
+      raw.mbDeezerIsrcError = error instanceof Error ? error.message : "deezer-isrc lookup failed";
     }
 
     const dsp = this.analyses.findByTrackId(trackId);

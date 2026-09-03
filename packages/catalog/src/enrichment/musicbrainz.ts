@@ -111,9 +111,24 @@ export class MusicBrainzClient {
   }
 
   async lookupIsrc(isrc: string): Promise<MbRecording[]> {
-    const url = `https://musicbrainz.org/ws/2/isrc/${encodeURIComponent(isrc)}?inc=artist-credits+isrcs+releases+release-groups+genres+tags&fmt=json`;
-    const json = asRecord(await this.getJson(url));
-    return asArray(json.recordings).map(mapRecording).filter((row): row is MbRecording => row !== null);
+    const encoded = encodeURIComponent(isrc);
+    const urls = [
+      `https://musicbrainz.org/ws/2/isrc/${encoded}?inc=artist-credits+releases&fmt=json`,
+      `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(`isrc:${isrc}`)}&fmt=json&limit=10`,
+    ];
+    for (const url of urls) {
+      const json = await this.getJson(url, { ignoreClientErrors: true });
+      if (json == null) {
+        continue;
+      }
+      const mapped = asArray(asRecord(json).recordings)
+        .map(mapRecording)
+        .filter((row): row is MbRecording => row !== null);
+      if (mapped.length > 0) {
+        return mapped;
+      }
+    }
+    return [];
   }
 
   async searchRecordings(title: string, artist: string, durationMs: number): Promise<MbRecording[]> {
@@ -143,7 +158,10 @@ export class MusicBrainzClient {
     };
   }
 
-  private async getJson(url: string): Promise<unknown> {
+  private async getJson(
+    url: string,
+    options: { ignoreClientErrors?: boolean } = {},
+  ): Promise<unknown> {
     const cached = this.cache.get(url);
     if (cached) {
       return JSON.parse(cached);
@@ -163,6 +181,9 @@ export class MusicBrainzClient {
         continue;
       }
       if (response.status >= 400) {
+        if (options.ignoreClientErrors && response.status < 500) {
+          return null;
+        }
         throw new Error(`MusicBrainz HTTP ${response.status} for ${redactUrl(url)}`);
       }
       this.cache.set(url, response.body);

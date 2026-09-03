@@ -84,26 +84,30 @@ npx @modelcontextprotocol/inspector pnpm mcp
 
 Set the same `DNB_CRATE_*` environment variables in the Inspector session. Confirm `tools/list`, call `scan_library`, then `search_tracks`.
 
-## Tools (Stage 1–4)
+## Tools (33)
 
 | Tool                        | When to use                                                                          |
 | --------------------------- | ------------------------------------------------------------------------------------ |
-| `get_server_status`         | Health: database, root count, ffmpeg/ffprobe presence. No secrets or absolute paths. |
+| `get_server_status`         | Health: database, root count, ffmpeg/ffprobe, enrichment flags. No secrets or paths. |
 | `scan_library`              | Re-index configured roots. Optional `dryRun`.                                        |
-| `search_tracks`             | Filter the catalog. Max 50 results, cursor pagination.                               |
+| `search_tracks`             | Filter the catalog, including descriptor ranges and genres. Max 50, cursor pages.    |
 | `get_track`                 | One track UUID, including cue points.                                                |
-| `update_track_metadata`     | Energy, rating, moods, subgenres, tags, notes, plus manual BPM/key.                  |
-| `get_library_stats`         | Counts and missing-metadata summary.                                                 |
+| `update_track_metadata`     | Energy, rating, moods, genres, album/label/date/isrc, plus manual BPM/key.           |
+| `get_library_stats`         | Counts, coverage, and descriptor percentiles.                                        |
 | `set_cue_points`            | Replace manual cue points; optional beat anchor.                                     |
-| `start_track_analysis`      | Queue analysis for explicit UUIDs or the planning-ready subset.                      |
+| `start_track_analysis`      | Queue analysis by ids or scope (`unanalyzed` / `stale` / `all`).                     |
+| `get_analysis_status`       | Poll analysis jobs.                                                                  |
+| `get_track_analysis`        | Beat grid, confidence, canonical vs analyzed BPM/key, descriptor pack.               |
+| `compare_track_analyses`    | Per-engine BPM/key/sections plus the five descriptor sliders.                        |
+| `get_track_sections`        | Intro/build/drop/breakdown/outro labels.                                             |
+| `get_analysis_report`       | Engine agreement vs published/manual BPM.                                            |
+| `create_cue_preview`        | 8-second WAV around a detected cue.                                                  |
 | `start_metadata_enrichment` | MusicBrainz / Deezer / AcoustID lookup. Optional `dryRun`. Never writes file tags.   |
 | `get_enrichment_status`     | Poll enrichment jobs.                                                                |
 | `get_enrichment_report`     | Match counts, needsReview, published BPM writes, disagreements, duplicates.          |
-| `get_analysis_status`       | Poll analysis jobs.                                                                  |
-| `get_track_analysis`        | Beat grid, confidence, canonical vs analyzed BPM/key.                                |
-| `get_planning_readiness`    | Which tracks lack BPM/key/energy/file.                                               |
-| `find_compatible_tracks`    | Rank candidates vs a source track (BPM/Camelot/energy/tags).                         |
-| `create_set_plan`           | Deterministic draft from structured constraints. Persists the plan.                  |
+| `get_planning_readiness`    | Which tracks lack BPM/key/energy/file. A `bpmHint` counts as BPM.                    |
+| `find_compatible_tracks`    | Rank candidates (BPM/Camelot/energy/tags/descriptors).                               |
+| `create_set_plan`           | Deterministic draft from structured constraints, including descriptor/genre filters. |
 | `get_set_plan`              | Load a saved plan.                                                                   |
 | `validate_set_plan`         | Errors vs warnings plus energy/duration diagnostics.                                 |
 | `update_set_plan`           | Explicit replace/trim/transition/rate/applyTransition/reorder edits.                 |

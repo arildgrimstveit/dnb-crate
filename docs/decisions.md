@@ -14,9 +14,21 @@ Write `tracks.bpm` with `bpmSource: "published"` only when the track has no `man
 
 Score = 0.5·title + 0.3·artist + 0.2·duration. Accept ≥ 0.85 with artist Jaccard ≥ 0.6 and a duration hit. 0.6–0.85 is `needsReview` and writes no track fields. Remix/edit/VIP tokens must match, so a remix never matches an original.
 
+MusicBrainz `/isrc/{code}` rejects `inc=release-groups+genres+tags` with HTTP 400. The client now tries `inc=artist-credits+releases`, then `recording?query=isrc:…`, and treats 4xx as no-hit so later tiers still run.
+
+FFmpeg nightly writes a bare URL-safe Base64 chromaprint (`-`/`_`) on stdout, not JSON. AcoustID lookups use the first 120 s of audio and the file’s full duration. A fingerprint score ≥ 0.85 plus remix-token agreement and duration within 6 s is enough to accept (title/artist Jaccard often fails on `feat.` / punctuation).
+
 ## 2026-09-03 — Descriptor pack is heuristic
 
 `energy`, `danceability`, `acousticness`, `melodicness`, and `valence` are same-pass DSP heuristics on the existing STFT/chroma/onset features. They are not trained mood models. `valence` in particular is low-confidence (major-vs-minor chroma margin plus brightness). Values are advisory, 0–1, and nullable on old rows. Integer `suggestedEnergy` is now `round(1 + 9·energy)`.
+
+## 2026-09-03 — WP5 descriptor retune (fixtures first)
+
+The 583-track 3.0.0 pass clustered several sliders (energy p90−p10 = 0.228, acousticness 0.236, melodicness 0.113). Energy and acousticness got one output stretch dated 2026-09-03 so those spreads exceed 0.3. Melodicness stayed on `2.2·keyConfidence`: chromaClarity ranks white-noise fixtures above most crate tracks, and key confidence on this crate is still ~0.001–0.05 (calibration is deferred). A liquid cutoff of 0.55 therefore matches zero rows; the liquid hour brief uses crate p80 (`melodicness.min` 0.12). Mood-preset words keep the designed 0.55 scale. Sub-bass and brightness are raw spectral ratios and were not remapped.
+
+## 2026-09-03 — Mix-wide true-peak limiter when LUFS is already in range
+
+The first Peak hour v3 render failed because aligned overlaps measured **+1.5 dBTP** while integrated LUFS was already at target, so the existing LUFS-only attenuation never ran. `mix.ts` now applies a second `volume` + `alimiter` pass when true peak is more than 0.3 dB above the ceiling.
 
 ## 2026-09-02 — `-filter_complex` fallback
 

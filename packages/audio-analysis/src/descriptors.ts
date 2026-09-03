@@ -1,6 +1,6 @@
 import type { TempoEvidence } from "@dnb-crate/domain";
 
-/** Reference ranges dated 2026-09-03. Re-tune once after the whole-library 3.0.0 run if a crate spread is < 0.3. */
+/** Reference ranges. Output stretches retuned 2026-09-03 after the 583-track 3.0.0 run. */
 export const ENERGY_DBFS_LO = -24;
 export const ENERGY_DBFS_HI = -8;
 export const DFA_FRAME_MS = 10;
@@ -9,6 +9,17 @@ export const DFA_TAU_MAX_MS = 8800;
 export const DFA_TAU_MULTIPLIER = 1.1;
 export const DFA_ALPHA_LO = 0.3;
 export const DFA_ALPHA_HI = 1.15;
+/** Crate energy raw min/max from the 3.0.0 pass (spread 0.228). */
+export const ENERGY_RAW_LO = 0.25;
+export const ENERGY_RAW_HI = 0.84;
+export const ENERGY_OUT_LO = 0.05;
+export const ENERGY_OUT_HI = 0.95;
+/** Crate acousticness raw p10–upper-mid from the 3.0.0 pass (spread 0.236). */
+export const ACOUSTIC_RAW_LO = 0.02;
+export const ACOUSTIC_RAW_HI = 0.4;
+export const ACOUSTIC_OUT_LO = 0.05;
+export const ACOUSTIC_OUT_HI = 0.85;
+/** Melodicness stays on keyConfidence: chromaClarity is inverted on noise vs crate (WP5). */
 
 export type DescriptorChromaStats = {
   chromaClarity: number;
@@ -45,6 +56,14 @@ export type DescriptorPack = {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function stretch(value: number, inLo: number, inHi: number, outLo: number, outHi: number): number {
+  if (inHi <= inLo) {
+    return clamp(value, 0, 1);
+  }
+  const t = (value - inLo) / (inHi - inLo);
+  return clamp(outLo + t * (outHi - outLo), 0, 1);
 }
 
 function mean(values: number[]): number {
@@ -233,24 +252,32 @@ export function computeDescriptorPack(input: DescriptorPackInput): DescriptorPac
   const prominence = input.tempoEvidence?.prominence ?? 0;
   const stability = input.tempoEvidence?.stability ?? 0;
   const onsetDensityNorm = clamp(0.45 * (input.onsetDensity / 0.3) + 0.55 * prominence, 0, 1);
-  const energy = clamp(
+  const energyRaw = clamp(
     0.4 * loud + 0.3 * clamp(input.dropIntensity, 0, 1) + 0.3 * onsetDensityNorm,
     0,
     1,
   );
+  const energy = stretch(energyRaw, ENERGY_RAW_LO, ENERGY_RAW_HI, ENERGY_OUT_LO, ENERGY_OUT_HI);
   const dfaRaw = dfaDanceabilityTerm(input.samples, input.sampleRateHz);
   const dfaTerm = Math.max(dfaRaw, prominence * stability);
   const danceability = clamp(0.5 * dfaTerm + 0.3 * prominence + 0.2 * stability, 0, 1);
   const strongPeak = clamp(input.chroma.strongPeakRatio, 0, 1);
   const clarity = clamp(input.chroma.chromaClarity, 0, 1);
   const sub = clamp(input.subBassRatio, 0, 1);
-  const acousticness = clamp(
+  const acousticRaw = clamp(
     0.35 * (1 - clamp(sub / 0.5, 0, 1)) +
       0.3 * strongPeak * (1 - clamp(sub / 0.45, 0, 1)) +
       0.2 * clarity * (1 - sub) +
       0.15 * (1 - clamp(input.onsetDensity / 0.5, 0, 1)),
     0,
     1,
+  );
+  const acousticness = stretch(
+    acousticRaw,
+    ACOUSTIC_RAW_LO,
+    ACOUSTIC_RAW_HI,
+    ACOUSTIC_OUT_LO,
+    ACOUSTIC_OUT_HI,
   );
   const keyConf = clamp(input.chroma.keyConfidence, 0, 1);
   const melodicness = clamp(
