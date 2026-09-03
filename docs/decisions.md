@@ -1,5 +1,9 @@
 # Decisions
 
+## 2026-09-03 — Peak v3.4 is the mix quality bar
+
+Both Peak v4 and Liquid v4 are ear-check **fails**: stutters on almost every transition and early in the mix. `render:check` exit 0 on Peak v4 did not catch it. The direction is drop-anchored phrase-mix depth as on `hour-peak-v3.4.flac` (36:55), for Peak **and** Liquid. Do not pad Liquid with intro-start windows. Do not overwrite v3.4 or the v4 negatives.
+
 ## 2026-09-03 — Analyzed keys are gated at 0.5
 
 `applyAnalyzedMetadata` used to write every analyzed key as canonical (216 rows, `key_confidence` p50 0.012). That bypassed `resolveCanonicalKey`’s 0.5 gate and fed noise into `harmonicScore`.

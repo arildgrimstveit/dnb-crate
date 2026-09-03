@@ -2,7 +2,7 @@
 
 Listening notes for improving later hours. Do not paste library paths or secrets. Reference files under `output/` are gitignored — keep them on disk, never overwrite the liked copies listed below.
 
-Session dates: 2026-09-03. Canonical Peak listen copy: **`output/renders/hour-peak-v3.3.flac`**. Canonical Liquid listen copy: **`output/renders/hour-liquid-v3.wav`**.
+Session dates: 2026-09-03. Quality bar (direction): **`output/renders/hour-peak-v3.4.flac`**. Canonical Peak listen copy still on disk: **`output/renders/hour-peak-v3.3.flac`**. Canonical Liquid listen copy: **`output/renders/hour-liquid-v3.wav`**. Both v4 hours are ear-check **fails** (stutters).
 
 ## What “good” sounds like
 
@@ -18,9 +18,10 @@ Do not overwrite:
 
 | File | Why |
 | --- | --- |
-| `output/renders/hour-peak-v4.flac` | Peak v4 mood hour (phrase-anchored, level-matched). Structural pass; ear-check pending |
-| `output/renders/hour-liquid-v4.flac` | Liquid v4 mood hour. Structural pass; ear-check pending |
-| `output/renders/hour-peak-v3.4.flac` | Peak v3 order re-planned with phrase windows (plan `5c5121fb-…`, job `ed06f32f-…`). Structural pass; ear-check pending |
+| `output/renders/hour-peak-v3.5-diag.flac` | v3.4 order replan on analyzer 3.2.0 (Mixing v5 WP0). Do not overwrite v3.4 |
+| `output/renders/hour-peak-v4.flac` | Peak v4 mood hour. Ear-check **fail**: stutters on almost every transition and early in the mix |
+| `output/renders/hour-liquid-v4.flac` | Liquid v4 mood hour. Ear-check **fail**: same stutter regression; 2:03 intro-start pad |
+| `output/renders/hour-peak-v3.4.flac` | **Quality bar.** Peak v3 order, drop-anchored phrase windows (plan `5c5121fb-…`, job `ed06f32f-…`). Join 1 hole; rest good–perfect |
 | `output/renders/hour-peak-v3.3.flac` | Canonical Peak hour (mix 6.4.0; tags 6.5.0). Closer listen: joins 1–4 rough; from 20:26 much better |
 | `output/renders/hour-peak-v3.2.flac` | Complementary-curve A/B (12:08 still bad) |
 | `output/renders/hour-peak-v3.1.wav` | First listenably mixed Peak (6.1.0); source of the join-by-join notes |
@@ -100,7 +101,7 @@ The template is the same all the way through: every join is `phrase_mix`, comple
 
 Joins **1** and **4** leave a full drop hanging over a quiet intro for ~22 s. Join **3** is the known two-kit 32-bar. Join **2** looks like later breakdown→intro joins that sounded perfect (Dreamweaver → Breathe In, Hold on a While → Red Velvet), so that one is more pairing than curve.
 
-The good half starts when mix-out is a **build** (Inemuri) into Calling for a Sign, then the Nu:Logic / Technimatic run. Drop→quiet-intro can still work (Breathe In → Hold on a While, drop 0.41 → intro 0.03, was perfect) — so do not blindly sequential every drop outro. The opening four are the ones to re-check on the next Peak pass: earlier mix-out, shorter phrase, or different pairing.
+The good half starts when mix-out is a **build** (Inemuri) into Calling for a Sign, then the Nu:Logic / Technimatic run. Drop→quiet-intro can still work (Breathe In → Hold on a While, drop 0.41 → intro 0.03, was perfect) — so do not blindly sequential every drop outro. The opening four were the ones to re-check on v3.4. Phrase windows fixed **2–4**; join **1** is still the hole.
 
 ## Peak hour v3.4 — phrase-anchored replan of the v3 order
 
@@ -108,7 +109,47 @@ Plan `5c5121fb-da3b-4c2d-89b5-27675117dd95` (`plan:clone --replan` of `5cb141aa-
 
 `render:check` v2 exit **0**: every join has `exitKind` (`quietTail` or `dropLanding`); grid residual **0** on all 15 joins; no +1-period nudge; 13/15 joins `alignmentMode: phrase`. Gain-corrected LUFS delta is within 3 LU on every join. The 10 s arrangement step is large on Chant → Let The Story Begin (+7.6, quiet tail into the incoming drop) and Moment to Moment → Colour Me In (−7.9); those are phrase-window energy changes, not unmatched gains.
 
-Ear-check of joins 1–4 and the old 20:26-onward run is **pending** (listen `hour-peak-v3.4.flac`; timestamps moved with the shorter windows).
+Ear-check (2026-09-03). Times are track starts in `hour-peak-v3.4.flac`. Verdicts are the join **out of** that track.
+
+The v3.3 rough opening is mostly gone: Chant → Story Begin **liked**, Story Begin → Let It Fall **very good**, Let It Fall → Inemuri **very good**. Join 1 is the leftover miss: 32-bar complementary `quietTail` ducks Chant and leaves a gap before it kicks in. Landing joins 3 and 6 feel a little slow in the same way (not enough overlap / incoming waits). Breathe In → Hold on a While is slow on purpose and **perfect** as a breather. Dreamweaver through Colour Me In is **perfect**. Canonical listen copy stays **v3.3** until someone promotes v3.4.
+
+| # | Start | Outgoing → incoming | Bars | Shape | v3.4 |
+| --- | --- | --- | ---: | --- | --- |
+| 1 | 0:00 | Pendulum — Under The Waves | | | |
+| | **3:13** | → Logistics — Chant | 32 | complementary quietTail | a little too slow; not enough overlap; a moment of too much silence; Chant volume lowered and takes too long to kick in. Otherwise good |
+| 2 | 3:13 | Logistics — Chant | | | |
+| | **6:32** | → Sub Focus — Let The Story Begin | 8 | sequential quietTail | **like this one** |
+| 3 | 6:32 | Sub Focus — Let The Story Begin | | | |
+| | **7:59** | → Technimatic — Let It Fall | 8 | landing dropLanding | **very good**; tiny bit too slow (same story as 1) |
+| 4 | 7:59 | Technimatic — Let It Fall | | | |
+| | **9:17** | → Logistics — Inemuri | 16 | sequential quietTail | **very good** |
+| 5 | 9:17 | Logistics — Inemuri | | | |
+| | **10:56** | → Sub Focus — Calling for a Sign | 8 | landing dropLanding | **good** |
+| 6 | 10:56 | Sub Focus — Calling for a Sign | | | |
+| | **13:30** | → Nu:Logic — Dreamweaver | 8 | landing dropLanding | little too slow, same story as 1 and 3, slightly less |
+| 7 | 13:30 | Nu:Logic — Dreamweaver | | | |
+| | **14:38** | → Technimatic — Breathe In | 16 | complementary quietTail | **perfect** |
+| 8 | 14:38 | Technimatic — Breathe In | | | |
+| | **16:28** | → Technimatic — Hold on a While | 32 | complementary quietTail | slow, but it fits. **honestly perfect**, a good breather |
+| 9 | 16:28 | Technimatic — Hold on a While | | | |
+| | **18:41** | → Nu:Logic — Red Velvet | 32 | complementary quietTail | **perfect** |
+| 10 | 18:41 | Nu:Logic — Red Velvet | | | |
+| | **20:53** | → Technimatic — Moment to Moment | 32 | complementary quietTail | **perfect** |
+| 11 | 20:53 | Technimatic — Moment to Moment | | | |
+| | **24:23** | → Technimatic — Colour Me In | 8 | sequential quietTail | **perfect** |
+| 12 | 24:23 | Technimatic — Colour Me In | | | |
+| | **25:42** | → Sub Focus — Until The End | 8 | sequential quietTail | **perfect** |
+| 13 | 25:42 | Sub Focus — Until The End | | | |
+| | **28:38** | → Sub Focus — Tidal Wave | 8 | landing dropLanding | **good** |
+| 14 | 28:38 | Sub Focus — Tidal Wave | | | |
+| | **30:40** | → Pendulum — Streamline | 32 | landing dropLanding | **sweet** |
+| 15 | 30:40 | Pendulum — Streamline | | | |
+| | **35:26** | → Sub Focus — Vapourise | 16 | sequential quietTail | **good** |
+| 16 | 35:26 | Sub Focus — Vapourise | | | runs out |
+
+### Peak v3.5 diag (3.2.0 replan of this order)
+
+Plan `1f979410-…`, job `2131f3e5-…`, `output/renders/hour-peak-v3.5-diag.flac`, **40:35**. Same 16 titles, rates 1.0 @ 174. `render:check` exit 0. Render-time `choosePhraseShape` turned five planned landing/complementary joins into sequential (including the Breathe In → Hold on a While breather). Phrase wrap offsets up to 1725 ms. Ear-check pending — listen against v3.4, not v4.
 
 ## Why 12:08 was the hard one
 
@@ -143,9 +184,11 @@ Only 1→2 is a phrase mix. The rest are crossfades. That is a feature: liquid i
 
 ## Peak / Liquid hour v4
 
-Listen copies (do not overwrite keep-table files): `output/renders/hour-peak-v4.flac` and `output/renders/hour-liquid-v4.flac`. Ear-check is **pending** — judge joins against the v3.3 back-half bar (no “rough”, first 20 minutes of Peak as good as 20:26 onward; Liquid stays “nice” with more aligned joins).
+Listen copies (do not overwrite): `output/renders/hour-peak-v4.flac` and `output/renders/hour-liquid-v4.flac`.
 
-`dropAnchored: true` on Peak (mix-in at the incoming drop). `dropAnchored: false` on Liquid (intro-start windows). Analyzer **3.2.0**. Canonical keys were gated off, so both hours warn “missing key” on almost every track and `harmonicCoverage` is 0 / N.
+**Ear-check fail (2026-09-03).** Both hours are serious regressions vs v3.4: stutters on almost every transition, and at seemingly random points in the start of the mix. `render:check` being green does not catch this. Do not treat v4 as the direction. Quality bar is **`hour-peak-v3.4.flac`** (deep drop-anchored phrase mixes). Mixing v5: phrase-mix for Peak **and** Liquid, same depth recipe; fix alignment/landing/175-atempo before new hours.
+
+`dropAnchored: true` on Peak (mix-in at the incoming drop). `dropAnchored: false` on Liquid (intro-start windows — this is why Liquid v4 is 2:03). Analyzer **3.2.0**. Canonical keys were gated off, so both hours warn “missing key” on almost every track and `harmonicCoverage` is 0 / N.
 
 ### Peak v4 — structural
 
@@ -218,7 +261,8 @@ Plan `b85cd3fb-5540-48a0-ba80-554d94edf4b3`, job `9be8dba1-d7cf-4641-a04d-c4f7f3
 
 These showed up in ear-check or analysis dumps; they are not implemented:
 
-- **Drop hanging over a quiet intro.** Under The Waves → Chant and Let It Fall → Inemuri mix out of drops (0.33 / 0.41) into intros ~0.07. Do not sequential those blindly (Breathe In → Hold on a While is the same shape and was perfect). Prefer an earlier mix-out or a shorter phrase on the next Peak pass.
+- **Drop hanging over a quiet intro.** Under The Waves → Chant and Let It Fall → Inemuri mixed out of drops on v3.3 (0.33 / 0.41) into intros ~0.07. v3.4 phrase windows fixed Let It Fall → Inemuri (**very good**). Join 1 is still the hole.
+- **Too-short overlap / incoming ducked.** v3.4 join 1 (32-bar complementary `quietTail`): Chant is lowered and takes too long to kick in, so there is a moment of too much silence. Landing joins 3 and 6 feel a little slow in the same way. Prefer more overlap, or bring incoming mid/high in earlier — do not wait for the drop if that leaves a gap. Breathe In → Hold on a While was the same “slow” shape and was **perfect** as a breather; do not speed every join.
 - **Drum-aware mix-in.** Detect kit-on-from-bar-1 even when the section is labelled `intro` (onset density / mid energy in the first 8 bars of the incoming window). Sequential thresholds are a coarse proxy.
 - **32-bar policy.** Do not auto-extend to 32 bars solely because the intro is long if that intro is already a kit. Consider 16 bars + sequential instead.
 - **Bar-phase alignment on this crate.** Downbeat v2 put accepted-grid p50 at **1.0**, so Peak v4 is `alignmentMode: phrase` on every join. Liquid v4 still has five phrase-mix residuals 100–160 ms (sparse onsets / interludes).

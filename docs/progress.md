@@ -1,5 +1,15 @@
 # Progress
 
+## Mixing v5 — v3.4-depth (2026-09-03)
+
+Quality bar: `output/renders/hour-peak-v3.4.flac`. Both v4 hours are ear-check **fails** (stutters). Plan: `docs/plans/mixing-v5-handover.md`.
+
+### WP0 shipped
+
+Documented the v4 stutter fail. Clone-replan of v3.4 order `5c5121fb-…` on analyzer **3.2.0**: plan `1f979410-cdaa-4b0e-b7db-67a373617a00`, job `2131f3e5-a7e2-4150-a9cb-0d5c19e9f698`, copy `output/renders/hour-peak-v3.5-diag.flac` (sha256 `67cbc1b9…`). Duration **2435509** ms (~40:35; plan 2438398). Rates **≈ 1.0** at **174**. `render:check` exit **0**, residuals 0, 13/15 `phrase` + 2 `bar`. Do not overwrite v3.4.
+
+Render warnings show `choosePhraseShape` overwrote planned landing/complementary with **sequential** on Under The Waves → Chant, Story Begin → Let It Fall, Inemuri → Calling for a Sign, Calling for a Sign → Dreamweaver, and Breathe In → Hold on a While. Phrase offsets include **1725 ms** (joins 4 and 9). WP1–WP3 still required: this isolate says 175-atempo is not why the v3.4 *order* would stutter on 3.2.0 — landing wipe + post-plan phrase wrap remain. Agent cannot ear-check the diag file.
+
 ## Mixing v4 — baseline (2026-09-03)
 
 Live crate after the v3 whole-library pass. Docs that still say **583** tracks are stale; `library:stats` now reports **431** (430 FLAC, 1 MP3, 34.5 h). The drop is a later library/dedupe pass, not an analysis regression.
@@ -43,7 +53,7 @@ Plan file, crate-count refresh (431), manifest join fields (`barCount`, `phraseS
 
 Phrase-anchored windows (`packages/catalog/src/planning/windows.ts`): drop-anchored mix-in, phrase-boundary mix-out, `exitKind` `quietTail` / `dropLanding`, new `landing` shape, sequential mid/high start 2 bars before mid-phrase, no +1-period alignment nudge, `alignmentMode: phrase` when both drops sit on 8-bar multiples, `:curve=hsin` on partial ramps.
 
-Peak v3.4: plan `5c5121fb-…`, job `ed06f32f-…`, `output/renders/hour-peak-v3.4.flac`. `render:check` v2 exit **0** (residuals 0; gain-corrected LUFS within 3 LU). Duration **2214820** ms. Ear-check pending in `docs/mixing-lessons.md`.
+Peak v3.4: plan `5c5121fb-…`, job `ed06f32f-…`, `output/renders/hour-peak-v3.4.flac`. `render:check` v2 exit **0** (residuals 0; gain-corrected LUFS within 3 LU). Duration **2214820** ms. Ear-check in `docs/mixing-lessons.md`: join 1 too slow / hole; 2–4 liked / very good; Technimatic run perfect. Canonical copy stays v3.3.
 
 | # | Join | Bars | Shape | Exit | Residual | Arr. step LU | Mode |
 | --- | --- | ---: | --- | --- | ---: | ---: | --- |
