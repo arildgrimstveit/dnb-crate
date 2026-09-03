@@ -16,6 +16,7 @@ import {
   playbackRateForBpm,
   defaultLowHandoverBar,
   snapToNearestBeat,
+  choosePhraseShape,
   type CuePoint,
   type SetPlanEntry,
   type Track,
@@ -224,6 +225,10 @@ export function chooseTransition(
         rampMs: DEFAULT_BASS_SWAP_RAMP_MS,
         lowAttenuationDb: DEFAULT_BASS_LOW_ATTENUATION_DB,
         midDipDb: DEFAULT_MID_DIP_DB,
+        phraseShape: choosePhraseShape(
+          sectionAt(outgoing.analysis?.sections ?? [], outgoing.analysis?.mixOutMs ?? null),
+          sectionAt(incoming.analysis?.sections ?? [], incoming.analysis?.mixInMs ?? null),
+        ),
       },
     },
     outgoingRate,

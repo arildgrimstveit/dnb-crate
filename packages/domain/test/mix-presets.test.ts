@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  choosePhraseShape,
   clampMixPresetParams,
   expandPreset,
   isMonotoneBand,
@@ -14,11 +15,42 @@ describe("mix presets", () => {
     const incoming16 = sixteen.find((ev) => ev.target === "incoming_low");
     expect(incoming16?.atBar).toBe(12);
     expect(sixteen.some((ev) => ev.toDb === -24 || ev.fromDb === -24)).toBe(true);
+    expect(sixteen.find((ev) => ev.target === "outgoing_mid")?.atBar).toBe(0);
+    expect(sixteen.find((ev) => ev.target === "outgoing_mid")?.durationBars).toBe(16);
+    expect(sixteen.find((ev) => ev.target === "incoming_mid")?.durationBars).toBe(16);
     const thirtyTwo = expandPreset("phrase_mix", null, 32, BAR_MS);
     const incoming32 = thirtyTwo.find((ev) => ev.target === "incoming_low");
     expect(incoming32?.atBar).toBe(24);
+    expect(thirtyTwo.find((ev) => ev.target === "outgoing_high")?.durationBars).toBe(32);
     expect(isMonotoneBand(sixteen)).toBe(true);
     expect(isMonotoneBand(thirtyTwo)).toBe(true);
+  });
+
+  it("holds incoming drums until mid-phrase on a sequential phrase_mix", () => {
+    const thirtyTwo = expandPreset("phrase_mix", { phraseShape: "sequential" }, 32, BAR_MS);
+    expect(thirtyTwo.find((ev) => ev.target === "incoming_mid")?.atBar).toBe(16);
+    expect(thirtyTwo.find((ev) => ev.target === "incoming_mid")?.durationBars).toBe(16);
+    expect(thirtyTwo.find((ev) => ev.target === "outgoing_mid")?.atBar).toBe(0);
+    expect(thirtyTwo.find((ev) => ev.target === "outgoing_mid")?.durationBars).toBe(16);
+    expect(isMonotoneBand(thirtyTwo)).toBe(true);
+  });
+
+  it("uses sequential drums only for a hot drop into a drum-heavy intro", () => {
+    expect(
+      choosePhraseShape({ type: "drop", sectionEnergy: 0.334 }, { type: "intro", sectionEnergy: 0.217 }),
+    ).toBe("sequential");
+    expect(
+      choosePhraseShape({ type: "drop", sectionEnergy: 0.255 }, { type: "intro", sectionEnergy: 0.204 }),
+    ).toBe("complementary");
+    expect(
+      choosePhraseShape(
+        { type: "breakdown", sectionEnergy: 0.096 },
+        { type: "intro", sectionEnergy: 0.159 },
+      ),
+    ).toBe("complementary");
+    expect(
+      choosePhraseShape({ type: "drop", sectionEnergy: 0.334 }, { type: "intro", sectionEnergy: 0.078 }),
+    ).toBe("complementary");
   });
 
   it("swaps bass at bar 8 of 16 and 16 of 32", () => {

@@ -159,7 +159,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `start_set_render`
 
-- Input: `{ setPlanId, outputFormat?: "wav", edgeFadeMs?, allowLowConfidence?, allowExcessiveTempo? }`
+- Input: `{ setPlanId, outputFormat?: "flac", edgeFadeMs?, allowLowConfidence?, allowExcessiveTempo? }`
 - Returns immediately with a job id. Poll `get_render_status`.
 - Errors: `SET_PLAN_NOT_FOUND`, `INVALID_SET_PLAN`, `FFMPEG_UNAVAILABLE`
 

@@ -21,7 +21,7 @@ Status: ready to start. Nothing in this plan is committed yet; the Stage 5 work 
 **Environment notes**
 
 - Windows, Node 24, FFmpeg on PATH. `pnpm` is not on PATH; use `node ./node_modules/vitest/vitest.mjs run` and `node ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json --pretty false`. `corepack pnpm exec tsx <file>` works for scripts.
-- Private crate under a gitignored music folder (583 tracks). Local DB `data/dnb-crate.sqlite`, config `dnb-crate.config.json`, output `output/` — all gitignored. Never commit `data/`, `output/`, config, or audio.
+- Private crate under a gitignored music folder (583 tracks). Local DB `data/dnb-crate.sqlite`, config `dnb-crate.config.json`, output `output/` — all gitignored. Never commit `data/`, `output/`, config, audio, or library paths.
 - Gate set: 14 tracks with `bpmSource: "published"` (IDs in §8). 9 of them are published at 174; the other 5 are 124 / 125 / 140 / 159 / 159 / 176.
 - Baseline before this plan: `vitest` 17 files / 70 tests green; `tsc --noEmit` clean; DSP hits 6/9 published-174 tracks exactly; drop previews in `output/previews/`.
 

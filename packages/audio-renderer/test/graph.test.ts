@@ -97,6 +97,25 @@ describe("filter graph", () => {
     expect(filter).not.toContain(".wav");
   });
 
+  it("keeps the outgoing prefix out of the 3-band split", () => {
+    const filter = buildPhraseMixFilter({
+      trims: [
+        { startSec: 10, endSec: 30, gainDb: 0, playbackRate: 1 },
+        { startSec: 0, endSec: 20, gainDb: 0, playbackRate: 1 },
+      ],
+      overlapSeconds: [8],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+      hasAfadeUnity: true,
+    });
+    expect(filter).toContain("[s0]atrim=start=0:end=12.000000");
+    expect(filter).toContain("[tail]asplit=3");
+    expect(filter).toContain("concat=n=2:v=0:a=1");
+    expect(filter).not.toContain("[s0]asplit=3");
+    expect(filter).toContain("[mixed]alimiter=");
+    expect(filter).not.toContain("[joined]alimiter=");
+  });
+
   it("builds a phrase-mix graph as a 3-band split", () => {
     const filter = buildPhraseMixFilter({
       trims: [

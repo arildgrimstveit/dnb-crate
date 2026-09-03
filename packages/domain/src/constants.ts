@@ -1,6 +1,8 @@
 export const APP_NAME = "dnb-crate-mcp";
 export const APP_VERSION = "0.5.0";
-export const RENDERER_VERSION = "6.0.0";
+export const RENDERER_VERSION = "6.5.0";
+export const DEFAULT_RENDER_OUTPUT_FORMAT = "flac" as const;
+export const DEFAULT_RENDER_OUTPUT_EXTENSION = ".flac";
 /** @deprecated Prefer DSP_ANALYZER_NAME; kept for migrated Stage 4 rows. */
 export const ANALYZER_NAME = "dnb-crate-envelope";
 export const ANALYZER_VERSION = "1.0.0";

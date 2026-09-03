@@ -3,8 +3,13 @@ import type {
   RenderJobKind,
   RenderJobStatus,
   RenderManifestV1,
+  RenderOutputFormat,
 } from "@dnb-crate/domain";
-import { DomainError, RENDER_JOB_LIST_LIMIT_MAX } from "@dnb-crate/domain";
+import {
+  DEFAULT_RENDER_OUTPUT_FORMAT,
+  DomainError,
+  RENDER_JOB_LIST_LIMIT_MAX,
+} from "@dnb-crate/domain";
 
 import type { SqliteDatabase } from "./db.ts";
 import { decodeCursor, encodeCursor } from "./pagination.ts";
@@ -15,7 +20,7 @@ type JobRow = {
   set_plan_id: string;
   status: RenderJobStatus;
   progress: number;
-  output_format: "wav";
+  output_format: RenderOutputFormat;
   output_relpath: string | null;
   output_checksum: string | null;
   transition_id: string | null;
@@ -103,12 +108,13 @@ export class RenderJobRepository {
         `INSERT INTO render_jobs (
           id, kind, set_plan_id, status, progress, output_format, transition_id, cache_key,
           params_json, warnings_json, created_at
-        ) VALUES (?, ?, ?, 'queued', 0, 'wav', ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.id,
         input.kind,
         input.setPlanId,
+        DEFAULT_RENDER_OUTPUT_FORMAT,
         input.transitionId ?? null,
         input.cacheKey ?? null,
         JSON.stringify(input.params ?? {}),
@@ -133,12 +139,13 @@ export class RenderJobRepository {
           id, kind, set_plan_id, status, progress, output_format, output_relpath, output_checksum,
           transition_id, cache_key, manifest_json, warnings_json, progress_message,
           created_at, started_at, completed_at
-        ) VALUES (?, ?, ?, 'succeeded', 1, 'wav', ?, ?, ?, ?, ?, ?, 'cache hit', ?, ?, ?)`,
+        ) VALUES (?, ?, ?, 'succeeded', 1, ?, ?, ?, ?, ?, ?, ?, 'cache hit', ?, ?, ?)`,
       )
       .run(
         input.id,
         input.kind,
         input.setPlanId,
+        input.source.outputFormat,
         input.source.outputRootRelativePath,
         input.source.outputChecksumSha256,
         input.transitionId,
@@ -219,12 +226,13 @@ export class RenderJobRepository {
     this.db
       .prepare(
         `UPDATE render_jobs SET
-          status = 'succeeded', progress = 1, output_relpath = ?, output_checksum = ?,
-          manifest_json = ?, warnings_json = ?, progress_message = 'complete',
+          status = 'succeeded', progress = 1, output_format = ?, output_relpath = ?,
+          output_checksum = ?, manifest_json = ?, warnings_json = ?, progress_message = 'complete',
           error_code = NULL, error_message = NULL, retryable = 0, completed_at = ?
          WHERE id = ?`,
       )
       .run(
+        input.manifest.outputFormat,
         input.outputRelpath,
         input.checksum,
         JSON.stringify(input.manifest),

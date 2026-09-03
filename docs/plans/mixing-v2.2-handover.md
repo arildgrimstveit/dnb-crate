@@ -20,7 +20,7 @@ Status: ready to start. Builds on `main` at `ed58f94` (analysis v2.1). Two doc f
 
 - Windows, Node 24, FFmpeg `N-125875-g5d4d3bdc61-20260731` on PATH. Verified locally: `afade` has `silence`/`unity` gains (partial fades), `volume` has `eval=frame`, `highshelf`/`lowshelf`/`equalizer`/`bandpass`/`silenceremove`/`astats` exist. `-filter_complex_script` is absent on this build (fallback exists).
 - `pnpm` is not on PATH. Use `node ./node_modules/vitest/vitest.mjs run`, `node ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json --pretty false`, `node ./node_modules/tsx/dist/cli.mjs <file.ts|.mts>`.
-- Private crate under a gitignored music folder (583 tracks). `data/`, `output/`, `dnb-crate.config.json`, audio are gitignored. Never commit them. Do not edit `.cursor/plans/*`.
+- Private crate under a gitignored music folder (583 tracks). `data/`, `output/`, `dnb-crate.config.json`, audio are gitignored. Never commit them or library paths. Do not edit `.cursor/plans/*`.
 - Temp scripts: keep them out of the repo (or delete before finishing). No `tmp-*.mts` may be left in the tree.
 
 **Reference artifacts (keep, never overwrite)**

@@ -38,8 +38,15 @@ Coverage stats, analysis scopes, descriptor pack 3.0.0, MusicBrainz/Deezer/Acous
 
 ### Hours
 
-- **Liquid hour v3** plan `c93a9f56-…` — 12 tracks, **12** outside the original 14, **11** canonical artists. Brief: exclude idm/ambient/rock; `melodicness.min` **0.12** (crate p80; 0.55 matches zero rows); energy 0.35–0.7; arc 4 → 7 → 5; seed 3. Job `abeb7577-…`, `render:check` exit **0**, `interiorSilence: []`, duration **4001988 ms** (~66:42, +402 s vs target). Copy `output/renders/hour-liquid-v3.wav` (sha256 `abb8021e…`). Did not overwrite older hours.
-- **Peak hour v3** plan `5cb141aa-…` — 16 tracks, **15** outside the original 14 (Tidal Wave is the one overlap), **10** canonical artists. Brief: energy ≥ 0.7, danceability ≥ 0.6, arc 6 → 9 → 7, seed **6** (seed 5 failed `render:check` on a 2 s quiet hole). Job `2eff4a40-…`, `render:check` exit **0**, `interiorSilence: []`, duration **3583076 ms** (~59:43). Copy `output/renders/hour-peak-v3.wav` (sha256 `ce578306…`). First seed-5 render also needed a mix-wide true-peak limiter pass (aligned overlaps hit +1.5 dBTP). Did not overwrite older hours.
+Join-by-join ear-check, keep-list, and mix rules for later hours: **`docs/mixing-lessons.md`**.
+
+- **Liquid hour v3** plan `c93a9f56-…` — 12 tracks, **12** outside the original 14, **11** canonical artists. Brief: exclude idm/ambient/rock; `melodicness.min` **0.12** (crate p80; 0.55 matches zero rows); energy 0.35–0.7; arc 4 → 7 → 5; seed 3. Job `abeb7577-…`, `render:check` exit **0**, `interiorSilence: []`, duration **4001988 ms** (~66:42, +402 s vs target). Copy `output/renders/hour-liquid-v3.wav` (sha256 `abb8021e…`). Did not overwrite older hours. **Ear-check pass: all transitions nice.** Almost every join is a crossfade (only 1→2 is phrase mix).
+- **Peak hour v3** plan `5cb141aa-…` — 16 tracks, **15** outside the original 14 (Tidal Wave is the one overlap), **10** canonical artists. Brief: energy ≥ 0.7, danceability ≥ 0.6, arc 6 → 9 → 7, seed **6** (seed 5 failed `render:check` on a 2 s quiet hole). Duration **3583076 ms** (~59:43) on every Peak copy. Did not overwrite older hours.
+  - 6.0.0 job `2eff4a40-…` → `hour-peak-v3.wav` (sha256 `ce578306…`). Ear-check fail: pairwise phrase-mix re-filtered the mix so far (LUFS **−17.9**).
+  - 6.1.0 job `49a99d77-…` → `hour-peak-v3.1.wav` (sha256 `3ce67316…`), LUFS **−14.9**, TP **−1.2**. First detailed listen (kit clash at 12:08, sudden drops, Technimatic run perfect, later 32-bar squash).
+  - 6.2.0 publishes FLAC; older liked hours stay WAV.
+  - 6.3.0 job `70135278-…` → `hour-peak-v3.2.flac` (sha256 `44088df9…`), LUFS **−14**, TP **−2.5**. Complementary mid/high: sudden drops and compression fixed; 12:08 still two kits.
+  - **6.4.0 job `558bf742-…` → `hour-peak-v3.3.flac`. Sequential drums on Story Begin → Let It Fall only. User accepted this copy.** Mix tags remuxed in 6.5.0 (audio unchanged; sha256 `72a6dd84…`).
 
 ## Mixing v2.2 (2026-09-03)
 

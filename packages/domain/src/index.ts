@@ -23,6 +23,8 @@ export {
   DEFAULT_LOUDNESS_TARGET_LUFS,
   DEFAULT_TRUE_PEAK_CEILING_DB,
   DEFAULT_RENDER_SAMPLE_RATE_HZ,
+  DEFAULT_RENDER_OUTPUT_FORMAT,
+  DEFAULT_RENDER_OUTPUT_EXTENSION,
   DEFAULT_RENDER_CHANNELS,
   DEFAULT_RENDER_WORKER_LIMIT,
   DEFAULT_PREVIEW_WINDOW_MS,
@@ -146,12 +148,17 @@ export {
   resolveCanonicalKey,
 } from "./analysis.ts";
 export {
+  choosePhraseShape,
   clampMixPresetParams,
   defaultLowHandoverBar,
   expandPreset,
   isMonotoneBand,
+  sectionAtMs,
+  SEQUENTIAL_INCOMING_HEAD_ENERGY,
+  SEQUENTIAL_OUTGOING_DROP_ENERGY,
   type MixPresetParams,
   type MixPresetType,
+  type PhraseShape,
 } from "./mix-presets.ts";
 export {
   analysisJobSchema,

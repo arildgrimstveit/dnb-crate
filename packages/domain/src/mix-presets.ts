@@ -8,16 +8,21 @@ import {
   MIN_BASS_CROSSOVER_HZ,
   MIN_BASS_SWAP_RAMP_MS,
 } from "./constants.ts";
-import { clampBassSwapParams, type AutomationEvent, type BassSwapParams } from "./analysis.ts";
+import { clampBassSwapParams, type AutomationEvent, type BassSwapParams, type TrackSection } from "./analysis.ts";
 import type { TransitionType } from "./planning.ts";
 
 export type MixPresetType = "crossfade" | "phrase_mix" | "bass_swap";
+export type PhraseShape = "complementary" | "sequential";
+
+export const SEQUENTIAL_INCOMING_HEAD_ENERGY = 0.15;
+export const SEQUENTIAL_OUTGOING_DROP_ENERGY = 0.3;
 
 export type MixPresetParams = BassSwapParams & {
   barCount: 16 | 32;
   targetBpm: number | null;
   lowHandoverBar: number;
   midDipDb: number;
+  phraseShape: PhraseShape;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -61,7 +66,41 @@ export function clampMixPresetParams(
     ),
     midDipDb: clamp(input?.midDipDb ?? bass.midDipDb ?? DEFAULT_MID_DIP_DB, -24, 0),
     lowHandoverBar,
+    phraseShape: input?.phraseShape === "sequential" ? "sequential" : "complementary",
   };
+}
+
+export function sectionAtMs(
+  sections: TrackSection[],
+  atMs: number | null | undefined,
+): TrackSection | undefined {
+  if (atMs == null || !Number.isFinite(atMs)) {
+    return sections[0];
+  }
+  return (
+    sections.find((section) => atMs >= section.startMs && atMs < section.endMs) ??
+    sections.find((section) => atMs >= section.startMs && atMs <= section.endMs)
+  );
+}
+
+/**
+ * Drop outro into a drum-heavy intro: do not layer kits. Incoming mid/high wait until
+ * the outgoing kit has faded. Quiet intros and non-drop tails stay complementary.
+ */
+export function choosePhraseShape(
+  outgoing: Pick<TrackSection, "type" | "sectionEnergy"> | null | undefined,
+  incoming: Pick<TrackSection, "type" | "sectionEnergy"> | null | undefined,
+): PhraseShape {
+  if (
+    incoming != null &&
+    incoming.sectionEnergy >= SEQUENTIAL_INCOMING_HEAD_ENERGY &&
+    outgoing != null &&
+    outgoing.type === "drop" &&
+    outgoing.sectionEnergy >= SEQUENTIAL_OUTGOING_DROP_ENERGY
+  ) {
+    return "sequential";
+  }
+  return "complementary";
 }
 
 function event(
@@ -87,18 +126,20 @@ function event(
 }
 
 function phraseEvents(params: MixPresetParams, barMs: number): AutomationEvent[] {
-  const scale = params.barCount / 16;
-  const fadeInBars = 8 * scale;
   const handover = params.lowHandoverBar;
   const end = params.barCount;
+  const half = end / 2;
+  const incomingStart = params.phraseShape === "sequential" ? half : 0;
+  const incomingBars = params.phraseShape === "sequential" ? half : end;
+  const outgoingBars = params.phraseShape === "sequential" ? half : end;
   return [
-    event("incoming_mid", 0, fadeInBars, null, 0, barMs),
-    event("incoming_high", 0, fadeInBars, null, 0, barMs),
+    event("incoming_mid", incomingStart, incomingBars, null, 0, barMs),
+    event("incoming_high", incomingStart, incomingBars, null, 0, barMs),
     event("incoming_low", handover, 1, null, 0, barMs),
     event("outgoing_low", handover, 1, 0, params.lowAttenuationDb, barMs),
     event("outgoing_low", end, 0, params.lowAttenuationDb, null, barMs, Math.max(params.rampMs, 1)),
-    event("outgoing_mid", fadeInBars, fadeInBars, 0, null, barMs),
-    event("outgoing_high", fadeInBars, fadeInBars, 0, null, barMs),
+    event("outgoing_mid", 0, outgoingBars, 0, null, barMs),
+    event("outgoing_high", 0, outgoingBars, 0, null, barMs),
   ];
 }
 

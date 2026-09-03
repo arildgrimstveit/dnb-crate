@@ -33,6 +33,8 @@ export type FilterGraphOptions = {
   transitions?: MixTransitionSpec[];
   hasAfadeUnity?: boolean;
   warnings?: string[];
+  /** When false, skip the mix-wide alimiter (used for intermediate pairwise joins). */
+  applyLimiter?: boolean;
 };
 
 export function limiterAmplitudeFromCeilingDb(ceilingDb: number): number {
@@ -62,13 +64,18 @@ function segmentPrep(index: number, trim: FilterTrim, sampleRateHz: number): str
   return `[${index}:a]aformat=sample_fmts=fltp:sample_rates=${sampleRateHz}:channel_layouts=stereo,atrim=start=${trim.startSec}:end=${trim.endSec},asetpts=PTS-STARTPTS,volume=${gain}dB${atempoSuffix(trim.playbackRate)}[s${index}]`;
 }
 
-function limiterChain(
+function limiterFilter(limiterAmplitude: number, applyLimiter: boolean): string {
+  return applyLimiter
+    ? `alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50`
+    : "anull";
+}
+
+function edgeFadeChain(
   trims: FilterTrim[],
   overlapSeconds: number[],
-  limiterAmplitude: number,
   edgeFadeSeconds?: { fadeIn: number; fadeOut: number },
 ): string {
-  const post: string[] = [`alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50`];
+  const post: string[] = [];
   const fadeIn = edgeFadeSeconds?.fadeIn ?? 0;
   const fadeOut = edgeFadeSeconds?.fadeOut ?? 0;
   if (fadeIn > 0) {
@@ -78,7 +85,34 @@ function limiterChain(
     const durationSec = expectedDurationMs(trims, overlapSeconds) / 1000;
     post.push(`afade=t=out:st=${Math.max(0, durationSec - fadeOut)}:d=${fadeOut}`);
   }
-  return post.join(",");
+  return post.length > 0 ? post.join(",") : "anull";
+}
+
+function limiterChain(
+  trims: FilterTrim[],
+  overlapSeconds: number[],
+  limiterAmplitude: number,
+  edgeFadeSeconds?: { fadeIn: number; fadeOut: number },
+  applyLimiter = true,
+): string {
+  const lim = limiterFilter(limiterAmplitude, applyLimiter);
+  const fades = edgeFadeChain(trims, overlapSeconds, edgeFadeSeconds);
+  if (lim === "anull") {
+    return fades;
+  }
+  if (fades === "anull") {
+    return lim;
+  }
+  return `${lim},${fades}`;
+}
+
+/** Linkwitz–Riley 4th-order: two cascaded 2-pole Butterworths at the same cutoff. */
+function lr4Lowpass(hz: number): string {
+  return `lowpass=f=${hz},lowpass=f=${hz}`;
+}
+
+function lr4Highpass(hz: number): string {
+  return `highpass=f=${hz},highpass=f=${hz}`;
 }
 
 function assertGraphShape(trims: FilterTrim[], overlapSeconds: number[]): void {
@@ -114,7 +148,7 @@ export function buildAcrossfadeFilter(options: FilterGraphOptions): string {
   }
 
   parts.push(
-    `[${current}]${limiterChain(trims, overlapSeconds, limiterAmplitude, edgeFadeSeconds)}[out]`,
+    `[${current}]${limiterChain(trims, overlapSeconds, limiterAmplitude, edgeFadeSeconds, options.applyLimiter)}[out]`,
   );
   return parts.join(";");
 }
@@ -153,6 +187,8 @@ function compileBandAfades(
     }
     const st = Math.max(0, originSec + (ev.atMs ?? 0) / 1000);
     const d = Math.max((ev.durationMs ?? 0) / 1000, 0.001);
+    const fullRange = fromG <= 1e-9 || toG <= 1e-9;
+    const curve = fullRange ? ":curve=hsin" : "";
     if (toG < fromG - 1e-9) {
       const silence = fromG <= 1e-9 ? 0 : toG / fromG;
       const extra =
@@ -161,7 +197,7 @@ function compileBandAfades(
           : hasUnity
             ? ":unity=1:silence=0"
             : "";
-      parts.push(`afade=t=out:st=${st.toFixed(3)}:d=${d.toFixed(3)}${extra}`);
+      parts.push(`afade=t=out:st=${st.toFixed(3)}:d=${d.toFixed(3)}${extra}${curve}`);
     } else if (toG > fromG + 1e-9) {
       const silence = toG <= 1e-9 ? 0 : fromG / toG;
       const extra =
@@ -170,7 +206,7 @@ function compileBandAfades(
           : hasUnity
             ? ":silence=0:unity=1"
             : "";
-      parts.push(`afade=t=in:st=${st.toFixed(3)}:d=${d.toFixed(3)}${extra}`);
+      parts.push(`afade=t=in:st=${st.toFixed(3)}:d=${d.toFixed(3)}${extra}${curve}`);
     }
   }
   if (
@@ -203,7 +239,9 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
   );
   const t0 = outputDurationSec(trims[0]!);
   const overlap = overlapSeconds[0]!;
-  const delayMs = Math.max(0, Math.round((t0 - overlap) * 1000));
+  const prefixSec = t0 - overlap;
+  const isolatePrefix = prefixSec > 0.001;
+  const delayMs = isolatePrefix ? 0 : Math.max(0, Math.round(prefixSec * 1000));
   const barMs =
     params.targetBpm != null && params.targetBpm > 0
       ? (4 * 60_000) / params.targetBpm
@@ -211,7 +249,7 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
   const events = expandPreset(type, params, barCount, barMs);
   const hasUnity = options.hasAfadeUnity !== false;
   const warnings = options.warnings ?? [];
-  const outgoingOrigin = Math.max(0, t0 - overlap);
+  const outgoingOrigin = isolatePrefix ? 0 : Math.max(0, prefixSec);
   const byTarget = (target: AutomationEvent["target"]) =>
     events.filter((ev) => ev.target === target);
   const incomingDelay = delayMs > 0 ? `,adelay=${delayMs}|${delayMs}` : "";
@@ -237,17 +275,25 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
     }
     return `[${src}]${chain}[${out}]`;
   };
+  const prefixLabel = isolatePrefix ? prefixSec.toFixed(6) : "";
+  const outgoingSplit = isolatePrefix ? "tail" : "s0";
   const parts = [
     segmentPrep(0, trims[0]!, sampleRateHz),
     segmentPrep(1, trims[1]!, sampleRateHz),
-    `[s0]asplit=3[oRawL][oRawM][oRawH]`,
-    `[oRawL]lowpass=f=${lowHz}[oL0]`,
-    `[oRawM]highpass=f=${lowHz},lowpass=f=${highHz}[oM0]`,
-    `[oRawH]highpass=f=${highHz}[oH0]`,
+    ...(isolatePrefix
+      ? [
+          `[s0]atrim=start=0:end=${prefixLabel},asetpts=PTS-STARTPTS[prefix]`,
+          `[s0]atrim=start=${prefixLabel},asetpts=PTS-STARTPTS[tail]`,
+        ]
+      : []),
+    `[${outgoingSplit}]asplit=3[oRawL][oRawM][oRawH]`,
+    `[oRawL]${lr4Lowpass(lowHz)}[oL0]`,
+    `[oRawM]${lr4Highpass(lowHz)},${lr4Lowpass(highHz)}[oM0]`,
+    `[oRawH]${lr4Highpass(highHz)}[oH0]`,
     `[s1]asplit=3[iRawL][iRawM][iRawH]`,
-    `[iRawL]lowpass=f=${lowHz}[iL0]`,
-    `[iRawM]highpass=f=${lowHz},lowpass=f=${highHz}[iM0]`,
-    `[iRawH]highpass=f=${highHz}[iH0]`,
+    `[iRawL]${lr4Lowpass(lowHz)}[iL0]`,
+    `[iRawM]${lr4Highpass(lowHz)},${lr4Lowpass(highHz)}[iM0]`,
+    `[iRawH]${lr4Highpass(highHz)}[iH0]`,
     withFade("oL0", oL, "oL"),
     withFade("oM0", oM, "oM"),
     withFade("oH0", oH, "oH"),
@@ -255,7 +301,12 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
     withFade("iM0", iM, "iM"),
     withFade("iH0", iH, "iH"),
     `[oL][oM][oH][iL][iM][iH]amix=inputs=6:normalize=0:dropout_transition=0[mixed]`,
-    `[mixed]${limiterChain(trims, overlapSeconds, limiterAmplitude, edgeFadeSeconds)}[out]`,
+    isolatePrefix
+      ? options.applyLimiter !== false
+        ? `[mixed]${limiterFilter(limiterAmplitude, true)}[mixedLim];[prefix][mixedLim]concat=n=2:v=0:a=1[joined]`
+        : `[prefix][mixed]concat=n=2:v=0:a=1[joined]`
+      : `[mixed]${limiterFilter(limiterAmplitude, options.applyLimiter !== false)}[joined]`,
+    `[joined]${edgeFadeChain(trims, overlapSeconds, edgeFadeSeconds)}[out]`,
   ];
   return parts.join(";");
 }

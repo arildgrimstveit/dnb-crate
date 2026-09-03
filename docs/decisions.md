@@ -1,5 +1,15 @@
 # Decisions
 
+## 2026-09-03 — Mix FLACs carry the tracklist, not the first song
+
+FFmpeg copies tags from the first `-i` unless told not to, so hour renders were showing the opening track's title/artist. Published FLACs now strip source tags (`-map_metadata -1`) and write mix-level Vorbis comments: plan name as title/album, artist `dnb-crate`, the full numbered tracklist in `comment`/`description`, and an embedded `CUESHEET` for per-track markers (FFmpeg does not persist native chapters on FLAC). Cue-snippet WAVs under `previews/` are stripped only. Renderer **6.5.0**.
+
+## 2026-09-03 — Ear-check is the mix spec
+
+Automated `render:check` only catches silence and timestamps. What sounded good or bad on Liquid v3, Peak v3.1–v3.3, and the v2.2 hour is written in **`docs/mixing-lessons.md`**. That file is the keep-list, join-by-join Peak table, and the rules for later hours (one kit at a time, no halfway volume cliff, no limiter on the mix so far, do not 32-bar a drum intro). Session rows stay in `docs/manual-test-log.md`.
+
+Accepted Peak copy: `output/renders/hour-peak-v3.3.flac`. Accepted Liquid copy: `output/renders/hour-liquid-v3.wav`. Do not overwrite them.
+
 ## 2026-09-03 — Metadata enrichment is network opt-in
 
 MusicBrainz, Deezer, and AcoustID run only when `enrichment.enabled` is true. Tests never hit the network (injectable `HttpClient`). The AcoustID key and contact string never appear in logs, tool results, `get_server_status`, reports, cache file names, or docs. `get_server_status` reports only `{ enabled, musicbrainz, deezer, acoustidConfigured }`. Logged URLs redact `client=`. Example config keeps `apiKey` empty.
@@ -26,9 +36,31 @@ FFmpeg nightly writes a bare URL-safe Base64 chromaprint (`-`/`_`) on stdout, no
 
 The 583-track 3.0.0 pass clustered several sliders (energy p90−p10 = 0.228, acousticness 0.236, melodicness 0.113). Energy and acousticness got one output stretch dated 2026-09-03 so those spreads exceed 0.3. Melodicness stayed on `2.2·keyConfidence`: chromaClarity ranks white-noise fixtures above most crate tracks, and key confidence on this crate is still ~0.001–0.05 (calibration is deferred). A liquid cutoff of 0.55 therefore matches zero rows; the liquid hour brief uses crate p80 (`melodicness.min` 0.12). Mood-preset words keep the designed 0.55 scale. Sub-bass and brightness are raw spectral ratios and were not remapped.
 
+## 2026-09-03 — Sequential drums on drop-into-hot-intro
+
+Complementary phrase-mix still stacked kits on Let The Story Begin → Let It Fall: mix-out is a drop (section energy 0.33) and Let It Fall’s intro already has drums (0.22) from bar one. Renderer **6.4.0** holds incoming mid/high until mid-phrase on that pattern only (`incoming ≥ 0.15` and outgoing drop `≥ 0.3`). Other Peak joins stay complementary.
+
+## 2026-09-03 — Phrase-mix mid/high are complementary
+
+Peak hour v3.1 (`hour-peak-v3.1.wav`) showed stacked drum kits on hot joins (Let The Story Begin → Let It Fall, 32 bars) and a sudden outgoing drop at the halfway mark (Let It Fall → Inemuri). Later 32-bar overlaps also felt limited: two full kits plus `amix=6` hit the ceiling.
+
+Renderer **6.3.0** fades outgoing and incoming mid/high across the **whole** phrase (`hsin`), so hats/snares hand over instead of layering. Lows still swap at bar 12 / 24. Band splits are Linkwitz–Riley 4th-order. The graph `alimiter` sits on the overlap tail only, not the accumulated prefix. Liked hours stay untouched.
+
+## 2026-09-03 — Published renders are 24-bit FLAC
+
+The mixer still works in 48 kHz stereo `pcm_s24le`. Intermediate pairwise files, loudness, true-peak, and `render:check` stay on that PCM. The last write encodes the finished mix to FLAC (`-compression_level 8`) so the file is lossless and typically about half a WAV. Older jobs may still point at `.wav`. Cue-snippet previews under `previews/` stay WAV.
+
+Renderer **6.2.0**.
+
+## 2026-09-03 — Pairwise phrase-mix must not re-filter the mix so far
+
+Peak hour v3 (`hour-peak-v3.wav`) chained 15 `phrase_mix` joins pairwise. Each step band-split and `alimiter`'d the **entire** accumulated mix, then a mix-wide `volume` + limiter cut another 1.6 dB. Integrated LUFS landed at **−17.9** (target −14) and the early tracks sounded wrong. Liquid stayed good because only its first join is a phrase mix.
+
+Renderer **6.1.0** isolates the 3-band graph to the overlap tail and concatenates the unprocessed prefix, skips the graph limiter on intermediate pairwise steps, and true-peak post-process tries limiter-only first. A mix-wide volume duck is only the fallback if true peak is still over the ceiling.
+
 ## 2026-09-03 — Mix-wide true-peak limiter when LUFS is already in range
 
-The first Peak hour v3 render failed because aligned overlaps measured **+1.5 dBTP** while integrated LUFS was already at target, so the existing LUFS-only attenuation never ran. `mix.ts` now applies a second `volume` + `alimiter` pass when true peak is more than 0.3 dB above the ceiling.
+The first Peak hour v3 render failed because aligned overlaps measured **+1.5 dBTP** while integrated LUFS was already at target, so the existing LUFS-only attenuation never ran. `mix.ts` now applies a second limiter pass when true peak is more than 0.3 dB above the ceiling. Do not pre-attenuate the whole hour by the peak excess.
 
 ## 2026-09-02 — `-filter_complex` fallback
 
@@ -70,7 +102,7 @@ File scans no longer overwrite BPM or key when `bpmSource` / `keySource` is `man
 
 ## 2026-08-31 — Stage 3 renderer and loudness
 
-WAV is the only output. Mixing uses FFmpeg `acrossfade` with `hsin` curves (equal-power) at 48 kHz stereo `pcm_s24le`. Argument arrays only; filter graphs use stream labels, never source paths.
+Mixing uses FFmpeg `acrossfade` with `hsin` curves (equal-power) at 48 kHz stereo `pcm_s24le`. The published file is 24-bit FLAC (see the 2026-09-03 FLAC decision). Argument arrays only; filter graphs use stream labels, never source paths.
 
 Loudness: mix-wide target **-14 LUFS**, true-peak ceiling **-1 dBTP**. Individual tracks are not loudnormed. If integrated LUFS is more than 0.5 LU above target, one mix-wide attenuation is applied. Stage 3 does not promise bit-identical output across FFmpeg builds.
 

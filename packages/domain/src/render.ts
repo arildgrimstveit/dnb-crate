@@ -3,7 +3,7 @@ import type { TransitionType } from "./planning.ts";
 
 export type RenderJobKind = "preview" | "full";
 export type RenderJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
-export type RenderOutputFormat = "wav";
+export type RenderOutputFormat = "flac" | "wav";
 
 export type RenderJob = {
   id: string;
@@ -88,7 +88,7 @@ export type RenderManifestV1 = {
 
 export type StartSetRenderInput = {
   setPlanId: string;
-  outputFormat?: RenderOutputFormat;
+  outputFormat?: "flac";
   edgeFadeMs?: number;
   allowLowConfidence?: boolean;
   allowExcessiveTempo?: boolean;

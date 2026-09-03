@@ -125,6 +125,8 @@ export function createFakeFfmpegRunner(
         if (failOn === "probe") {
           return { exitCode: 1, signal: null, stdout: "", stderr: "Invalid data found" };
         }
+        const probed = lastOutputPath(request.args);
+        const codecName = probed?.toLowerCase().endsWith(".flac") ? "flac" : "pcm_s24le";
         return {
           exitCode: 0,
           signal: null,
@@ -132,7 +134,7 @@ export function createFakeFfmpegRunner(
             streams: [
               {
                 codec_type: "audio",
-                codec_name: "pcm_s24le",
+                codec_name: codecName,
                 sample_rate: "48000",
                 channels: 2,
                 duration: "1.000000",

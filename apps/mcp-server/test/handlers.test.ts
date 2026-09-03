@@ -316,7 +316,7 @@ describe("MCP tool handlers", () => {
     });
     expect(status.structuredContent).toMatchObject({
       ok: true,
-      data: { status: "succeeded", outputFormat: "wav" },
+      data: { status: "succeeded", outputFormat: "flac" },
     });
 
     const manifest = await client.callTool({

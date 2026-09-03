@@ -116,10 +116,12 @@ describe("render jobs", () => {
     expect(started.job.status === "queued" || started.job.status === "running").toBe(true);
     const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
     expect(done.status).toBe("succeeded");
-    expect(done.outputRootRelativePath).toMatch(/^renders\//);
+    expect(done.outputFormat).toBe("flac");
+    expect(done.outputRootRelativePath).toMatch(/^renders\/.+\.flac$/);
     expect(done.outputRootRelativePath).not.toMatch(/^[A-Za-z]:\\/);
     const manifest = catalog.service.getRenderManifest(done.id);
     expect(manifest.tracks).toHaveLength(2);
+    expect(manifest.outputFormat).toBe("flac");
     expect(manifest.outputChecksumSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(manifest.invocation).not.toContain("alpha.wav");
     const after = createHash("sha256")

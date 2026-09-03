@@ -1,6 +1,6 @@
 # DnB Crate MCP
 
-Local-first catalog for a private drum & bass library. An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server; the same domain services are also available from a CLI. The app indexes a local crate, analyzes tracks (BPM, grid, key, sections, descriptors), plans a deterministic one-hour set, and renders a gapless WAV with equal-power crossfades plus beat-aligned phrase mixes and bass swaps.
+Local-first catalog for a private drum & bass library. An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server; the same domain services are also available from a CLI. The app indexes a local crate, analyzes tracks (BPM, grid, key, sections, descriptors), plans a deterministic one-hour set, and renders a gapless 24-bit FLAC with equal-power crossfades plus beat-aligned phrase mixes and bass swaps.
 
 The language model interprets requests. This application owns scanning, storage, search, and validation.
 
@@ -115,8 +115,8 @@ Set the same `DNB_CRATE_*` environment variables in the Inspector session. Confi
 | `delete_set_plan`           | Requires `confirm: true`.                                                            |
 | `plan_transition`           | Rank phrase-mix / bass-swap / crossfade proposals for a pair.                        |
 | `validate_transition`       | Feasibility of a concrete template (grids, rates, cues).                             |
-| `create_transition_preview` | Queue a 30–60s WAV preview; optional `phrase_mix` / `bass_swap` template.            |
-| `start_set_render`          | Queue a full WAV render. Returns a job id immediately.                               |
+| `create_transition_preview` | Queue a 30–60s FLAC preview; optional `phrase_mix` / `bass_swap` template.           |
+| `start_set_render`          | Queue a full 24-bit FLAC render. Returns a job id immediately.                       |
 | `get_render_status`         | Poll progress 0–1 and terminal state.                                                |
 | `list_render_jobs`          | Bounded list of preview/full jobs.                                                   |
 | `cancel_render_job`         | Requires `confirm: true`. Kills the FFmpeg process.                                  |
@@ -126,7 +126,7 @@ Resources: `dnbcrate://tracks/{trackId}`, `dnbcrate://tracks/{trackId}/analysis`
 
 Prompt: `build-dnb-set` (optional; the tool workflow works without it).
 
-Scoring details: `docs/scoring.md`. Analysis / templates: `docs/analysis.md`. Rendering / loudness / jobs: `docs/rendering.md`. Example plan JSON: `docs/examples/one-hour-plan.example.json`.
+Scoring details: `docs/scoring.md`. Analysis / templates: `docs/analysis.md`. Rendering / loudness / jobs: `docs/rendering.md`. Ear-check lessons for later mixes: `docs/mixing-lessons.md`. Example plan JSON: `docs/examples/one-hour-plan.example.json`.
 
 ## Tests
 

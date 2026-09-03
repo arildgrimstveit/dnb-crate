@@ -8,6 +8,8 @@ import {
   DEFAULT_PREVIEW_WINDOW_MS,
   DEFAULT_RENDER_CHANNELS,
   DEFAULT_RENDER_EDGE_FADE_MS,
+  DEFAULT_RENDER_OUTPUT_EXTENSION,
+  DEFAULT_RENDER_OUTPUT_FORMAT,
   DEFAULT_RENDER_SAMPLE_RATE_HZ,
   DEFAULT_RENDER_WORKER_LIMIT,
   DEFAULT_TRUE_PEAK_CEILING_DB,
@@ -16,8 +18,10 @@ import {
   RENDERER_VERSION,
   assertPlaybackRate,
   clampMixPresetParams,
+  choosePhraseShape,
   expandPreset,
   isDomainError,
+  sectionAtMs,
   type AppConfig,
   type AutomationEvent,
   type Logger,
@@ -43,9 +47,11 @@ import {
   renderMix,
   applyAlignmentOffset,
   downbeatAlignmentOffsetMs,
+  mixTagsFromTracklist,
   parseSilenceSpans,
   sha256File,
   sha256Json,
+  trackCredit,
   type FfmpegBinaries,
   type MixSegment,
   type MixTransitionSpec,
@@ -89,6 +95,7 @@ export type PreparedSegment = MixSegment & {
   trackId: string;
   entryId: string;
   fingerprint: string;
+  artist: string | null;
   title: string;
   timelineStartMs: number;
   playbackRate: number;
@@ -614,7 +621,11 @@ export class RenderCoordinator {
         incomingSeg.requestedTransitionType = null;
         segments = [outgoingSeg, incomingSeg];
         overlaps = [sliced.overlapMs];
-        relPath = path.join("cache", "previews", `${job.cacheKey ?? job.id}.wav`);
+        relPath = path.join(
+          "cache",
+          "previews",
+          `${job.cacheKey ?? job.id}${DEFAULT_RENDER_OUTPUT_EXTENSION}`,
+        );
         edgeFadeMs = 0;
       } else {
         const prepared: PreparedSegment[] = [];
@@ -637,7 +648,7 @@ export class RenderCoordinator {
         overlaps = stored.plan.entries
           .slice(0, -1)
           .map((entry) => entry.transitionToNext?.durationMs ?? 0);
-        relPath = path.join("renders", `${job.id}.wav`);
+        relPath = path.join("renders", `${job.id}${DEFAULT_RENDER_OUTPUT_EXTENSION}`);
       }
 
       for (const segment of segments) {
@@ -657,15 +668,33 @@ export class RenderCoordinator {
         }
       }
 
-      const mixTypes: MixTransitionSpec[] = overlaps.map((_, index) =>
-        toMixSpec(
+      const mixTypes: MixTransitionSpec[] = overlaps.map((_, index) => {
+        const outgoing = segments[index];
+        const incoming = segments[index + 1];
+        const overlap = overlaps[index] ?? 0;
+        const type =
           job.kind === "preview"
-            ? (job.params.template ?? segments[index]?.requestedTransitionType)
-            : segments[index]?.requestedTransitionType,
-          job.params.barCount,
-          segments[index]?.mixParams,
-        ),
-      );
+            ? (job.params.template ?? outgoing?.requestedTransitionType)
+            : outgoing?.requestedTransitionType;
+        let params = outgoing?.mixParams;
+        if (type === "phrase_mix" && outgoing && incoming && overlap > 0) {
+          const outAnalysis = this.analyses.findByTrackId(outgoing.trackId);
+          const inAnalysis = this.analyses.findByTrackId(incoming.trackId);
+          const outMs =
+            outgoing.sourceEndMs - overlap * (outgoing.playbackRate > 0 ? outgoing.playbackRate : 1);
+          const shape = choosePhraseShape(
+            sectionAtMs(outAnalysis?.sections ?? [], outMs),
+            sectionAtMs(inAnalysis?.sections ?? [], incoming.sourceStartMs),
+          );
+          params = { ...params, phraseShape: shape };
+          if (shape === "sequential") {
+            warnings.push(
+              `Sequential drum hand-over on ${outgoing.title} → ${incoming.title} (incoming kit held until mid-phrase).`,
+            );
+          }
+        }
+        return toMixSpec(type, job.params.barCount, params);
+      });
       if (mixTypes.some((item) => item.type !== "crossfade")) {
         requireAlignedFfmpeg(binaries);
       }
@@ -719,6 +748,10 @@ export class RenderCoordinator {
         throw new DomainError("PATH_OUTSIDE_LIBRARY_ROOT", "Refusing to write outside outputRoot");
       }
       this.jobs.updateProgress(job.id, 0.02, "mixing");
+      const mixTitle =
+        job.kind === "preview" && segments.length >= 2
+          ? `${trackCredit(segments[0]!.artist, segments[0]!.title)} → ${trackCredit(segments[1]!.artist, segments[1]!.title)}`
+          : stored.plan.name;
       const mix = await renderMix(this.runner, binaries, {
         segments,
         overlapMs: overlaps,
@@ -732,6 +765,17 @@ export class RenderCoordinator {
         onProgress: (fraction) => {
           this.jobs.updateProgress(job.id, Math.min(0.95, 0.05 + fraction * 0.9), "mixing");
         },
+        outputMetadata: mixTagsFromTracklist({
+          title: mixTitle,
+          album: stored.plan.name,
+          date: stored.plan.createdAt.slice(0, 4),
+          encodedBy: `dnb-crate ${RENDERER_VERSION}`,
+          tracks: segments.map((segment) => ({
+            artist: segment.artist,
+            title: segment.title,
+            startMs: segment.timelineStartMs,
+          })),
+        }),
       });
       warnings.push(...mix.warnings);
       const checksum = mix.checksumSha256 || (await sha256File(absOut));
@@ -745,7 +789,7 @@ export class RenderCoordinator {
         setPlanId: job.setPlanId,
         setPlanContentHash: sha256Json(stored.plan),
         kind: job.kind,
-        outputFormat: "wav",
+        outputFormat: DEFAULT_RENDER_OUTPUT_FORMAT,
         outputSampleRateHz: mix.sampleRateHz || this.settings.sampleRateHz,
         outputChannels: mix.channels || DEFAULT_RENDER_CHANNELS,
         outputDurationMs: mix.durationMs,
@@ -992,6 +1036,7 @@ export class RenderCoordinator {
       trackId: track.id,
       entryId: entry.id,
       fingerprint,
+      artist: track.artist,
       title: track.title,
       timelineStartMs,
       overlapToNextMs: entry.transitionToNext?.durationMs ?? null,
@@ -1173,6 +1218,10 @@ function mixParamsFromEntry(entry: SetPlanEntry): Partial<MixPresetParams> | nul
     rampMs: num("rampMs"),
     lowAttenuationDb: num("lowAttenuationDb"),
     midDipDb: num("midDipDb"),
+    phraseShape:
+      raw.phraseShape === "sequential" || raw.phraseShape === "complementary"
+        ? raw.phraseShape
+        : undefined,
   };
 }
 

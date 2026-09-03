@@ -37,6 +37,19 @@ export { probeAudioFile } from "./probe.ts";
 export type { ProbeResult } from "./parse.ts";
 export { renderMix, type MixRequest, type MixResult, type MixSegment } from "./mix.ts";
 export {
+  MIX_TAG_ARTIST,
+  buildCueSheet,
+  buildFfmetadataFile,
+  buildMixTracklist,
+  escapeFfmetadataValue,
+  formatCueIndex,
+  formatMixTimestamp,
+  mixTagsFromTracklist,
+  trackCredit,
+  type MixChapterTag,
+  type MixOutputTags,
+} from "./output-tags.ts";
+export {
   applyAlignmentOffset,
   downbeatAlignmentOffsetMs,
   nearestTime,

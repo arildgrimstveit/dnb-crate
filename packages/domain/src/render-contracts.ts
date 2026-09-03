@@ -32,7 +32,7 @@ export const renderJobSchema = z.object({
   kind: renderJobKindSchema,
   status: renderJobStatusSchema,
   progress: z.number().min(0).max(1),
-  outputFormat: z.literal("wav"),
+  outputFormat: z.enum(["flac", "wav"]),
   outputRootRelativePath: z.string().nullable(),
   outputFileName: z.string().nullable(),
   outputChecksumSha256: z.string().nullable(),
@@ -86,7 +86,7 @@ export const renderManifestV1Schema = z.object({
   setPlanId: z.string(),
   setPlanContentHash: z.string(),
   kind: renderJobKindSchema,
-  outputFormat: z.literal("wav"),
+  outputFormat: z.enum(["flac", "wav"]),
   outputSampleRateHz: z.number().int(),
   outputChannels: z.number().int(),
   outputDurationMs: z.number().int(),
@@ -106,7 +106,10 @@ export const renderManifestV1Schema = z.object({
 
 export const startSetRenderInputSchema = z.object({
   setPlanId: z.string().uuid(),
-  outputFormat: z.literal("wav").optional().describe("WAV only. MP3 is not available yet."),
+  outputFormat: z
+    .literal("flac")
+    .optional()
+    .describe("24-bit 48 kHz lossless FLAC. Same PCM as the mix, compressed. Default flac."),
   edgeFadeMs: z
     .number()
     .int()

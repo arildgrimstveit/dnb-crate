@@ -20,6 +20,7 @@ import {
   type MixTransitionSpec,
 } from "./filter-graph.ts";
 import { sha256File } from "./hash.ts";
+import { buildFfmetadataFile, type MixOutputTags } from "./output-tags.ts";
 import { parseEbur128, parseOutTimeMs, parseSilenceSpans } from "./parse.ts";
 import { probeAudioFile } from "./probe.ts";
 import type { ProcessRunner } from "./runner.ts";
@@ -43,7 +44,11 @@ export type MixRequest = {
   abortSignal?: AbortSignal;
   onProgress?: (fraction: number) => void;
   postProcess?: boolean;
+  /** When false, skip the graph alimiter (intermediate pairwise joins). */
+  applyLimiter?: boolean;
   transitions?: MixTransitionSpec[];
+  /** Mix-level tags for the published FLAC. Source-file tags are never copied. */
+  outputMetadata?: MixOutputTags;
 };
 
 export type MixResult = {
@@ -102,6 +107,12 @@ async function atomicReplace(fromPath: string, toPath: string): Promise<void> {
     await copyFile(fromPath, toPath);
     await removeIfPresent(fromPath);
   }
+}
+
+const FLAC_COMPRESSION_LEVEL = 8;
+
+function isFlacOutput(outputPath: string): boolean {
+  return path.extname(outputPath).toLowerCase() === ".flac";
 }
 
 function toTrims(segments: MixSegment[]): FilterTrim[] {
@@ -175,6 +186,7 @@ export async function renderMix(
     transitions: request.transitions,
     hasAfadeUnity: binaries.hasAfadeUnity,
     warnings,
+    applyLimiter: request.applyLimiter,
   });
 
   await mkdir(path.dirname(request.outputPath), { recursive: true });
@@ -213,6 +225,8 @@ export async function renderMix(
       "-c:a",
       "pcm_s24le",
       "-vn",
+      "-map_metadata",
+      "-1",
       partialPath,
     ];
     if (estimateArgvChars(args) > FFMPEG_ARGV_SOFT_LIMIT && request.segments.length > 2) {
@@ -251,6 +265,8 @@ export async function renderMix(
           "-y",
           "-i",
           workingPath,
+          "-map_metadata",
+          "-1",
           "-af",
           `volume=${gainDb}dB,alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50`,
           "-c:a",
@@ -275,7 +291,6 @@ export async function renderMix(
       }
 
       if (measured.truePeakDb !== null && measured.truePeakDb > request.truePeakCeilingDb + 0.3) {
-        const peakGainDb = request.truePeakCeilingDb - measured.truePeakDb - 0.2;
         const limited = `${request.outputPath}.peak-limited.wav`;
         const peakArgs = [
           "-nostdin",
@@ -283,8 +298,10 @@ export async function renderMix(
           "-y",
           "-i",
           workingPath,
+          "-map_metadata",
+          "-1",
           "-af",
-          `volume=${peakGainDb}dB,alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50`,
+          `alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50`,
           "-c:a",
           "pcm_s24le",
           limited,
@@ -301,15 +318,48 @@ export async function renderMix(
         await removeIfPresent(workingPath);
         workingPath = limited;
         warnings.push(
-          `Applied mix-wide ${peakGainDb.toFixed(2)} dB peak reduction so true peak meets ${request.truePeakCeilingDb} dBTP.`,
+          `Applied mix-wide true-peak limiter so true peak meets ${request.truePeakCeilingDb} dBTP.`,
         );
         measured = await measureLoudness(runner, binaries, workingPath, request.abortSignal);
         if (measured.truePeakDb !== null && measured.truePeakDb > request.truePeakCeilingDb + 0.3) {
-          throw new DomainError(
-            "RENDER_FAILED",
-            `True peak ${measured.truePeakDb.toFixed(2)} dB exceeds ceiling ${request.truePeakCeilingDb} dB`,
-            { retryable: false, details: { truePeakDb: measured.truePeakDb } },
+          const peakGainDb = request.truePeakCeilingDb - measured.truePeakDb - 0.2;
+          const ducked = `${request.outputPath}.peak-ducked.wav`;
+          const duckArgs = [
+            "-nostdin",
+            "-hide_banner",
+            "-y",
+            "-i",
+            workingPath,
+            "-map_metadata",
+            "-1",
+            "-af",
+            `volume=${peakGainDb}dB,alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50`,
+            "-c:a",
+            "pcm_s24le",
+            ducked,
+          ];
+          invocation = `${invocation} ; ${redactInvocation(binaries.ffmpegPath, duckArgs)}`;
+          const duckRun = await runner.run({
+            executable: binaries.ffmpegPath,
+            args: duckArgs,
+            abortSignal: request.abortSignal,
+          });
+          if (duckRun.exitCode !== 0) {
+            mapRunFailure(duckRun, request.abortSignal);
+          }
+          await removeIfPresent(workingPath);
+          workingPath = ducked;
+          warnings.push(
+            `Applied ${peakGainDb.toFixed(2)} dB after limiter so true peak meets ${request.truePeakCeilingDb} dBTP.`,
           );
+          measured = await measureLoudness(runner, binaries, workingPath, request.abortSignal);
+          if (measured.truePeakDb !== null && measured.truePeakDb > request.truePeakCeilingDb + 0.3) {
+            throw new DomainError(
+              "RENDER_FAILED",
+              `True peak ${measured.truePeakDb.toFixed(2)} dB exceeds ceiling ${request.truePeakCeilingDb} dB`,
+              { retryable: false, details: { truePeakDb: measured.truePeakDb } },
+            );
+          }
         }
       }
 
@@ -336,7 +386,37 @@ export async function renderMix(
       }
     }
 
-    await atomicReplace(workingPath, request.outputPath);
+    if (isFlacOutput(request.outputPath)) {
+      const encoded = `${request.outputPath}.partial.flac`;
+      const metadataPath = `${request.outputPath}.ffmeta.txt`;
+      try {
+        const encodeArgs = await buildFlacEncodeArgs(
+          runner,
+          binaries,
+          workingPath,
+          encoded,
+          metadataPath,
+          request,
+          expectedMs,
+        );
+        invocation = `${invocation} ; ${redactInvocation(binaries.ffmpegPath, encodeArgs)}`;
+        const encodeRun = await runner.run({
+          executable: binaries.ffmpegPath,
+          args: encodeArgs,
+          abortSignal: request.abortSignal,
+        });
+        if (encodeRun.exitCode !== 0) {
+          await removeIfPresent(encoded);
+          mapRunFailure(encodeRun, request.abortSignal);
+        }
+        await removeIfPresent(workingPath);
+        await atomicReplace(encoded, request.outputPath);
+      } finally {
+        await removeIfPresent(metadataPath);
+      }
+    } else {
+      await atomicReplace(workingPath, request.outputPath);
+    }
     const probe = await probeAudioFile(runner, binaries, request.outputPath, request.abortSignal);
     const checksumSha256 = await sha256File(request.outputPath);
     request.onProgress?.(1);
@@ -355,10 +435,62 @@ export async function renderMix(
     await removeIfPresent(partialPath);
     await removeIfPresent(`${request.outputPath}.attenuated.wav`);
     await removeIfPresent(`${request.outputPath}.peak-limited.wav`);
+    await removeIfPresent(`${request.outputPath}.peak-ducked.wav`);
+    await removeIfPresent(`${request.outputPath}.partial.flac`);
+    await removeIfPresent(`${request.outputPath}.ffmeta.txt`);
     throw error;
   } finally {
     await removeIfPresent(filterPath);
   }
+}
+
+async function buildFlacEncodeArgs(
+  runner: ProcessRunner,
+  binaries: FfmpegBinaries,
+  workingPath: string,
+  encodedPath: string,
+  metadataPath: string,
+  request: MixRequest,
+  expectedMs: number,
+): Promise<string[]> {
+  const codecArgs = ["-c:a", "flac", "-compression_level", String(FLAC_COMPRESSION_LEVEL)];
+  if (!request.outputMetadata) {
+    return [
+      "-nostdin",
+      "-hide_banner",
+      "-y",
+      "-i",
+      workingPath,
+      "-map_metadata",
+      "-1",
+      ...codecArgs,
+      encodedPath,
+    ];
+  }
+  let durationMs = expectedMs;
+  try {
+    durationMs = (await probeAudioFile(runner, binaries, workingPath, request.abortSignal)).durationMs;
+  } catch {
+    // Chapter ends fall back to the planned duration.
+  }
+  await writeFile(metadataPath, buildFfmetadataFile(request.outputMetadata, durationMs), "utf8");
+  return [
+    "-nostdin",
+    "-hide_banner",
+    "-y",
+    "-i",
+    workingPath,
+    "-f",
+    "ffmetadata",
+    "-i",
+    metadataPath,
+    "-map",
+    "0:a",
+    "-map_metadata",
+    "1",
+    ...codecArgs,
+    encodedPath,
+  ];
 }
 
 async function measureLoudness(
@@ -405,55 +537,60 @@ async function renderPairwise(
   let currentFile = current.filePath;
   const warnings: string[] = [];
   let invocation = "pairwise-acrossfade";
-  for (let i = 1; i < request.segments.length; i += 1) {
-    const next = request.segments[i]!;
-    const overlap = request.overlapMs[i - 1]!;
-    const stepOut = i === request.segments.length - 1 ? request.outputPath : accPath;
-    const result = await renderMix(runner, binaries, {
-      ...request,
-      segments: [
-        { ...current, filePath: currentFile, playbackRate: current.playbackRate ?? 1 },
-        next,
-      ],
-      overlapMs: [overlap],
-      transitions: request.transitions
-        ? [request.transitions[i - 1] ?? { type: "crossfade" }]
-        : undefined,
-      outputPath: stepOut,
-      edgeFadeMs: i === request.segments.length - 1 ? request.edgeFadeMs : 0,
-      postProcess: i === request.segments.length - 1,
-      onProgress: (fraction) => {
-        const overall = (i - 1 + fraction) / (request.segments.length - 1);
-        request.onProgress?.(overall);
-      },
-    });
-    warnings.push(...result.warnings);
-    invocation = `${invocation} ; ${result.invocation}`;
-    currentFile = stepOut;
-    current = {
-      filePath: stepOut,
-      sourceStartMs: 0,
-      sourceEndMs: result.durationMs,
-      gainDb: 0,
-      playbackRate: 1,
+  try {
+    for (let i = 1; i < request.segments.length; i += 1) {
+      const next = request.segments[i]!;
+      const overlap = request.overlapMs[i - 1]!;
+      const stepOut = i === request.segments.length - 1 ? request.outputPath : accPath;
+      const result = await renderMix(runner, binaries, {
+        ...request,
+        segments: [
+          { ...current, filePath: currentFile, playbackRate: current.playbackRate ?? 1 },
+          next,
+        ],
+        overlapMs: [overlap],
+        transitions: request.transitions
+          ? [request.transitions[i - 1] ?? { type: "crossfade" }]
+          : undefined,
+        outputPath: stepOut,
+        outputMetadata: i === request.segments.length - 1 ? request.outputMetadata : undefined,
+        edgeFadeMs: i === request.segments.length - 1 ? request.edgeFadeMs : 0,
+        postProcess: i === request.segments.length - 1,
+        applyLimiter: i === request.segments.length - 1,
+        onProgress: (fraction) => {
+          const overall = (i - 1 + fraction) / (request.segments.length - 1);
+          request.onProgress?.(overall);
+        },
+      });
+      warnings.push(...result.warnings);
+      invocation = `${invocation} ; ${result.invocation}`;
+      currentFile = stepOut;
+      current = {
+        filePath: stepOut,
+        sourceStartMs: 0,
+        sourceEndMs: result.durationMs,
+        gainDb: 0,
+        playbackRate: 1,
+      };
+    }
+    const probe = await probeAudioFile(runner, binaries, request.outputPath, request.abortSignal);
+    const checksumSha256 = await sha256File(request.outputPath);
+    const loudness = await measureLoudness(runner, binaries, request.outputPath, request.abortSignal);
+    return {
+      durationMs: probe.durationMs,
+      sampleRateHz: probe.sampleRateHz,
+      channels: probe.channels,
+      checksumSha256,
+      integratedLufs: loudness.integratedLufs,
+      truePeakDb: loudness.truePeakDb,
+      invocation,
+      warnings,
+      expectedDurationMs: expectedDurationMs(
+        toTrims(request.segments),
+        request.overlapMs.map((ms) => ms / 1000),
+      ),
     };
+  } finally {
+    await removeIfPresent(accPath);
   }
-  const probe = await probeAudioFile(runner, binaries, request.outputPath, request.abortSignal);
-  const checksumSha256 = await sha256File(request.outputPath);
-  const loudness = await measureLoudness(runner, binaries, request.outputPath, request.abortSignal);
-  await removeIfPresent(accPath);
-  return {
-    durationMs: probe.durationMs,
-    sampleRateHz: probe.sampleRateHz,
-    channels: probe.channels,
-    checksumSha256,
-    integratedLufs: loudness.integratedLufs,
-    truePeakDb: loudness.truePeakDb,
-    invocation,
-    warnings,
-    expectedDurationMs: expectedDurationMs(
-      toTrims(request.segments),
-      request.overlapMs.map((ms) => ms / 1000),
-    ),
-  };
 }
