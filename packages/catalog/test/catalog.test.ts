@@ -104,6 +104,11 @@ describe("catalog repository and scanner", () => {
     expect(stats.trackCount).toBe(2);
     expect(stats.missingArtistCount).toBe(1);
     expect(stats.extensionCounts[".wav"]).toBe(2);
+    expect(stats.analysisCoverage.analyzed).toBe(0);
+    expect(stats.analysisCoverage.notAnalyzed).toBe(2);
+    expect(stats.metadataCoverage.energy).toBe(1);
+    expect(stats.metadataCoverage.moods).toBe(1);
+    expect(stats.metadataCoverage.genres).toBe(0);
   });
 
   it("paginates deterministically and rejects a corrupted cursor", async () => {

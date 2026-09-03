@@ -83,9 +83,14 @@ async function main(): Promise<void> {
         printJson({ ok: true, data: scanned.result, warnings: scanned.warnings });
         break;
       }
-      case "library:stats":
-        printJson({ ok: true, data: runtime.service.getLibraryStats() });
+      case "library:stats": {
+        const stats = runtime.service.getLibraryStats();
+        printJson({ ok: true, data: stats });
+        process.stderr.write(
+          `analyzed ${stats.analysisCoverage.analyzed} / ${stats.trackCount} energy ${stats.metadataCoverage.energy}\n`,
+        );
         break;
+      }
       case "track:search": {
         const limitRaw = option(args, "--limit");
         const result = runtime.service.searchTracks({

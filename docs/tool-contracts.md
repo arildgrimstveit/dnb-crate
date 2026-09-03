@@ -39,7 +39,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 ## `get_library_stats`
 
 - Input: `{}`
-- Output data: counts, `extensionCounts`, missing-field counts, `totalDurationMs`
+- Output data: counts, `extensionCounts`, missing-field counts, `totalDurationMs`, `analysisCoverage` (analyzed/notAnalyzed, engine versions, accepted/rejected/reference/bpmHintOnly), `metadataCoverage` (bpm/key by source, energy, moods, genres, isrc, label, releaseDate, recordingMbid, duplicateGroups)
 
 ## `set_cue_points`
 

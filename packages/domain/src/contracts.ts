@@ -175,6 +175,29 @@ export const scanLibraryDataSchema = z.object({
 
 export const emptyInputSchema = z.object({});
 
+export const analysisCoverageSchema = z.object({
+  analyzed: z.number().int(),
+  notAnalyzed: z.number().int(),
+  byEngineVersion: z.record(z.string(), z.number().int()),
+  accepted: z.number().int(),
+  rejected: z.number().int(),
+  reference: z.number().int(),
+  bpmHintOnly: z.number().int(),
+});
+
+export const metadataCoverageSchema = z.object({
+  bpmBySource: z.record(z.string(), z.number().int()),
+  keyBySource: z.record(z.string(), z.number().int()),
+  energy: z.number().int(),
+  moods: z.number().int(),
+  genres: z.number().int(),
+  isrc: z.number().int(),
+  label: z.number().int(),
+  releaseDate: z.number().int(),
+  recordingMbid: z.number().int(),
+  duplicateGroups: z.number().int(),
+});
+
 export const libraryStatsDataSchema = z.object({
   trackCount: z.number().int(),
   missingFileCount: z.number().int(),
@@ -186,6 +209,8 @@ export const libraryStatsDataSchema = z.object({
   missingKeyCount: z.number().int(),
   missingEnergyCount: z.number().int(),
   missingRatingCount: z.number().int(),
+  analysisCoverage: analysisCoverageSchema,
+  metadataCoverage: metadataCoverageSchema,
 });
 
 export const serverStatusDataSchema = z.object({

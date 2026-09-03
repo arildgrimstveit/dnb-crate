@@ -10,6 +10,7 @@ import type {
 } from "@dnb-crate/domain";
 import {
   DomainError,
+  DSP_ANALYZER_NAME,
   SEARCH_LIMIT_DEFAULT,
   SEARCH_LIMIT_MAX,
   normalizeKey,
@@ -620,6 +621,149 @@ export class TrackRepository {
       missingKeyCount: row.missing_key_count,
       missingEnergyCount: row.missing_energy_count,
       missingRatingCount: row.missing_rating_count,
+      analysisCoverage: this.analysisCoverage(),
+      metadataCoverage: this.metadataCoverage(),
+    };
+  }
+
+  private tableExists(name: string): boolean {
+    const row = this.db
+      .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(name) as { ok: number } | undefined;
+    return row !== undefined;
+  }
+
+  private hasColumn(table: string, column: string): boolean {
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    return rows.some((item) => item.name === column);
+  }
+
+  private sourceCounts(column: string): Record<string, number> {
+    const rows = this.db
+      .prepare(
+        `SELECT COALESCE(${column}, 'NULL') AS source, COUNT(*) AS n FROM tracks GROUP BY ${column}`,
+      )
+      .all() as { source: string; n: number }[];
+    const out: Record<string, number> = {};
+    for (const item of rows) {
+      out[item.source] = item.n;
+    }
+    return out;
+  }
+
+  private analysisCoverage(): LibraryStats["analysisCoverage"] {
+    const statusRows = this.db
+      .prepare("SELECT analysis_status AS status, COUNT(*) AS n FROM tracks GROUP BY analysis_status")
+      .all() as { status: string; n: number }[];
+    let analyzed = 0;
+    let notAnalyzed = 0;
+    for (const item of statusRows) {
+      if (item.status === "complete") {
+        analyzed = item.n;
+      } else if (item.status === "not_analyzed") {
+        notAnalyzed = item.n;
+      }
+    }
+
+    const byEngineVersion: Record<string, number> = {};
+    let accepted = 0;
+    let rejected = 0;
+    let reference = 0;
+    let bpmHintOnly = 0;
+    if (this.tableExists("track_analyses")) {
+      const engineRows = this.db
+        .prepare(
+          `SELECT analyzer_name || '@' || analyzer_version AS key, COUNT(*) AS n
+           FROM track_analyses GROUP BY analyzer_name, analyzer_version`,
+        )
+        .all() as { key: string; n: number }[];
+      for (const item of engineRows) {
+        byEngineVersion[item.key] = item.n;
+      }
+      const dsp = this.db
+        .prepare(
+          `SELECT
+             SUM(CASE WHEN grid_rejected = 0 AND IFNULL(grid_source, 'analyzed') <> 'reference' THEN 1 ELSE 0 END) AS accepted,
+             SUM(CASE WHEN grid_rejected = 1 THEN 1 ELSE 0 END) AS rejected,
+             SUM(CASE WHEN grid_source = 'reference' AND grid_rejected = 0 THEN 1 ELSE 0 END) AS reference
+           FROM track_analyses WHERE analyzer_name = ?`,
+        )
+        .get(DSP_ANALYZER_NAME) as {
+        accepted: number | null;
+        rejected: number | null;
+        reference: number | null;
+      };
+      accepted = dsp.accepted ?? 0;
+      rejected = dsp.rejected ?? 0;
+      reference = dsp.reference ?? 0;
+      if (this.hasColumn("track_analyses", "descriptors_json")) {
+        const hint = this.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM track_analyses
+             WHERE analyzer_name = ?
+               AND grid_rejected = 1
+               AND json_extract(descriptors_json, '$.bpmHint') IS NOT NULL`,
+          )
+          .get(DSP_ANALYZER_NAME) as { n: number };
+        bpmHintOnly = hint.n;
+      }
+    }
+
+    return { analyzed, notAnalyzed, byEngineVersion, accepted, rejected, reference, bpmHintOnly };
+  }
+
+  private metadataCoverage(): LibraryStats["metadataCoverage"] {
+    const energy = (
+      this.db.prepare("SELECT COUNT(*) AS n FROM tracks WHERE energy IS NOT NULL").get() as {
+        n: number;
+      }
+    ).n;
+    const moods = this.tableExists("track_moods")
+      ? (this.db.prepare("SELECT COUNT(DISTINCT track_id) AS n FROM track_moods").get() as { n: number })
+          .n
+      : 0;
+    const genres = this.tableExists("track_genres")
+      ? (this.db.prepare("SELECT COUNT(DISTINCT track_id) AS n FROM track_genres").get() as { n: number })
+          .n
+      : 0;
+    const countNonEmpty = (column: string): number => {
+      if (!this.hasColumn("tracks", column)) {
+        return 0;
+      }
+      return (
+        this.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM tracks WHERE ${column} IS NOT NULL AND ${column} <> ''`,
+          )
+          .get() as { n: number }
+      ).n;
+    };
+    let duplicateGroups = 0;
+    if (this.hasColumn("tracks", "recording_key")) {
+      duplicateGroups = (
+        this.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM (
+               SELECT recording_key FROM tracks
+               WHERE recording_key IS NOT NULL
+               GROUP BY recording_key
+               HAVING COUNT(*) > 1
+             )`,
+          )
+          .get() as { n: number }
+      ).n;
+    }
+    return {
+      bpmBySource: this.sourceCounts("bpm_source"),
+      keyBySource: this.sourceCounts("key_source"),
+      energy,
+      moods,
+      genres,
+      isrc: countNonEmpty("isrc"),
+      label: countNonEmpty("label"),
+      releaseDate: countNonEmpty("release_date"),
+      recordingMbid: countNonEmpty("recording_mbid"),
+      duplicateGroups,
     };
   }
 

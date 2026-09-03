@@ -1,5 +1,15 @@
 # Progress
 
+## Crate v3 — baseline (2026-09-03)
+
+`library:stats` before WP1–WP5. Live crate, no re-analysis.
+
+- Tracks **583** (582 FLAC, 1 MP3), 47.5 h, 87 artists.
+- Analysis: **14 / 583** complete, 569 `not_analyzed`. DSP 2.1.0: accepted **5**, rejected **8**, reference **1**. Envelope 1.0.0: 14 rows.
+- BPM source: published 14, NULL 569. Key source: manual 9, analyzed 3, NULL 571.
+- Energy / rating / moods / tags / subgenres: **0**. Enrichment fields (isrc, label, releaseDate, recordingMbid, genres, duplicateGroups) report 0 until WP3.
+- File tags (not yet in the catalog): ISRC 122, label 115, genre 491, date 582, MusicBrainz IDs 30.
+
 ## Mixing v2.2 (2026-09-03)
 
 Set plans now consume analysis: mix windows from mix-in/mix-out + silence bounds, beat-or-bar alignment, reference grids, 3-band presets, and join type from head/tail energy. WP0–WP6 notes sit below.
