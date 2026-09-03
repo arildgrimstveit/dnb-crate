@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyAlignmentOffset,
   downbeatAlignmentOffsetMs,
+  planAlignmentOffsetMs,
   wrapDelta,
 } from "../src/downbeat-align.ts";
 
@@ -133,5 +134,67 @@ describe("downbeat alignment", () => {
     });
     expect(applied.incomingStartMs).toBe(0);
     expect(applied.outgoingEndMs).toBe(180_020);
+  });
+
+  it("falls back from a multi-second phrase wrap to bar", () => {
+    const beatMs = 60_000 / 174;
+    const barMs = beatMs * 4;
+    const phase = 2752;
+    const aligned = planAlignmentOffsetMs({
+      outgoingDownbeatsMs: [0, barMs, barMs * 2],
+      incomingDownbeatsMs: [phase, phase + barMs, phase + barMs * 2],
+      outgoingOverlapStartMs: 0,
+      incomingOverlapStartMs: 0,
+      bpm: 174,
+      targetBpm: 174,
+      outgoingPhraseOriginMs: 0,
+      incomingPhraseOriginMs: phase,
+      outgoingDownbeatConfidence: 1,
+      incomingDownbeatConfidence: 1,
+    });
+    expect(aligned.mode).toBe("bar");
+    expect(Math.abs(aligned.offsetMs)).toBeLessThan(beatMs / 2);
+  });
+
+  it("keeps a 360 ms bar residual instead of an 11 s phrase wrap", () => {
+    const beatMs = 60_000 / 174;
+    const barMs = beatMs * 4;
+    const phase = 360;
+    const aligned = planAlignmentOffsetMs({
+      outgoingDownbeatsMs: [0, barMs, barMs * 2],
+      incomingDownbeatsMs: [phase, phase + barMs, phase + barMs * 2],
+      outgoingOverlapStartMs: 0,
+      incomingOverlapStartMs: 0,
+      bpm: 174,
+      targetBpm: 174,
+      outgoingPhraseOriginMs: 0,
+      incomingPhraseOriginMs: phase,
+      outgoingDownbeatConfidence: 1,
+      incomingDownbeatConfidence: 1,
+    });
+    expect(aligned.mode).toBe("phrase");
+    expect(Math.abs(aligned.offsetMs - phase)).toBeLessThan(5);
+  });
+
+  it("recomputes overlap so outgoing-end fallback does not leave a stale mix-out", () => {
+    const overlapMs = 8_000;
+    const outgoingEndMs = 180_000;
+    const applied = applyAlignmentOffset({
+      incomingStartMs: 0,
+      incomingEndMs: 180_000,
+      outgoingEndMs,
+      offsetMs: -20,
+      periodMs: 1379,
+      incomingRate: 1,
+      outgoingRate: 1,
+      overlapMs,
+    });
+    expect(applied.movedOutgoingEnd).toBe(true);
+    expect(applied.incomingStartMs).toBe(0);
+    expect(applied.outgoingEndMs).toBe(180_020);
+    expect(applied.overlapMs).toBe(8_020);
+    const oldStart = outgoingEndMs - overlapMs;
+    const newStart = applied.outgoingEndMs - (applied.overlapMs ?? 0);
+    expect(newStart).toBe(oldStart);
   });
 });

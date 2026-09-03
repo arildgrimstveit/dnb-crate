@@ -1,3 +1,4 @@
+import { planAlignmentOffsetMs, type DownbeatAlignment } from "@dnb-crate/audio-renderer";
 import {
   sectionAtMs,
   snapToNearestBeat,
@@ -18,6 +19,7 @@ export type WindowTrack = {
     audioStartMs?: number | null;
     audioEndMs?: number | null;
     downbeatTimesMs?: number[];
+    downbeatConfidence?: number | null;
   } | null;
 };
 
@@ -33,6 +35,9 @@ export type PhraseWindow = {
   phraseShape: PhraseShape;
   incomingDropMs: number | null;
   dropAnchored: boolean;
+  alignmentOffsetMs: number;
+  alignmentPeriodMs: number | null;
+  alignmentMode: DownbeatAlignment["mode"] | null;
 };
 
 const PHRASE = 8;
@@ -238,6 +243,68 @@ function pickOutgoingExit(
   };
 }
 
+export function phraseOriginMs(track: WindowTrack): number | null {
+  const drop = firstDropSection(track.analysis?.sections ?? []);
+  if (drop?.startBar == null || drop.startBar % 8 !== 0) {
+    return null;
+  }
+  return drop.startMs;
+}
+
+export function bakeWindowAlignment(
+  outgoing: WindowTrack,
+  incoming: WindowTrack,
+  window: PhraseWindow,
+  options: { targetBpm?: number | null; outgoingRate?: number; incomingRate?: number } = {},
+): PhraseWindow {
+  const outDownbeats = outgoing.analysis?.downbeatTimesMs ?? [];
+  const inDownbeats = incoming.analysis?.downbeatTimesMs ?? [];
+  if (outDownbeats.length === 0 || inDownbeats.length === 0) {
+    return {
+      ...window,
+      alignmentOffsetMs: window.alignmentOffsetMs,
+      alignmentPeriodMs: window.alignmentPeriodMs,
+      alignmentMode: window.alignmentMode,
+    };
+  }
+  const targetBpm = options.targetBpm ?? incoming.analysis?.canonicalBpm ?? incoming.bpm;
+  const outgoingRate = options.outgoingRate && options.outgoingRate > 0 ? options.outgoingRate : 1;
+  const incomingRate = options.incomingRate && options.incomingRate > 0 ? options.incomingRate : 1;
+  const aligned = planAlignmentOffsetMs({
+    outgoingDownbeatsMs: outDownbeats,
+    incomingDownbeatsMs: inDownbeats,
+    outgoingOverlapStartMs: window.mixOutMs,
+    incomingOverlapStartMs: window.mixInMs,
+    bpm: targetBpm,
+    outgoingRate,
+    incomingRate,
+    targetBpm,
+    outgoingDownbeatConfidence: outgoing.analysis?.downbeatConfidence ?? null,
+    incomingDownbeatConfidence: incoming.analysis?.downbeatConfidence ?? null,
+    outgoingPhraseOriginMs: phraseOriginMs(outgoing),
+    incomingPhraseOriginMs: phraseOriginMs(incoming),
+  });
+  const inStart = incoming.analysis?.audioStartMs ?? 0;
+  const inEnd = incoming.analysis?.audioEndMs ?? incoming.durationMs;
+  const nextMixIn = window.mixInMs + aligned.offsetMs;
+  if (nextMixIn >= inStart && nextMixIn < inEnd - 1000) {
+    return {
+      ...window,
+      mixInMs: Math.round(nextMixIn),
+      alignmentOffsetMs: aligned.offsetMs,
+      alignmentPeriodMs: aligned.periodMs,
+      alignmentMode: aligned.mode,
+    };
+  }
+  return {
+    ...window,
+    mixOutMs: Math.round(Math.max(0, window.mixOutMs - aligned.offsetMs * outgoingRate)),
+    alignmentOffsetMs: aligned.offsetMs,
+    alignmentPeriodMs: aligned.periodMs,
+    alignmentMode: aligned.mode,
+  };
+}
+
 function incomingHeadRelEnergy(
   incoming: WindowTrack,
   mixInMs: number,
@@ -279,17 +346,25 @@ export function planPhraseWindow(
       cues: [],
     });
     const mixOut = pickOutgoingExit(outgoing, 16, options.targetBpm ?? outBpm);
-    return {
-      mixInMs: avoidSourceZero(mixIn.ms, inDownbeats, inStart),
-      mixOutMs: mixOut.mixOutMs,
-      mixInBar: null,
-      mixOutBar: mixOut.mixOutBar,
-      barCount: 16,
-      exitKind: mixOut.exitKind,
-      phraseShape: mixOut.phraseShape,
-      incomingDropMs,
-      dropAnchored: false,
-    };
+    return bakeWindowAlignment(
+      outgoing,
+      incoming,
+      {
+        mixInMs: avoidSourceZero(mixIn.ms, inDownbeats, inStart),
+        mixOutMs: mixOut.mixOutMs,
+        mixInBar: null,
+        mixOutBar: mixOut.mixOutBar,
+        barCount: 16,
+        exitKind: mixOut.exitKind,
+        phraseShape: mixOut.phraseShape,
+        incomingDropMs,
+        dropAnchored: false,
+        alignmentOffsetMs: 0,
+        alignmentPeriodMs: null,
+        alignmentMode: null,
+      },
+      { targetBpm: options.targetBpm ?? inBpm },
+    );
   }
 
   const dropBar = drop.startBar;
@@ -349,15 +424,23 @@ export function planPhraseWindow(
     phraseShape = chosen.exit.phraseShape === "landing" ? "landing" : "sequential";
   }
 
-  return {
-    mixInMs: avoidSourceZero(chosen.mixInMs, inDownbeats, inStart),
-    mixOutMs: chosen.exit.mixOutMs,
-    mixInBar: chosen.mixInBar,
-    mixOutBar: chosen.exit.mixOutBar,
-    barCount: chosen.barCount,
-    exitKind: chosen.exit.exitKind,
-    phraseShape,
-    incomingDropMs,
-    dropAnchored: true,
-  };
+  return bakeWindowAlignment(
+    outgoing,
+    incoming,
+    {
+      mixInMs: avoidSourceZero(chosen.mixInMs, inDownbeats, inStart),
+      mixOutMs: chosen.exit.mixOutMs,
+      mixInBar: chosen.mixInBar,
+      mixOutBar: chosen.exit.mixOutBar,
+      barCount: chosen.barCount,
+      exitKind: chosen.exit.exitKind,
+      phraseShape,
+      incomingDropMs,
+      dropAnchored: true,
+      alignmentOffsetMs: 0,
+      alignmentPeriodMs: null,
+      alignmentMode: null,
+    },
+    { targetBpm: options.targetBpm ?? inBpm },
+  );
 }

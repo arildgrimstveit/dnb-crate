@@ -49,7 +49,7 @@ import {
   requireFfmpeg,
   renderMix,
   applyAlignmentOffset,
-  downbeatAlignmentOffsetMs,
+  planAlignmentOffsetMs,
   mixTagsFromTracklist,
   parseSilenceSpans,
   sha256File,
@@ -816,19 +816,14 @@ export class RenderCoordinator {
           outgoing.sourceEndMs - overlap * (outgoing.playbackRate > 0 ? outgoing.playbackRate : 1);
         const outAnalysis = this.analyses.findByTrackId(outgoing.trackId);
         const inAnalysis = this.analyses.findByTrackId(incoming.trackId);
-        const outDropBar = outAnalysis?.sections.find((section) => section.type === "drop")?.startBar;
-        const inDropBar = inAnalysis?.sections.find((section) => section.type === "drop")?.startBar;
+        const outDrop = outAnalysis?.sections.find((section) => section.type === "drop");
+        const inDrop = inAnalysis?.sections.find((section) => section.type === "drop");
         const phraseReady =
-          outDropBar != null &&
-          inDropBar != null &&
-          outDropBar % 8 === 0 &&
-          inDropBar % 8 === 0;
-        const barMs =
-          (4 * 60_000) /
-          (typeof outgoing.targetBpm === "number"
-            ? outgoing.targetBpm
-            : (outgoing.analysisBpm ?? incoming.analysisBpm ?? 174));
-        const aligned = downbeatAlignmentOffsetMs({
+          outDrop?.startBar != null &&
+          inDrop?.startBar != null &&
+          outDrop.startBar % 8 === 0 &&
+          inDrop.startBar % 8 === 0;
+        const aligned = planAlignmentOffsetMs({
           outgoingDownbeatsMs: outgoing.downbeatTimesMs,
           incomingDownbeatsMs: incoming.downbeatTimesMs,
           outgoingOverlapStartMs: outOverlapStart,
@@ -842,12 +837,8 @@ export class RenderCoordinator {
               : (outgoing.analysisBpm ?? incoming.analysisBpm),
           outgoingDownbeatConfidence: outgoing.downbeatConfidence,
           incomingDownbeatConfidence: incoming.downbeatConfidence,
-          outgoingPhraseOriginMs: phraseReady
-            ? barToMsFromBar(outDropBar, outAnalysis?.sections ?? [], barMs)
-            : null,
-          incomingPhraseOriginMs: phraseReady
-            ? barToMsFromBar(inDropBar, inAnalysis?.sections ?? [], barMs)
-            : null,
+          outgoingPhraseOriginMs: phraseReady ? outDrop.startMs : null,
+          incomingPhraseOriginMs: phraseReady ? inDrop.startMs : null,
         });
         const applied = applyAlignmentOffset({
           incomingStartMs: incoming.sourceStartMs,
@@ -857,12 +848,17 @@ export class RenderCoordinator {
           periodMs: aligned.periodMs,
           incomingRate: incoming.playbackRate,
           outgoingRate: outgoing.playbackRate,
+          overlapMs: overlap,
         });
         incoming.downbeatOffsetMs = applied.appliedOffsetMs;
         incoming.alignmentPeriodMs = aligned.periodMs;
         incoming.alignmentMode = aligned.mode;
         incoming.sourceStartMs = applied.incomingStartMs;
         outgoing.sourceEndMs = applied.outgoingEndMs;
+        if (applied.movedOutgoingEnd && applied.overlapMs != null) {
+          overlaps[i] = Math.round(applied.overlapMs);
+          outgoing.overlapToNextMs = overlaps[i]!;
+        }
       }
 
       await mkdir(this.config.outputRoot, { recursive: true });
@@ -1380,26 +1376,6 @@ function mixParamsFromEntry(entry: SetPlanEntry): Partial<MixPresetParams> | nul
         ? raw.phraseShape
         : undefined,
   };
-}
-
-function barToMsFromBar(
-  bar: number,
-  sections: Array<{ startBar?: number | null; endBar?: number | null; startMs: number; endMs: number }>,
-  barMs: number,
-): number {
-  for (const section of sections) {
-    if (
-      section.startBar != null &&
-      section.endBar != null &&
-      section.endBar > section.startBar &&
-      bar >= section.startBar &&
-      bar <= section.endBar
-    ) {
-      const t = (bar - section.startBar) / (section.endBar - section.startBar);
-      return section.startMs + t * (section.endMs - section.startMs);
-    }
-  }
-  return bar * barMs;
 }
 
 function toMixSpec(

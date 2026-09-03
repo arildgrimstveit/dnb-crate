@@ -78,6 +78,51 @@ export function downbeatAlignmentOffsetMs(input: {
   };
 }
 
+const ALIGN_CONFIRM_MS = 20;
+
+/** Phrase wrap only when the residual is within half a bar; else bar, then beat. */
+export function planAlignmentOffsetMs(
+  input: Parameters<typeof downbeatAlignmentOffsetMs>[0],
+): DownbeatAlignment {
+  const targetBpm =
+    input.targetBpm && input.targetBpm > 0
+      ? input.targetBpm
+      : input.bpm && input.bpm > 0
+        ? input.bpm
+        : 174;
+  const beatPeriod = 60_000 / targetBpm;
+  const halfBar = beatPeriod * 2;
+  const canPhrase = input.outgoingPhraseOriginMs != null && input.incomingPhraseOriginMs != null;
+  if (canPhrase) {
+    const phrase = downbeatAlignmentOffsetMs(input);
+    if (Math.abs(phrase.offsetMs) <= halfBar) {
+      return phrase;
+    }
+    const bar = downbeatAlignmentOffsetMs({
+      ...input,
+      outgoingPhraseOriginMs: null,
+      incomingPhraseOriginMs: null,
+      outgoingDownbeatConfidence: 1,
+      incomingDownbeatConfidence: 1,
+    });
+    if (Math.abs(bar.offsetMs) <= halfBar) {
+      return bar;
+    }
+    return downbeatAlignmentOffsetMs({
+      ...input,
+      outgoingPhraseOriginMs: null,
+      incomingPhraseOriginMs: null,
+      outgoingDownbeatConfidence: 0,
+      incomingDownbeatConfidence: 0,
+    });
+  }
+  return downbeatAlignmentOffsetMs(input);
+}
+
+export function isAlignmentConfirm(offsetMs: number): boolean {
+  return Math.abs(offsetMs) <= ALIGN_CONFIRM_MS;
+}
+
 export function applyAlignmentOffset(input: {
   incomingStartMs: number;
   incomingEndMs: number;
@@ -86,7 +131,14 @@ export function applyAlignmentOffset(input: {
   periodMs: number;
   incomingRate: number;
   outgoingRate: number;
-}): { incomingStartMs: number; outgoingEndMs: number; appliedOffsetMs: number } {
+  overlapMs?: number;
+}): {
+  incomingStartMs: number;
+  outgoingEndMs: number;
+  appliedOffsetMs: number;
+  overlapMs: number | undefined;
+  movedOutgoingEnd: boolean;
+} {
   const outgoingRate = input.outgoingRate > 0 ? input.outgoingRate : 1;
   const incomingStart = input.incomingStartMs + input.offsetMs;
   if (incomingStart >= 0 && incomingStart < input.incomingEndMs - 1000) {
@@ -94,11 +146,15 @@ export function applyAlignmentOffset(input: {
       incomingStartMs: incomingStart,
       outgoingEndMs: input.outgoingEndMs,
       appliedOffsetMs: input.offsetMs,
+      overlapMs: input.overlapMs,
+      movedOutgoingEnd: false,
     };
   }
   return {
     incomingStartMs: input.incomingStartMs,
     outgoingEndMs: input.outgoingEndMs - input.offsetMs * outgoingRate,
     appliedOffsetMs: input.offsetMs,
+    overlapMs: input.overlapMs != null ? Math.max(1, input.overlapMs - input.offsetMs) : undefined,
+    movedOutgoingEnd: true,
   };
 }

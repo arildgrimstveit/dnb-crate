@@ -52,7 +52,9 @@ export {
 export {
   applyAlignmentOffset,
   downbeatAlignmentOffsetMs,
+  isAlignmentConfirm,
   nearestTime,
+  planAlignmentOffsetMs,
   wrapDelta,
 } from "./downbeat-align.ts";
 export type { DownbeatAlignment } from "./downbeat-align.ts";

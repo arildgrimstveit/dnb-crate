@@ -432,6 +432,7 @@ describe("planner tempo matching", () => {
         outroLenMs: 40_000,
         sections: [],
         downbeatTimesMs: [],
+        downbeatConfidence: null,
         audioStartMs: 0,
         audioEndMs: 180_000,
         mixInMs: 0,

@@ -30,7 +30,7 @@ import {
 } from "@dnb-crate/domain";
 
 import { constrainMixOut, pickMixIn, pickMixOut, sectionEnergyAt } from "./cues.ts";
-import { planPhraseWindow, type PhraseWindow } from "./windows.ts";
+import { bakeWindowAlignment, planPhraseWindow, type PhraseWindow } from "./windows.ts";
 
 export type TimelineAnalysis = {
   gridOk: boolean;
@@ -46,6 +46,7 @@ export type TimelineAnalysis = {
   outroLenMs: number | null;
   sections: TrackSection[];
   downbeatTimesMs: number[];
+  downbeatConfidence: number | null;
   audioStartMs: number | null;
   audioEndMs: number | null;
   mixInMs: number | null;
@@ -257,6 +258,9 @@ export function chooseTransition(
         phraseShape,
         mixOutMs: window.mixOutMs,
         mixInMs: window.mixInMs,
+        downbeatOffsetMs: window.alignmentOffsetMs,
+        ...(window.alignmentPeriodMs != null ? { alignmentPeriodMs: window.alignmentPeriodMs } : {}),
+        ...(window.alignmentMode ? { alignmentMode: window.alignmentMode } : {}),
         ...(window.exitKind ? { exitKind: window.exitKind } : {}),
         ...(window.incomingDropMs != null ? { incomingDropMs: window.incomingDropMs } : {}),
         ...(keyClash ? { keyClash: true, keyClashWarning: "KEY_CLASH" } : {}),
@@ -286,9 +290,11 @@ export function musicalWindow(
     analysis?.mixOutMs ??
     Math.max(audioStart, audioEnd - Math.max(overlapSource, 1));
   const snappedMixIn =
-    downbeats.length > 0
-      ? (snapToNearestBeat(rawMixIn, downbeats)?.positionMs ?? Math.round(rawMixIn))
-      : Math.round(rawMixIn);
+    overrides?.mixInMs != null
+      ? Math.round(rawMixIn)
+      : downbeats.length > 0
+        ? (snapToNearestBeat(rawMixIn, downbeats)?.positionMs ?? Math.round(rawMixIn))
+        : Math.round(rawMixIn);
   const mixInMs = Math.max(audioStart, snappedMixIn);
   const mixOutMs = constrainMixOut(rawMixOut, overlapSource, audioEnd, downbeats);
   let sourceEndMs = isLast ? audioEnd : Math.min(Math.round(mixOutMs + overlapSource), audioEnd);
@@ -383,6 +389,22 @@ export function buildEntries(
       dropAnchored: options.dropAnchored,
       window: pairWindow,
     });
+    const alignedWindow = bakeWindowAlignment(track, next, pairWindow, {
+      targetBpm: result.targetBpm,
+      outgoingRate: result.outgoingRate,
+      incomingRate: result.incomingRate,
+    });
+    pairWindows[index] = alignedWindow;
+    result.transition.parameters = {
+      ...result.transition.parameters,
+      mixOutMs: alignedWindow.mixOutMs,
+      mixInMs: alignedWindow.mixInMs,
+      downbeatOffsetMs: alignedWindow.alignmentOffsetMs,
+      ...(alignedWindow.alignmentPeriodMs != null
+        ? { alignmentPeriodMs: alignedWindow.alignmentPeriodMs }
+        : {}),
+      ...(alignedWindow.alignmentMode ? { alignmentMode: alignedWindow.alignmentMode } : {}),
+    };
     const aligned = result.transition.type === "phrase_mix" || result.transition.type === "bass_swap";
     if (aligned) {
       if (!firstAlignedApplied && !existing?.get(track.id)?.playbackRate) {
@@ -594,6 +616,7 @@ export function analysisToTimeline(
     outroLenMs: outro ? outro.endMs - outro.startMs : null,
     sections,
     downbeatTimesMs: analysis.downbeatTimesMs ?? [],
+    downbeatConfidence: analysis.downbeatConfidence ?? null,
     audioStartMs: analysis.descriptors?.audioStartMs ?? null,
     audioEndMs: analysis.descriptors?.audioEndMs ?? null,
     mixInMs: mixIn.ms,
