@@ -45,20 +45,11 @@ export function audioBounds(bundle: MixCueBundle): { audioStartMs: number; audio
 
 export function constrainMixOut(
   mixOutMs: number,
-  overlapSourceMs: number,
+  _overlapSourceMs: number,
   audioEndMs: number,
-  downbeatTimesMs: number[],
+  _downbeatTimesMs: number[],
 ): number {
-  const overlap = Math.max(0, overlapSourceMs);
-  if (mixOutMs + overlap <= audioEndMs + 1e-6) {
-    return Math.round(Math.min(mixOutMs, audioEndMs));
-  }
-  const target = audioEndMs - overlap;
-  if (target <= 0) {
-    return 0;
-  }
-  const usable = downbeatTimesMs.filter((time) => time <= audioEndMs);
-  return Math.round(previousDownbeat(target, usable));
+  return Math.round(Math.min(Math.max(0, mixOutMs), audioEndMs));
 }
 
 export function pickMixOut(
@@ -255,18 +246,6 @@ function lastEnergeticSection(
 function sectionIsEnergetic(bundle: MixCueBundle, ms: number): boolean {
   const energy = sectionEnergyAt(bundle.analysis?.sections, ms);
   return energy == null || energy >= MIN_SECTION_ENERGY;
-}
-
-function previousDownbeat(ms: number, downbeats: number[]): number {
-  let prev: number | null = null;
-  for (const time of downbeats) {
-    if (time <= ms) {
-      prev = time;
-    } else {
-      break;
-    }
-  }
-  return prev ?? Math.round(ms);
 }
 
 export function snapMixMs(ms: number, beatTimesMs: number[]): number {

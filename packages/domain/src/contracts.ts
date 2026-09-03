@@ -508,6 +508,10 @@ export const createSetPlanInputSchema = z.object({
     .optional()
     .describe("Hard 0–1 descriptor ranges on the planner pool"),
   genres: genreFiltersSchema.optional().describe("Normalized include/exclude genre labels"),
+  dropAnchored: z
+    .boolean()
+    .optional()
+    .describe("Anchor mix-in so the incoming drop lands at overlap end. Default true."),
 });
 
 export const getSetPlanInputSchema = z.object({

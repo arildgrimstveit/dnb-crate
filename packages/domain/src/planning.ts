@@ -88,6 +88,7 @@ export type CreateSetPlanInput = {
   seed?: number;
   descriptors?: DescriptorFilters;
   genres?: { include?: string[]; exclude?: string[] };
+  dropAnchored?: boolean;
 };
 
 export type SelectionExplanation = {

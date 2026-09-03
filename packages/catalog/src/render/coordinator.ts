@@ -22,6 +22,7 @@ import {
   clampMixPresetParams,
   choosePhraseShape,
   expandPreset,
+  normalizePhraseBars,
   isDomainError,
   sectionAtMs,
   type AppConfig,
@@ -62,6 +63,7 @@ import {
 
 import {
   alignmentResidualMs,
+  plannedLevelStepLu,
   firstDropMs,
   joinCamelotDistance,
   measureLevelStepLu,
@@ -331,7 +333,7 @@ export class RenderCoordinator {
     transitionId: string;
     windowMs?: number;
     template?: "crossfade" | "phrase_mix" | "bass_swap";
-    barCount?: 16 | 32;
+    barCount?: 8 | 16 | 32;
     allowLowConfidence?: boolean;
   }): Promise<{ job: RenderJob; warnings: string[] }> {
     const stored = this.requirePlan(input.setPlanId);
@@ -555,6 +557,7 @@ export class RenderCoordinator {
               outputPath,
               overlapAtMs,
               durationMs,
+              overlap,
             )
           : null;
       joins.push({
@@ -588,9 +591,18 @@ export class RenderCoordinator {
     const residualFail = joins.some(
       (join) => join.residualMs != null && Math.abs(join.residualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS,
     );
-    const levelFail = joins.some(
-      (join) => join.levelStepLu != null && Math.abs(join.levelStepLu) > RENDER_CHECK_LEVEL_STEP_FAIL_LU,
-    );
+    const levelFail = joins.some((join) => {
+      const matched = plannedLevelStepLu(
+        join.outgoingLufs,
+        join.incomingLufs,
+        join.outgoingGainDb,
+        join.incomingGainDb,
+      );
+      if (matched != null) {
+        return Math.abs(matched) > RENDER_CHECK_LEVEL_STEP_FAIL_LU;
+      }
+      return join.levelStepLu != null && Math.abs(join.levelStepLu) > RENDER_CHECK_LEVEL_STEP_FAIL_LU;
+    });
     return {
       renderJobId,
       outputPath,
@@ -797,6 +809,20 @@ export class RenderCoordinator {
         }
         const outOverlapStart =
           outgoing.sourceEndMs - overlap * (outgoing.playbackRate > 0 ? outgoing.playbackRate : 1);
+        const outAnalysis = this.analyses.findByTrackId(outgoing.trackId);
+        const inAnalysis = this.analyses.findByTrackId(incoming.trackId);
+        const outDropBar = outAnalysis?.sections.find((section) => section.type === "drop")?.startBar;
+        const inDropBar = inAnalysis?.sections.find((section) => section.type === "drop")?.startBar;
+        const phraseReady =
+          outDropBar != null &&
+          inDropBar != null &&
+          outDropBar % 8 === 0 &&
+          inDropBar % 8 === 0;
+        const barMs =
+          (4 * 60_000) /
+          (typeof outgoing.targetBpm === "number"
+            ? outgoing.targetBpm
+            : (outgoing.analysisBpm ?? incoming.analysisBpm ?? 174));
         const aligned = downbeatAlignmentOffsetMs({
           outgoingDownbeatsMs: outgoing.downbeatTimesMs,
           incomingDownbeatsMs: incoming.downbeatTimesMs,
@@ -811,6 +837,12 @@ export class RenderCoordinator {
               : (outgoing.analysisBpm ?? incoming.analysisBpm),
           outgoingDownbeatConfidence: outgoing.downbeatConfidence,
           incomingDownbeatConfidence: incoming.downbeatConfidence,
+          outgoingPhraseOriginMs: phraseReady
+            ? barToMsFromBar(outDropBar, outAnalysis?.sections ?? [], barMs)
+            : null,
+          incomingPhraseOriginMs: phraseReady
+            ? barToMsFromBar(inDropBar, inAnalysis?.sections ?? [], barMs)
+            : null,
         });
         const applied = applyAlignmentOffset({
           incomingStartMs: incoming.sourceStartMs,
@@ -1327,7 +1359,8 @@ function mixParamsFromEntry(entry: SetPlanEntry): Partial<MixPresetParams> | nul
   const num = (key: string): number | undefined =>
     typeof raw[key] === "number" ? raw[key] : undefined;
   return {
-    barCount: raw.barCount === 32 ? 32 : raw.barCount === 16 ? 16 : undefined,
+    barCount:
+      raw.barCount === 32 ? 32 : raw.barCount === 16 ? 16 : raw.barCount === 8 ? 8 : undefined,
     targetBpm: num("targetBpm") ?? null,
     crossoverHz: num("crossoverHz"),
     swapAtBar: num("swapAtBar"),
@@ -1336,18 +1369,40 @@ function mixParamsFromEntry(entry: SetPlanEntry): Partial<MixPresetParams> | nul
     lowAttenuationDb: num("lowAttenuationDb"),
     midDipDb: num("midDipDb"),
     phraseShape:
-      raw.phraseShape === "sequential" || raw.phraseShape === "complementary"
+      raw.phraseShape === "sequential" ||
+      raw.phraseShape === "complementary" ||
+      raw.phraseShape === "landing"
         ? raw.phraseShape
         : undefined,
   };
 }
 
+function barToMsFromBar(
+  bar: number,
+  sections: Array<{ startBar?: number | null; endBar?: number | null; startMs: number; endMs: number }>,
+  barMs: number,
+): number {
+  for (const section of sections) {
+    if (
+      section.startBar != null &&
+      section.endBar != null &&
+      section.endBar > section.startBar &&
+      bar >= section.startBar &&
+      bar <= section.endBar
+    ) {
+      const t = (bar - section.startBar) / (section.endBar - section.startBar);
+      return section.startMs + t * (section.endMs - section.startMs);
+    }
+  }
+  return bar * barMs;
+}
+
 function toMixSpec(
   type: TransitionType | "crossfade" | "phrase_mix" | "bass_swap" | null | undefined,
-  barCount?: 16 | 32,
+  barCount?: 8 | 16 | 32,
   params?: Partial<MixPresetParams> | null,
 ): MixTransitionSpec {
-  const bars = barCount ?? (params?.barCount === 32 ? 32 : 16);
+  const bars = normalizePhraseBars(barCount ?? params?.barCount);
   if (type === "phrase_mix") {
     const clamped = clampMixPresetParams({ ...params, barCount: bars }, bars);
     return { type: "phrase_mix", barCount: bars, params: clamped };
@@ -1372,7 +1427,7 @@ function collectAutomation(
     }
     const start = outgoing.timelineStartMs + playableOutputMs(outgoing) - overlap;
     const spec = mixTypes[i]!;
-    const bars = spec.barCount === 32 ? 32 : 16;
+    const bars = normalizePhraseBars(spec.barCount);
     const barMs = overlap / bars;
     const expanded = expandPreset(spec.type, spec.params ?? spec.bassSwap, bars, barMs);
     for (const ev of expanded) {

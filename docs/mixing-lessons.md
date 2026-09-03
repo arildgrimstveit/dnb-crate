@@ -18,6 +18,7 @@ Do not overwrite:
 
 | File | Why |
 | --- | --- |
+| `output/renders/hour-peak-v3.4.flac` | Peak v3 order re-planned with phrase windows (plan `5c5121fb-…`, job `ed06f32f-…`). Structural pass; ear-check pending |
 | `output/renders/hour-peak-v3.3.flac` | Canonical Peak hour (mix 6.4.0; tags 6.5.0). Closer listen: joins 1–4 rough; from 20:26 much better |
 | `output/renders/hour-peak-v3.2.flac` | Complementary-curve A/B (12:08 still bad) |
 | `output/renders/hour-peak-v3.1.wav` | First listenably mixed Peak (6.1.0); source of the join-by-join notes |
@@ -98,6 +99,14 @@ The template is the same all the way through: every join is `phrase_mix`, comple
 Joins **1** and **4** leave a full drop hanging over a quiet intro for ~22 s. Join **3** is the known two-kit 32-bar. Join **2** looks like later breakdown→intro joins that sounded perfect (Dreamweaver → Breathe In, Hold on a While → Red Velvet), so that one is more pairing than curve.
 
 The good half starts when mix-out is a **build** (Inemuri) into Calling for a Sign, then the Nu:Logic / Technimatic run. Drop→quiet-intro can still work (Breathe In → Hold on a While, drop 0.41 → intro 0.03, was perfect) — so do not blindly sequential every drop outro. The opening four are the ones to re-check on the next Peak pass: earlier mix-out, shorter phrase, or different pairing.
+
+## Peak hour v3.4 — phrase-anchored replan of the v3 order
+
+Plan `5c5121fb-da3b-4c2d-89b5-27675117dd95` (`plan:clone --replan` of `5cb141aa-…`), job `ed06f32f-f506-449c-b6ea-d8063d258797`, listen copy **`output/renders/hour-peak-v3.4.flac`**. Duration **36:55** (2214820 ms) — shorter because mix-ins are drop-anchored and mix-outs leave earlier. Do not overwrite v3.3.
+
+`render:check` v2 exit **0**: every join has `exitKind` (`quietTail` or `dropLanding`); grid residual **0** on all 15 joins; no +1-period nudge; 13/15 joins `alignmentMode: phrase`. Gain-corrected LUFS delta is within 3 LU on every join. The 10 s arrangement step is large on Chant → Let The Story Begin (+7.6, quiet tail into the incoming drop) and Moment to Moment → Colour Me In (−7.9); those are phrase-window energy changes, not unmatched gains.
+
+Ear-check of joins 1–4 and the old 20:26-onward run is **pending** (listen `hour-peak-v3.4.flac`; timestamps moved with the shorter windows).
 
 ## Why 12:08 was the hard one
 

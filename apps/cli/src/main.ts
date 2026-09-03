@@ -423,7 +423,7 @@ async function main(): Promise<void> {
           allowExcessiveTempo: flag(args, "--allow-excessive-tempo"),
         });
         if (flag(args, "--wait")) {
-          const done = await runtime.service.waitForRenderJob(started.job.id, 10 * 60_000);
+          const done = await runtime.service.waitForRenderJob(started.job.id, 45 * 60_000);
           printJson({ ok: true, data: done, warnings: started.warnings });
         } else {
           printJson({ ok: true, data: started.job, warnings: started.warnings });

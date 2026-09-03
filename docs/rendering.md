@@ -23,16 +23,16 @@ Each plan entry also gets a bounded `gainDb` so tracks sit near the **set median
 ## Timing
 
 - Crossfade: `acrossfade` with `c1=hsin` / `c2=hsin`.
-- Phrase mix / bass swap: pairwise **3-band** graphs (`asplit=3`, Linkwitz–Riley 4th-order low/mid/high, `amix=inputs=6`). The graph limiter, when applied, sits on the overlap tail only. Overlap duration is the planned phrase (16/32 bars at target BPM). Presets:
+- Phrase mix / bass swap: pairwise **3-band** graphs (`asplit=3`, Linkwitz–Riley 4th-order low/mid/high, `amix=inputs=6`). The graph limiter, when applied, sits on the overlap tail only. Overlap duration is the planned phrase (8/16/32 bars at target BPM). Presets:
 
   | Preset | What moves |
   | --- | --- |
-  | `phrase_mix` | Incoming mid/high fade in over the whole overlap (`hsin`); outgoing mid/high fade out over the same span so the kits do not stack. Incoming low arrives at bar 12 (24 of 32). Outgoing low steps to −24 dB there, then to −inf at the end. When a drop outro meets a drum-heavy intro (`phraseShape: sequential`), incoming mid/high wait until mid-phrase so the kits do not overlap. |
-  | `bass_swap` | Mid/high crossfade across the overlap; outgoing mid dips −6 dB from bar 4. Lows swap at bar 8 (16 of 32) in `rampMs`, then outgoing low goes to −inf at bar 12. |
-  | `crossfade` | Single `acrossfade` with `hsin` (WP6 may shorten this on tempo mismatch). |
+  | `phrase_mix` | Complementary: incoming mid/high fade in over the overlap (`hsin`); outgoing mid/high fade out over the same span. Incoming low arrives at bar 12 (24 of 32, 6 of 8). Sequential: incoming mid/high start 2 bars before mid-phrase. Landing: incoming low at −inf until the last bar; outgoing mid/high fade only over the last 8 bars (4 when `B = 8`); incoming drop hits as the outgoing ends. |
+  | `bass_swap` | Mid/high crossfade across the overlap; outgoing mid dips −6 dB from bar 4. Lows swap at bar 8 (16 of 32, 4 of 8) in `rampMs`, then outgoing low goes to −inf at the handover bar. |
+  | `crossfade` | Single `acrossfade` with `hsin`. |
 
-  Band fades use `afade` `unity`/`silence` when FFmpeg has them (`hasAfadeUnity`). Otherwise partial levels collapse to full fades and a warning is recorded. `double_drop` still renders as `bass_swap`.
-- Aligned joins nudge the incoming start in **output time**. When both `downbeatConfidence` values are ≥ 0.5 the wrap period is one **bar** (4 beats); otherwise one beat. A negative nudge at source start 0 adds one period instead of being dropped. Manifest fields: `downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode` (`bar` | `beat`).
+  Every band ramp uses `:curve=hsin`, including partial levels. Band fades use `afade` `unity`/`silence` when FFmpeg has them (`hasAfadeUnity`). Otherwise partial levels collapse to full fades and a warning is recorded. `double_drop` still renders as `bass_swap`.
+- Aligned joins nudge the incoming start in **output time**. When both tracks have a drop `startBar` on an 8-bar multiple the wrap period is **8 bars** (`alignmentMode: phrase`); else one **bar** when both downbeat confidences are ≥ 0.5; otherwise one beat. A negative nudge at source start 0 **shifts the outgoing end** — it never adds one period. Manifest fields: `downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode` (`bar` | `beat` | `phrase`).
 - Playback rate other than 1.0 is applied with `atempo` and bounded to ±3% unless `allowExcessiveTempo`.
 - Internal mix: 48 kHz stereo PCM 24-bit. Working files stay WAV. The published file is 24-bit FLAC.
 - Published FLACs do **not** keep the first source file's tags. They get mix-level `title`/`album` (plan name), `artist` `dnb-crate`, a numbered tracklist in `comment`/`description`, and an embedded `CUESHEET` (track markers). FFmpeg's FLAC muxer does not persist native chapters; the cue sheet is what foobar2000 and similar players read.
@@ -44,7 +44,7 @@ Same as Stage 3: `start_set_render` / `create_transition_preview` return a job i
 
 Aligned templates **fail closed** when a required grid is missing, rejected, or below confidence 0.6, unless `allowLowConfidence` is true.
 
-`render:check --id JOB` runs `silencedetect` (−50 dB, ≥ 1 s) and prints interior spans plus per-join template, bars, rates, `downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode`, `windowInSilence`, alignment residual, 10 s level step (LU), low-overlap proxy, Camelot distance, `exitKind`, mix windows, and per-track LUFS/gain. Exit 1 if any interior span, window sits in silence, residual > 40 ms, or |level step| > 3 LU.
+`render:check --id JOB` runs `silencedetect` (−50 dB, ≥ 1 s) and prints interior spans plus per-join template, bars, rates, `downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode`, `windowInSilence`, alignment residual (grid xcorr after the applied nudge; a one-beat period-add still fails), 10 s arrangement step (LUFS 10 s before the overlap vs 10 s after it ends), low-overlap proxy, Camelot distance, `exitKind`, mix windows, and per-track LUFS/gain. Exit 1 if any interior span, window sits in silence, residual > 40 ms, or the gain-corrected LUFS delta (`incomingLufs + incomingGainDb − outgoingLufs − outgoingGainDb`) exceeds 3 LU. Quiet-tail and landing joins can show a large 10 s arrangement step; that is not the level-match gate.
 
 ## Known limitations
 

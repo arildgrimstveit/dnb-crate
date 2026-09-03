@@ -25,8 +25,9 @@ export function firstDropMs(
 }
 
 /**
- * Residual is the applied incoming-start nudge. A one-beat period add (~345 ms
- * at 174) is the Peak v3.3 failure mode the harness must surface.
+ * Residual is remaining grid error after the applied nudge. A one-beat
+ * period-add (~345 ms at 174) is still reported as residual so the Peak v3.3
+ * failure mode stays visible.
  */
 export function alignmentResidualMs(
   downbeatOffsetMs: number | null,
@@ -38,6 +39,8 @@ export function alignmentResidualMs(
   incomingRate: number,
   periodMs: number | null,
 ): number | null {
+  const wrapMs = periodMs && periodMs > 0 ? periodMs : 345;
+  const beatPeriodMs = wrapMs > 2000 ? wrapMs / 32 : wrapMs;
   const gridResidual = residualFromBeatGrids(
     outgoingBeats,
     incomingBeats,
@@ -45,9 +48,13 @@ export function alignmentResidualMs(
     incomingOverlapStartMs,
     outgoingRate,
     incomingRate,
-    periodMs ?? 345,
+    wrapMs,
   );
-  if (downbeatOffsetMs != null && Math.abs(downbeatOffsetMs) >= 20) {
+  if (
+    downbeatOffsetMs != null &&
+    Math.abs(downbeatOffsetMs) >= 20 &&
+    Math.abs(Math.abs(downbeatOffsetMs) - beatPeriodMs) < 25
+  ) {
     return downbeatOffsetMs;
   }
   return gridResidual ?? downbeatOffsetMs;
@@ -113,6 +120,20 @@ function onsetEnvelope(
   return env;
 }
 
+export function plannedLevelStepLu(
+  outgoingLufs: number | null,
+  incomingLufs: number | null,
+  outgoingGainDb: number | null,
+  incomingGainDb: number | null,
+): number | null {
+  if (outgoingLufs == null || incomingLufs == null) {
+    return null;
+  }
+  return Number(
+    (incomingLufs + (incomingGainDb ?? 0) - (outgoingLufs + (outgoingGainDb ?? 0))).toFixed(2),
+  );
+}
+
 export function joinCamelotDistance(outgoingKey: string | null, incomingKey: string | null): number | null {
   return camelotWheelDistance(outgoingKey, incomingKey);
 }
@@ -123,10 +144,12 @@ export async function measureLevelStepLu(
   mixPath: string,
   overlapAtMs: number,
   mixDurationMs: number,
+  overlapMs = 0,
 ): Promise<number | null> {
   const windowMs = 10_000;
   const beforeStart = Math.max(0, overlapAtMs - windowMs);
-  const afterStart = Math.min(Math.max(0, mixDurationMs - windowMs), overlapAtMs);
+  const afterCandidate = overlapAtMs + Math.max(0, overlapMs);
+  const afterStart = Math.min(Math.max(0, mixDurationMs - windowMs), afterCandidate);
   const before = await measureWindowLufs(runner, ffmpegPath, mixPath, beforeStart, windowMs);
   const after = await measureWindowLufs(runner, ffmpegPath, mixPath, afterStart, windowMs);
   if (before == null || after == null) {

@@ -3,9 +3,11 @@ import {
   CROSSFADE_CURVE,
   clampMixPresetParams,
   expandPreset,
+  normalizePhraseBars,
   type AutomationEvent,
   type BassSwapParams,
   type MixPresetParams,
+  type PhraseBarCount,
 } from "@dnb-crate/domain";
 
 export type FilterTrim = {
@@ -19,7 +21,7 @@ export type MixTransitionKind = "crossfade" | "phrase_mix" | "bass_swap";
 
 export type MixTransitionSpec = {
   type: MixTransitionKind;
-  barCount?: 16 | 32;
+  barCount?: PhraseBarCount;
   bassSwap?: Partial<BassSwapParams> | null;
   params?: Partial<MixPresetParams> | null;
 };
@@ -187,8 +189,7 @@ function compileBandAfades(
     }
     const st = Math.max(0, originSec + (ev.atMs ?? 0) / 1000);
     const d = Math.max((ev.durationMs ?? 0) / 1000, 0.001);
-    const fullRange = fromG <= 1e-9 || toG <= 1e-9;
-    const curve = fullRange ? ":curve=hsin" : "";
+    const curve = ":curve=hsin";
     if (toG < fromG - 1e-9) {
       const silence = fromG <= 1e-9 ? 0 : toG / fromG;
       const extra =
@@ -232,7 +233,7 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
   }
   const spec = options.transitions?.[0];
   const type = spec?.type === "phrase_mix" ? "phrase_mix" : "bass_swap";
-  const barCount = spec?.barCount === 32 ? 32 : 16;
+  const barCount = normalizePhraseBars(spec?.barCount ?? spec?.params?.barCount);
   const params = clampMixPresetParams(
     { ...spec?.bassSwap, ...spec?.params, barCount, targetBpm: spec?.params?.targetBpm ?? null },
     barCount,

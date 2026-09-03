@@ -104,7 +104,7 @@ describe("downbeat alignment", () => {
     expect(Math.abs(aligned.offsetMs)).toBeLessThanOrEqual(barMs / 2 + 1);
   });
 
-  it("applies a negative offset at start 0 as offset plus one bar", () => {
+  it("shifts the outgoing end instead of adding a period at source start 0", () => {
     const barMs = (4 * 60_000) / 174;
     const applied = applyAlignmentOffset({
       incomingStartMs: 0,
@@ -115,9 +115,10 @@ describe("downbeat alignment", () => {
       incomingRate: 1,
       outgoingRate: 1,
     });
-    expect(applied.incomingStartMs).toBeCloseTo(barMs - 20, 5);
-    expect(applied.outgoingEndMs).toBe(180_000);
-    expect(applied.appliedOffsetMs).toBeCloseTo(barMs - 20, 5);
+    expect(applied.incomingStartMs).toBe(0);
+    expect(applied.outgoingEndMs).toBe(180_020);
+    expect(applied.appliedOffsetMs).toBe(-20);
+    expect(Math.abs(applied.appliedOffsetMs)).not.toBeCloseTo(barMs, 0);
   });
 
   it("shifts the outgoing end when a period nudge would pass the incoming tail", () => {

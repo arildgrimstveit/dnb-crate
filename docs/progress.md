@@ -39,6 +39,30 @@ Plan file, crate-count refresh (431), manifest join fields (`barCount`, `phraseS
 
 `gainDb = clamp(setMedianLufs − trackLufs, −6, +3)`. Missing LUFS stays 0 with `levelMatchWarning`. Non-zero manual gain survives `--replan`.
 
+### WP2 shipped
+
+Phrase-anchored windows (`packages/catalog/src/planning/windows.ts`): drop-anchored mix-in, phrase-boundary mix-out, `exitKind` `quietTail` / `dropLanding`, new `landing` shape, sequential mid/high start 2 bars before mid-phrase, no +1-period alignment nudge, `alignmentMode: phrase` when both drops sit on 8-bar multiples, `:curve=hsin` on partial ramps.
+
+Peak v3.4: plan `5c5121fb-…`, job `ed06f32f-…`, `output/renders/hour-peak-v3.4.flac`. `render:check` v2 exit **0** (residuals 0; gain-corrected LUFS within 3 LU). Duration **2214820** ms. Ear-check pending in `docs/mixing-lessons.md`.
+
+| # | Join | Bars | Shape | Exit | Residual | Arr. step LU | Mode |
+| --- | --- | ---: | --- | --- | ---: | ---: | --- |
+| 0 | Under The Waves → Chant | 32 | complementary | quietTail | 0 | +0.4 | phrase |
+| 1 | Chant → Let The Story Begin | 8 | sequential | quietTail | 0 | +7.6 | phrase |
+| 2 | Let The Story Begin → Let It Fall | 8 | landing | dropLanding | 0 | −0.4 | phrase |
+| 3 | Let It Fall → Inemuri | 16 | sequential | quietTail | 0 | −0.8 | phrase |
+| 4 | Inemuri → Calling for a Sign | 8 | landing | dropLanding | 0 | −0.2 | phrase |
+| 5 | Calling for a Sign → Dreamweaver | 8 | landing | dropLanding | 0 | −1.0 | phrase |
+| 6 | Dreamweaver → Breathe In | 16 | complementary | quietTail | 0 | −0.9 | phrase |
+| 7 | Breathe In → Hold on a While | 32 | complementary | quietTail | 0 | −0.3 | phrase |
+| 8 | Hold on a While → Red Velvet | 32 | complementary | quietTail | 0 | −0.3 | phrase |
+| 9 | Red Velvet → Moment to Moment | 32 | complementary | quietTail | 0 | +1.2 | phrase |
+| 10 | Moment to Moment → Colour Me In | 8 | sequential | quietTail | 0 | −7.9 | beat |
+| 11 | Colour Me In → Until The End | 8 | sequential | quietTail | 0 | −2.7 | beat |
+| 12 | Until The End → Tidal Wave | 8 | landing | dropLanding | 0 | +0.9 | phrase |
+| 13 | Tidal Wave → Streamline | 32 | landing | dropLanding | 0 | −1.4 | phrase |
+| 14 | Streamline → Vapourise | 16 | sequential | quietTail | 0 | −0.9 | phrase |
+
 ## Crate v3 — baseline (2026-09-03)
 
 `library:stats` before WP1–WP5. Live crate, no re-analysis.

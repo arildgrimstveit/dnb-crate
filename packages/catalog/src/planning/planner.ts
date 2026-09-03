@@ -266,6 +266,9 @@ export function draftSetPlan(
 
   const entries = buildEntries(
     selected.map((track) => ({ ...track, analysis: analyses.get(track.id) ?? null })),
+    undefined,
+    undefined,
+    { dropAnchored: input.dropAnchored },
   );
   const duration = planDurationMs(entries);
   const partial =

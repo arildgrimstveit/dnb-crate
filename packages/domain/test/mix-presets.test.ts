@@ -28,8 +28,8 @@ describe("mix presets", () => {
 
   it("holds incoming drums until mid-phrase on a sequential phrase_mix", () => {
     const thirtyTwo = expandPreset("phrase_mix", { phraseShape: "sequential" }, 32, BAR_MS);
-    expect(thirtyTwo.find((ev) => ev.target === "incoming_mid")?.atBar).toBe(16);
-    expect(thirtyTwo.find((ev) => ev.target === "incoming_mid")?.durationBars).toBe(16);
+    expect(thirtyTwo.find((ev) => ev.target === "incoming_mid")?.atBar).toBe(14);
+    expect(thirtyTwo.find((ev) => ev.target === "incoming_mid")?.durationBars).toBe(18);
     expect(thirtyTwo.find((ev) => ev.target === "outgoing_mid")?.atBar).toBe(0);
     expect(thirtyTwo.find((ev) => ev.target === "outgoing_mid")?.durationBars).toBe(16);
     expect(isMonotoneBand(thirtyTwo)).toBe(true);
@@ -51,6 +51,17 @@ describe("mix presets", () => {
     expect(
       choosePhraseShape({ type: "drop", sectionEnergy: 0.334 }, { type: "intro", sectionEnergy: 0.078 }),
     ).toBe("complementary");
+  });
+
+  it("holds incoming low at -inf until the last bar on a landing phrase", () => {
+    const events = expandPreset("phrase_mix", { phraseShape: "landing" }, 32, BAR_MS);
+    const incomingLow = events.find((ev) => ev.target === "incoming_low");
+    expect(incomingLow?.atBar).toBe(31);
+    expect(incomingLow?.fromDb).toBeNull();
+    expect(incomingLow?.toDb).toBe(0);
+    expect(events.find((ev) => ev.target === "outgoing_mid")?.atBar).toBe(24);
+    expect(events.find((ev) => ev.target === "outgoing_mid")?.durationBars).toBe(8);
+    expect(isMonotoneBand(events)).toBe(true);
   });
 
   it("swaps bass at bar 8 of 16 and 16 of 32", () => {

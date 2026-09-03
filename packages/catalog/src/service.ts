@@ -636,7 +636,7 @@ export class CatalogService {
     outgoingTrackId: string;
     incomingTrackId: string;
     preferredType?: "phrase_mix" | "bass_swap" | "crossfade" | "any";
-    barCount?: 16 | 32;
+    barCount?: 8 | 16 | 32;
     targetBpm?: number;
     allowExcessiveTempo?: boolean;
     allowLowConfidence?: boolean;
@@ -658,7 +658,7 @@ export class CatalogService {
     outgoingTrackId: string;
     incomingTrackId: string;
     type: "crossfade" | "phrase_mix" | "bass_swap";
-    barCount?: 16 | 32;
+    barCount?: 8 | 16 | 32;
     durationMs?: number;
     targetBpm?: number;
     outgoingPlaybackRate?: number;
@@ -912,6 +912,7 @@ export class CatalogService {
               .filter((entry) => entry.gainDb !== 0)
               .map((entry) => [entry.trackId, { gainDb: entry.gainDb }]),
           ),
+          { dropAnchored: true },
         )
       : ordered.map((entry) => ({
           ...entry,
@@ -959,7 +960,7 @@ export class CatalogService {
     transitionId: string;
     windowMs?: number;
     template?: "crossfade" | "phrase_mix" | "bass_swap";
-    barCount?: 16 | 32;
+    barCount?: 8 | 16 | 32;
     allowLowConfidence?: boolean;
   }) {
     return this.renders.startPreview(input);

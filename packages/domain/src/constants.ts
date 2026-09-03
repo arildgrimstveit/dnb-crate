@@ -88,7 +88,15 @@ export const MIN_BPM_HINT_CONFIDENCE = 0.3;
 export const PUBLISHED_BPM_INTEGER_TOLERANCE = 1.0;
 export const PUBLISHED_BPM_FRACTION_TOLERANCE = 0.5;
 export const DEFAULT_PHRASE_BARS = 16;
-export const PHRASE_BAR_OPTIONS = [16, 32] as const;
+export type PhraseBarCount = 8 | 16 | 32;
+
+export function normalizePhraseBars(value: number | null | undefined): PhraseBarCount {
+  if (value === 32 || value === 8) {
+    return value;
+  }
+  return 16;
+}
+export const PHRASE_BAR_OPTIONS = [8, 16, 32] as const;
 export const DEFAULT_BASS_CROSSOVER_HZ = 180;
 export const MIN_BASS_CROSSOVER_HZ = 120;
 export const MAX_BASS_CROSSOVER_HZ = 250;

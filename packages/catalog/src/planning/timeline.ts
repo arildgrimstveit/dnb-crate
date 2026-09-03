@@ -3,7 +3,6 @@ import {
   DEFAULT_BASS_LOW_ATTENUATION_DB,
   DEFAULT_BASS_SWAP_RAMP_MS,
   DEFAULT_MID_DIP_DB,
-  DEFAULT_PHRASE_BARS,
   DEFAULT_TRANSITION_OVERLAP_MS,
   LEVEL_MATCH_GAIN_MAX_DB,
   LEVEL_MATCH_GAIN_MIN_DB,
@@ -13,6 +12,7 @@ import {
   MIN_PLAYABLE_DURATION_MS,
   assertPlaybackRate,
   normalizeDnbBpm,
+  normalizePhraseBars,
   resolveBpmHint,
   phraseDurationMs,
   playbackRateForBpm,
@@ -20,6 +20,7 @@ import {
   snapToNearestBeat,
   choosePhraseShape,
   type CuePoint,
+  type PhraseBarCount,
   type SetPlanEntry,
   type Track,
   type TrackSection,
@@ -28,6 +29,7 @@ import {
 } from "@dnb-crate/domain";
 
 import { constrainMixOut, pickMixIn, pickMixOut, sectionEnergyAt } from "./cues.ts";
+import { planPhraseWindow, type PhraseWindow } from "./windows.ts";
 
 export type TimelineAnalysis = {
   gridOk: boolean;
@@ -118,16 +120,6 @@ function crossfade(reason: string, durationMs = DEFAULT_TRANSITION_OVERLAP_MS): 
   };
 }
 
-function longestSectionMs(sections: TrackSection[], types: TrackSectionType[]): number {
-  let longest = 0;
-  for (const section of sections) {
-    if (types.includes(section.type)) {
-      longest = Math.max(longest, section.endMs - section.startMs);
-    }
-  }
-  return longest;
-}
-
 function sectionAt(sections: TrackSection[], atMs: number | null): TrackSection | undefined {
   if (atMs == null) {
     return sections[0];
@@ -172,7 +164,11 @@ function chooseAlignedType(outgoing: TimelineTrack, incoming: TimelineTrack): {
 export function chooseTransition(
   outgoing: TimelineTrack,
   incoming: TimelineTrack,
-  options: { outgoingEffectiveBpm?: number } = {},
+  options: {
+    outgoingEffectiveBpm?: number;
+    dropAnchored?: boolean;
+    window?: PhraseWindow | null;
+  } = {},
 ): ChosenTransition {
   const outCanon = options.outgoingEffectiveBpm ?? tempoBpm(outgoing);
   const inCanon = tempoBpm(incoming);
@@ -202,15 +198,19 @@ export function chooseTransition(
     return crossfade("tempo-out-of-range", SHORT_CROSSFADE_MS);
   }
   const aligned = chooseAlignedType(outgoing, incoming);
-  const barMs = phraseDurationMs(1, target);
-  const introMs = incoming.analysis?.introLenMs
-    ?? longestSectionMs(incoming.analysis?.sections ?? [], ["intro"]);
-  const outroMs = Math.max(
-    outgoing.analysis?.outroLenMs ?? 0,
-    longestSectionMs(outgoing.analysis?.sections ?? [], ["outro", "breakdown"]),
-  );
-  const phraseBars: 16 | 32 =
-    introMs >= barMs * 28 || outroMs >= barMs * 28 ? 32 : DEFAULT_PHRASE_BARS;
+  const window =
+    options.window ??
+    planPhraseWindow(outgoing, incoming, {
+      dropAnchored: options.dropAnchored,
+      targetBpm: target,
+    });
+  const phraseBars: PhraseBarCount = normalizePhraseBars(window.barCount);
+  const phraseShape =
+    window.phraseShape ??
+    choosePhraseShape(
+      sectionAt(outgoing.analysis?.sections ?? [], window.mixOutMs),
+      sectionAt(incoming.analysis?.sections ?? [], window.mixInMs),
+    );
   return {
     transition: {
       id: crypto.randomUUID(),
@@ -223,15 +223,16 @@ export function chooseTransition(
         barCount: phraseBars,
         targetBpm: Number(target.toFixed(3)),
         crossoverHz: DEFAULT_BASS_CROSSOVER_HZ,
-        swapAtBar: phraseBars === 32 ? 16 : 8,
+        swapAtBar: phraseBars === 32 ? 16 : phraseBars === 8 ? 4 : 8,
         lowHandoverBar: defaultLowHandoverBar(phraseBars),
         rampMs: DEFAULT_BASS_SWAP_RAMP_MS,
         lowAttenuationDb: DEFAULT_BASS_LOW_ATTENUATION_DB,
         midDipDb: DEFAULT_MID_DIP_DB,
-        phraseShape: choosePhraseShape(
-          sectionAt(outgoing.analysis?.sections ?? [], outgoing.analysis?.mixOutMs ?? null),
-          sectionAt(incoming.analysis?.sections ?? [], incoming.analysis?.mixInMs ?? null),
-        ),
+        phraseShape,
+        mixOutMs: window.mixOutMs,
+        mixInMs: window.mixInMs,
+        ...(window.exitKind ? { exitKind: window.exitKind } : {}),
+        ...(window.incomingDropMs != null ? { incomingDropMs: window.incomingDropMs } : {}),
       },
     },
     outgoingRate,
@@ -245,14 +246,18 @@ export function musicalWindow(
   overlapMs: number,
   rate: number,
   isLast: boolean,
+  overrides?: { mixInMs?: number | null; mixOutMs?: number | null },
 ): { sourceStartMs: number; sourceEndMs: number; mixInMs: number; mixOutMs: number } {
   const analysis = track.analysis;
   const audioStart = analysis?.audioStartMs ?? 0;
   const audioEnd = analysis?.audioEndMs ?? track.durationMs;
   const downbeats = analysis?.downbeatTimesMs ?? [];
   const overlapSource = isLast ? 0 : overlapMs * (rate > 0 ? rate : 1);
-  const rawMixIn = analysis?.mixInMs ?? audioStart;
-  const rawMixOut = analysis?.mixOutMs ?? Math.max(audioStart, audioEnd - Math.max(overlapSource, 1));
+  const rawMixIn = overrides?.mixInMs ?? analysis?.mixInMs ?? audioStart;
+  const rawMixOut =
+    overrides?.mixOutMs ??
+    analysis?.mixOutMs ??
+    Math.max(audioStart, audioEnd - Math.max(overlapSource, 1));
   const snappedMixIn =
     downbeats.length > 0
       ? (snapToNearestBeat(rawMixIn, downbeats)?.positionMs ?? Math.round(rawMixIn))
@@ -308,8 +313,10 @@ export function buildEntries(
   tracks: TimelineTrack[],
   overlapMs = DEFAULT_TRANSITION_OVERLAP_MS,
   existing?: Map<string, Partial<SetPlanEntry>>,
+  options: { dropAnchored?: boolean } = {},
 ): SetPlanEntry[] {
   const referenceLufs = medianLufs(tracks.map((track) => track.analysis?.integratedLufs));
+  const pairWindows: Array<PhraseWindow | null> = [];
   const rates = tracks.map((track) => {
     const prior = existing?.get(track.id);
     return prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : 1;
@@ -323,8 +330,11 @@ export function buildEntries(
     const next = tracks[index + 1];
     if (isLast || !next) {
       chosen.push(null);
+      pairWindows.push(null);
       continue;
     }
+    const pairWindow = planPhraseWindow(track, next, { dropAnchored: options.dropAnchored });
+    pairWindows.push(pairWindow);
     if (prior?.transitionToNext) {
       chosen.push({
         transition: prior.transitionToNext,
@@ -343,6 +353,8 @@ export function buildEntries(
       locked && outCanon != null ? outCanon * (rates[index] ?? 1) : undefined;
     const result = chooseTransition(track, next, {
       outgoingEffectiveBpm: outgoingEffective,
+      dropAnchored: options.dropAnchored,
+      window: pairWindow,
     });
     const aligned = result.transition.type === "phrase_mix" || result.transition.type === "bass_swap";
     if (aligned) {
@@ -367,7 +379,10 @@ export function buildEntries(
     const overlap = isLast ? 0 : overlapFor(transition) || overlapMs;
     const rate =
       prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : (rates[index] ?? 1);
-    return musicalWindow(track, overlap, rate, isLast);
+    return musicalWindow(track, overlap, rate, isLast, {
+      mixInMs: pairWindows[index - 1]?.mixInMs,
+      mixOutMs: pairWindows[index]?.mixOutMs,
+    });
   });
 
   const entries: SetPlanEntry[] = [];

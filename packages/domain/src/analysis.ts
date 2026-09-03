@@ -80,6 +80,12 @@ export type SonicDescriptors = {
   tempoEvidence: TempoEvidence | null;
   audioStartMs?: number | null;
   audioEndMs?: number | null;
+  bars?: {
+    rms: number[];
+    sub: number[];
+    midFlux: number[];
+    onsetDensity: number[];
+  } | null;
 };
 
 export type TrackAnalysis = {
@@ -170,7 +176,7 @@ export type BassSwapParams = {
 
 export type TransitionProposal = {
   type: Exclude<TransitionType, "double_drop">;
-  barCount: 16 | 32 | null;
+  barCount: 8 | 16 | 32 | null;
   durationMs: number;
   targetBpm: number | null;
   outgoingTrackId: string;
@@ -232,11 +238,12 @@ function clamp(value: number, min: number, max: number): number {
 
 export function clampBassSwapParams(
   input: Partial<BassSwapParams> | null | undefined,
-  barCount: 16 | 32,
+  barCount: 8 | 16 | 32,
 ): BassSwapParams {
-  const defaultSwap = barCount === 32 ? 16 : 8;
+  const defaultSwap = barCount === 32 ? 16 : barCount === 8 ? 4 : 8;
   const swapRaw = input?.swapAtBar ?? defaultSwap;
-  const swapAtBar = swapRaw > 0 && swapRaw < barCount && swapRaw % 4 === 0 ? swapRaw : defaultSwap;
+  const step = barCount === 8 ? 2 : 4;
+  const swapAtBar = swapRaw > 0 && swapRaw < barCount && swapRaw % step === 0 ? swapRaw : defaultSwap;
   return {
     crossoverHz: clamp(
       input?.crossoverHz ?? DEFAULT_BASS_CROSSOVER_HZ,

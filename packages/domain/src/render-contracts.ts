@@ -147,7 +147,7 @@ export const createTransitionPreviewInputSchema = z.object({
     .enum(["crossfade", "phrase_mix", "bass_swap"])
     .optional()
     .describe("Override the planned transition template for this preview."),
-  barCount: z.union([z.literal(16), z.literal(32)]).optional(),
+  barCount: z.union([z.literal(8), z.literal(16), z.literal(32)]).optional(),
   allowLowConfidence: z.boolean().optional(),
 });
 

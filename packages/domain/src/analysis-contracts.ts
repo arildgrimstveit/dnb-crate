@@ -83,7 +83,7 @@ export const planTransitionInputSchema = z.object({
   outgoingTrackId: trackIdSchema,
   incomingTrackId: trackIdSchema,
   preferredType: z.enum(["phrase_mix", "bass_swap", "crossfade", "any"]).optional(),
-  barCount: z.union([z.literal(16), z.literal(32)]).optional(),
+  barCount: z.union([z.literal(8), z.literal(16), z.literal(32)]).optional(),
   targetBpm: z.number().positive().max(400).optional(),
   allowExcessiveTempo: z.boolean().optional(),
   allowLowConfidence: z.boolean().optional(),
@@ -94,7 +94,7 @@ export const validateTransitionInputSchema = z.object({
   outgoingTrackId: trackIdSchema,
   incomingTrackId: trackIdSchema,
   type: z.enum(["crossfade", "phrase_mix", "bass_swap"]),
-  barCount: z.union([z.literal(16), z.literal(32)]).optional(),
+  barCount: z.union([z.literal(8), z.literal(16), z.literal(32)]).optional(),
   durationMs: z.number().int().min(1000).max(120_000).optional(),
   targetBpm: z.number().positive().max(400).optional(),
   outgoingPlaybackRate: z.number().positive().optional(),
@@ -166,6 +166,15 @@ export const sonicDescriptorsSchema = z.object({
   tempoEvidence: tempoEvidenceSchema.nullable().optional(),
   audioStartMs: z.number().nullable().optional(),
   audioEndMs: z.number().nullable().optional(),
+  bars: z
+    .object({
+      rms: z.array(z.number()),
+      sub: z.array(z.number()),
+      midFlux: z.array(z.number()),
+      onsetDensity: z.array(z.number()),
+    })
+    .nullable()
+    .optional(),
 });
 
 export const beatGridSummarySchema = z.object({
@@ -356,7 +365,7 @@ export const automationEventSchema = z.object({
 
 export const transitionProposalSchema = z.object({
   type: z.enum(["crossfade", "phrase_mix", "bass_swap"]),
-  barCount: z.union([z.literal(16), z.literal(32)]).nullable(),
+  barCount: z.union([z.literal(8), z.literal(16), z.literal(32)]).nullable(),
   durationMs: z.number().int(),
   targetBpm: z.number().nullable(),
   outgoingTrackId: z.string(),

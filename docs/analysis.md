@@ -59,14 +59,14 @@ Analyzer-inserted cues never overwrite a manual cue of the same type. The transi
 
 Silence bounds come from RMS over 50 ms frames. Leading/trailing runs below **−50 dBFS** lasting ≥ **500 ms** set `descriptors.audioStartMs` / `audioEndMs`. Bars and section labels stop at `audioEndMs`. A last section with `sectionEnergy < 0.02` is dropped (not labelled `outro`).
 
-`create_set_plan` and `plan_transition` share `planning/cues.ts`: manual `outro_start` → energetic outro → last energetic breakdown → last eight downbeats → `audioEnd − overlap` (and the incoming mirror: manual intro → intro → first downbeat → `audioStart`). Candidate sections need `sectionEnergy ≥ 0.05`. If `mixOut + overlap` would pass `audioEndMs`, the mix-out snaps back to the previous downbeat. Playable windows grow toward `audioStartMs` when they would otherwise fall below 90 s; they never extend past `audioEndMs`.
+Aligned joins use `planning/windows.ts`: mix-in is drop-anchored (`D_in − B` for `B ∈ {32,16,8}` so the incoming drop lands at overlap end) unless the brief sets `dropAnchored: false`. Mix-out is the latest phrase-grid boundary that fits `B` — a quiet outro/breakdown (`exitKind: quietTail`) or the last phrase inside the final drop (`dropLanding`). `constrainMixOut` only clamps to `audioEndMs`; it never relocates a mix-out into a drop. Mix-in never starts at source 0 (first downbeat instead). Crossfade / no-drop tracks still use `planning/cues.ts` (manual outro → energetic outro → last energetic breakdown → last eight downbeats). Playable windows grow toward `audioStartMs` when they would otherwise fall below 90 s.
 
 ## Transition templates
 
 | Template     | Behaviour |
 | ------------ | --------- |
 | `crossfade`  | Equal-power `acrossfade` (`hsin`). No grid required. Default 30 s; 8 s on tempo mismatch. |
-| `phrase_mix` | 16 or 32 bars at target BPM. Incoming mid/high fade in over the whole overlap; outgoing mid/high fade out over the same span. Incoming low arrives at bar 12 (24 of 32). Outgoing low steps to −24 dB there, then to −inf. A drop outro into a drum-heavy intro uses `sequential` (incoming kit held until mid-phrase). |
+| `phrase_mix` | 8, 16 or 32 bars at target BPM. Complementary: incoming mid/high over the whole overlap; incoming low at bar 12 (24 of 32, 6 of 8). Sequential: incoming mid/high start 2 bars before mid-phrase. Landing (`exitKind: dropLanding`): incoming low stays at −inf until the last bar; outgoing mid/high fade only over the last 8 bars (4 when `B = 8`). |
 | `bass_swap`  | Mid/high crossfade across the overlap; outgoing mid dips −6 dB from bar 4. Lows swap at bar 8 (16 of 32) in `rampMs` (default 40). |
 
 `create_set_plan` picks `bass_swap` / `phrase_mix` / `crossfade` from the join (head/tail sections when present; track energy only as fallback), ±3% tempo, and section lengths, then tempo-matches aligned pairs as above.

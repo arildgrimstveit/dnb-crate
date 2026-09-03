@@ -24,7 +24,7 @@ export type PlanTransitionInput = {
   outgoingTrackId: string;
   incomingTrackId: string;
   preferredType?: "phrase_mix" | "bass_swap" | "crossfade" | "any";
-  barCount?: 16 | 32;
+  barCount?: 8 | 16 | 32;
   targetBpm?: number;
   allowExcessiveTempo?: boolean;
   allowLowConfidence?: boolean;
@@ -35,7 +35,7 @@ export type ValidateTransitionInput = {
   outgoingTrackId: string;
   incomingTrackId: string;
   type: "crossfade" | "phrase_mix" | "bass_swap";
-  barCount?: 16 | 32;
+  barCount?: 8 | 16 | 32;
   durationMs?: number;
   targetBpm?: number;
   outgoingPlaybackRate?: number;
@@ -67,7 +67,7 @@ function gridOk(analysis: TrackAnalysis | null, allowLow: boolean): boolean {
 function automationFor(
   type: TransitionProposal["type"],
   durationMs: number,
-  barCount: 16 | 32 | null,
+  barCount: 8 | 16 | 32 | null,
 ): AutomationEvent[] {
   const bars = barCount ?? 16;
   const barMs = durationMs / bars;
@@ -76,7 +76,7 @@ function automationFor(
 
 function propose(
   type: TransitionProposal["type"],
-  barCount: 16 | 32 | null,
+  barCount: 8 | 16 | 32 | null,
   outgoing: TrackBundle,
   incoming: TrackBundle,
   targetBpm: number | null,

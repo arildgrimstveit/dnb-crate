@@ -108,7 +108,7 @@ export type CreateTransitionPreviewInput = {
   transitionId: string;
   windowMs?: number;
   template?: "crossfade" | "phrase_mix" | "bass_swap";
-  barCount?: 16 | 32;
+  barCount?: 8 | 16 | 32;
   allowLowConfidence?: boolean;
 };
 

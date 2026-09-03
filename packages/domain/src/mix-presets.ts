@@ -7,18 +7,19 @@ import {
   MAX_BASS_SWAP_RAMP_MS,
   MIN_BASS_CROSSOVER_HZ,
   MIN_BASS_SWAP_RAMP_MS,
+  type PhraseBarCount,
 } from "./constants.ts";
 import { clampBassSwapParams, type AutomationEvent, type BassSwapParams, type TrackSection } from "./analysis.ts";
 import type { TransitionType } from "./planning.ts";
 
 export type MixPresetType = "crossfade" | "phrase_mix" | "bass_swap";
-export type PhraseShape = "complementary" | "sequential";
+export type PhraseShape = "complementary" | "sequential" | "landing";
 
 export const SEQUENTIAL_INCOMING_HEAD_ENERGY = 0.15;
 export const SEQUENTIAL_OUTGOING_DROP_ENERGY = 0.3;
 
 export type MixPresetParams = BassSwapParams & {
-  barCount: 16 | 32;
+  barCount: PhraseBarCount;
   targetBpm: number | null;
   lowHandoverBar: number;
   midDipDb: number;
@@ -29,19 +30,20 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-export function defaultLowHandoverBar(barCount: 16 | 32): number {
-  return barCount === 32 ? 24 : 12;
+export function defaultLowHandoverBar(barCount: PhraseBarCount): number {
+  return barCount === 32 ? 24 : barCount === 8 ? 6 : 12;
 }
 
 export function clampMixPresetParams(
   input: Partial<MixPresetParams> | null | undefined,
-  barCount: 16 | 32,
+  barCount: PhraseBarCount,
 ): MixPresetParams {
   const bass = clampBassSwapParams(input, barCount);
   const defaultHandover = defaultLowHandoverBar(barCount);
   const handoverRaw = input?.lowHandoverBar ?? bass.lowHandoverBar ?? defaultHandover;
+  const step = barCount === 8 ? 2 : 4;
   const lowHandoverBar =
-    handoverRaw > 0 && handoverRaw <= barCount && handoverRaw % 4 === 0
+    handoverRaw > 0 && handoverRaw <= barCount && handoverRaw % step === 0
       ? handoverRaw
       : defaultHandover;
   return {
@@ -66,7 +68,10 @@ export function clampMixPresetParams(
     ),
     midDipDb: clamp(input?.midDipDb ?? bass.midDipDb ?? DEFAULT_MID_DIP_DB, -24, 0),
     lowHandoverBar,
-    phraseShape: input?.phraseShape === "sequential" ? "sequential" : "complementary",
+    phraseShape:
+      input?.phraseShape === "sequential" || input?.phraseShape === "landing"
+        ? input.phraseShape
+        : "complementary",
   };
 }
 
@@ -125,12 +130,30 @@ function event(
   };
 }
 
+function landingEvents(params: MixPresetParams, barMs: number): AutomationEvent[] {
+  const end = params.barCount;
+  const midHighFade = end === 8 ? 4 : 8;
+  const midHighStart = Math.max(0, end - midHighFade);
+  return [
+    event("incoming_mid", 0, end, null, 0, barMs),
+    event("incoming_high", 0, end, null, 0, barMs),
+    event("incoming_low", end - 1, 1, null, 0, barMs),
+    event("outgoing_low", end, 0, 0, null, barMs, Math.max(params.rampMs, 1)),
+    event("outgoing_mid", midHighStart, midHighFade, 0, null, barMs),
+    event("outgoing_high", midHighStart, midHighFade, 0, null, barMs),
+  ];
+}
+
 function phraseEvents(params: MixPresetParams, barMs: number): AutomationEvent[] {
+  if (params.phraseShape === "landing") {
+    return landingEvents(params, barMs);
+  }
   const handover = params.lowHandoverBar;
   const end = params.barCount;
   const half = end / 2;
-  const incomingStart = params.phraseShape === "sequential" ? half : 0;
-  const incomingBars = params.phraseShape === "sequential" ? half : end;
+  const overlapBars = params.phraseShape === "sequential" ? 2 : 0;
+  const incomingStart = params.phraseShape === "sequential" ? Math.max(0, half - overlapBars) : 0;
+  const incomingBars = params.phraseShape === "sequential" ? end - incomingStart : end;
   const outgoingBars = params.phraseShape === "sequential" ? half : end;
   return [
     event("incoming_mid", incomingStart, incomingBars, null, 0, barMs),
@@ -168,7 +191,7 @@ function bassSwapEvents(params: MixPresetParams, barMs: number): AutomationEvent
 export function expandPreset(
   type: MixPresetType | TransitionType,
   params: Partial<MixPresetParams> | null | undefined,
-  barCount: 16 | 32,
+  barCount: PhraseBarCount,
   barMs: number,
 ): AutomationEvent[] {
   if (type === "crossfade") {
