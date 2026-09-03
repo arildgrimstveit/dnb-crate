@@ -446,20 +446,28 @@ describe("planner tempo matching", () => {
     };
   }
 
-  it("tempo-matches 174/176 onto 175", () => {
+  it("locks a 174/176 pair to the outgoing integer instead of averaging to 175", () => {
     const a = gridTrack(174, 4);
     const b = gridTrack(176, 9);
     const chosen = chooseTransition(a, b);
     expect(["bass_swap", "phrase_mix"]).toContain(chosen.transition.type);
-    expect(chosen.targetBpm).toBe(175);
-    expect(chosen.transition.parameters.targetBpm).toBe(175);
-    expect(chosen.incomingRate).toBeCloseTo(175 / 176, 5);
-    expect(chosen.outgoingRate).toBeCloseTo(175 / 174, 5);
+    expect(chosen.targetBpm).toBe(174);
+    expect(chosen.transition.parameters.targetBpm).toBe(174);
+    expect(chosen.outgoingRate).toBe(1);
+    expect(chosen.incomingRate).toBeCloseTo(174 / 176, 5);
     expect(Math.abs(chosen.incomingRate - 1)).toBeLessThanOrEqual(0.03);
-    expect(Math.abs(chosen.outgoingRate - 1)).toBeLessThanOrEqual(0.03);
     const entries = buildEntries([a, b]);
-    expect(entries[0]?.playbackRate).toBeCloseTo(175 / 174, 5);
-    expect(entries[1]?.playbackRate).toBeCloseTo(175 / 176, 5);
+    expect(entries[0]?.playbackRate).toBe(1);
+    expect(entries[1]?.playbackRate).toBeCloseTo(174 / 176, 5);
+  });
+
+  it("keeps a 174+174+176 chain at 174 and only stretches the 176", () => {
+    const entries = buildEntries([gridTrack(174), gridTrack(174), gridTrack(176)]);
+    expect(entries[0]?.playbackRate).toBe(1);
+    expect(entries[1]?.playbackRate).toBe(1);
+    expect(entries[2]?.playbackRate).toBeCloseTo(174 / 176, 5);
+    expect(entries[0]?.transitionToNext?.parameters.targetBpm).toBe(174);
+    expect(entries[1]?.transitionToNext?.parameters.targetBpm).toBe(174);
   });
 
   it("falls back to an 8s crossfade when 174/182 cannot lock within 3%", () => {
@@ -661,7 +669,7 @@ describe("planner tempo matching", () => {
     const a = gridTrack(174);
     const b = gridTrack(176);
     const first = buildEntries([a, b]);
-    expect(first[0]?.playbackRate).not.toBe(1);
+    expect(first[1]?.playbackRate).not.toBe(1);
     const prior = new Map([
       [a.id, { ...first[0]!, playbackRate: 1.01 }],
       [b.id, first[1]!],

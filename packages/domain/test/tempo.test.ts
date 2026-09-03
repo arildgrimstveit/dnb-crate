@@ -5,8 +5,10 @@ import {
   assertPlaybackRate,
   DomainError,
   normalizeDnbBpm,
+  pairTargetBpm,
   phraseDurationMs,
   playbackRateForBpm,
+  snapPlaybackRate,
   publishedBpmTolerance,
   reconstructGrid,
   resolveBpmHint,
@@ -32,6 +34,14 @@ describe("DnB tempo helpers", () => {
 
   it("computes 16-bar phrase length at 174 BPM", () => {
     expect(Math.round(phraseDurationMs(16, 174))).toBe(22069);
+  });
+
+  it("locks same-integer pairs and prefers outgoing 174 over a 175 average", () => {
+    expect(pairTargetBpm(174, 174)).toBe(174);
+    expect(pairTargetBpm(174, 176)).toBe(174);
+    expect(pairTargetBpm(174, 176, { chainTargetBpm: 174 })).toBe(174);
+    expect(snapPlaybackRate(1.001)).toBe(1);
+    expect(snapPlaybackRate(174 / 176)).toBeCloseTo(174 / 176, 5);
   });
 
   it("enforces ±3% playback rate unless overridden", () => {

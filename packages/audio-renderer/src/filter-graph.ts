@@ -1,4 +1,5 @@
 import {
+  ATEMPO_SKIP_THRESHOLD,
   BAND_HIGH_CROSSOVER_HZ,
   CROSSFADE_CURVE,
   clampMixPresetParams,
@@ -55,7 +56,7 @@ export function expectedDurationMs(trims: FilterTrim[], overlapSeconds: number[]
 }
 
 function atempoSuffix(rate: number | undefined): string {
-  if (rate === undefined || Math.abs(rate - 1) < 1e-6) {
+  if (rate === undefined || Math.abs(rate - 1) < ATEMPO_SKIP_THRESHOLD) {
     return "";
   }
   return `,atempo=${rate.toFixed(6)}`;

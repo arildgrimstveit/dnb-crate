@@ -5,7 +5,7 @@ import {
   assertPlaybackRate,
   clampMixPresetParams,
   expandPreset,
-  normalizeDnbBpm,
+  pairTargetBpm,
   phraseDurationMs,
   playbackRateForBpm,
   resolveCanonicalBpm,
@@ -234,11 +234,10 @@ export function planTransition(
   const outBpm = resolveCanonicalBpm(outgoing.track, outgoing.analysis).bpm;
   const inBpm = resolveCanonicalBpm(incoming.track, incoming.analysis).bpm;
   let targetBpm = input.targetBpm ?? null;
-  if (targetBpm === null && outBpm && inBpm) {
-    const folded = normalizeDnbBpm((outBpm + inBpm) / 2);
-    targetBpm = folded?.bpm ?? (outBpm + inBpm) / 2;
+  if (outBpm && inBpm) {
+    targetBpm = pairTargetBpm(outBpm, inBpm, { chainTargetBpm: input.targetBpm });
   } else if (targetBpm !== null) {
-    targetBpm = normalizeDnbBpm(targetBpm)?.bpm ?? targetBpm;
+    targetBpm = pairTargetBpm(targetBpm, targetBpm, { chainTargetBpm: targetBpm });
   }
   const barCount = input.barCount ?? DEFAULT_PHRASE_BARS;
   const allow = {

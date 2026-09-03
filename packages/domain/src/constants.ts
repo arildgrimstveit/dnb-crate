@@ -92,6 +92,8 @@ export const CROSSFADE_CURVE = "hsin";
 export const DNB_BPM_MIN = 160;
 export const DNB_BPM_MAX = 190;
 export const MAX_TEMPO_DEVIATION = 0.03;
+/** Skip atempo when |rate − 1| is below this (~0.35 BPM at 174). */
+export const ATEMPO_SKIP_THRESHOLD = 0.002;
 export const MIN_ANALYSIS_CONFIDENCE = 0.6;
 export const MIN_BPM_HINT_CONFIDENCE = 0.3;
 export const PUBLISHED_BPM_INTEGER_TOLERANCE = 1.0;

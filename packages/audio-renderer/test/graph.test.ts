@@ -57,6 +57,16 @@ describe("filter graph", () => {
     expect(filter).toContain("atempo=1.030000");
     expect(filter).toContain("atempo=0.970000");
     expect(filter).not.toContain("asetrate");
+    const tiny = buildAcrossfadeFilter({
+      trims: [
+        { startSec: 0, endSec: 8, gainDb: 0, playbackRate: 1.001 },
+        { startSec: 0, endSec: 8, gainDb: 0, playbackRate: 0.999 },
+      ],
+      overlapSeconds: [2],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+    });
+    expect(tiny).not.toContain("atempo");
     const expected = expectedDurationMs(
       [
         { startSec: 0, endSec: 8, gainDb: 0, playbackRate: 1.03 },

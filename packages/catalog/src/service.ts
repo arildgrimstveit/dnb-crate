@@ -952,7 +952,7 @@ export class CatalogService {
               .filter((entry) => entry.gainDb !== 0)
               .map((entry) => [entry.trackId, { gainDb: entry.gainDb }]),
           ),
-          { dropAnchored: true },
+          { dropAnchored: true, targetBpm: stored.plan.targetBpm },
         )
       : ordered.map((entry) => ({
           ...entry,
@@ -1193,6 +1193,7 @@ export class CatalogService {
       orderedTracks.map((track) => ({ ...track, analysis: this.toTimeline(track) })),
       undefined,
       new Map(entries.map((entry) => [entry.trackId, entry])),
+      { targetBpm: stored.plan.targetBpm },
     );
     const plan: SetPlanV1 = {
       ...stored.plan,

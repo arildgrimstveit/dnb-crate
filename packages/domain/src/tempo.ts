@@ -1,4 +1,5 @@
 import {
+  ATEMPO_SKIP_THRESHOLD,
   DNB_BPM_MAX,
   DNB_BPM_MIN,
   MAX_TEMPO_DEVIATION,
@@ -27,7 +28,49 @@ export function playbackRateForBpm(sourceBpm: number, targetBpm: number): number
       "BPM must be positive to compute playback rate",
     );
   }
-  return targetBpm / sourceBpm;
+  return snapPlaybackRate(targetBpm / sourceBpm);
+}
+
+export function snapPlaybackRate(
+  rate: number,
+  epsilon = ATEMPO_SKIP_THRESHOLD,
+): number {
+  return Math.abs(rate - 1) < epsilon ? 1 : rate;
+}
+
+export function foldedIntegerBpm(bpm: number): number | null {
+  const folded = normalizeDnbBpm(bpm);
+  if (!folded) {
+    return null;
+  }
+  return Math.round(folded.bpm);
+}
+
+export function pairTargetBpm(
+  outCanon: number,
+  inCanon: number,
+  options: { chainTargetBpm?: number | null; outgoingLocked?: boolean } = {},
+): number {
+  if (options.outgoingLocked) {
+    return outCanon;
+  }
+  const outFold = foldedIntegerBpm(outCanon) ?? Math.round(outCanon);
+  const inFold = foldedIntegerBpm(inCanon) ?? Math.round(inCanon);
+  const fits = (source: number, target: number): boolean =>
+    Math.abs(playbackRateForBpm(source, target) - 1) <= MAX_TEMPO_DEVIATION + 1e-9;
+  if (options.chainTargetBpm != null && options.chainTargetBpm > 0) {
+    const chain = foldedIntegerBpm(options.chainTargetBpm) ?? options.chainTargetBpm;
+    if (fits(outCanon, chain) && fits(inCanon, chain)) {
+      return chain;
+    }
+  }
+  if (outFold === inFold) {
+    return outFold;
+  }
+  if (fits(inCanon, outFold)) {
+    return outFold;
+  }
+  return normalizeDnbBpm((outCanon + inCanon) / 2)?.bpm ?? (outCanon + inCanon) / 2;
 }
 
 export function assertPlaybackRate(

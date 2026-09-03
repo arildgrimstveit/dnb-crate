@@ -11,7 +11,7 @@ import {
   MIN_ANALYSIS_CONFIDENCE,
   MIN_PLAYABLE_DURATION_MS,
   assertPlaybackRate,
-  normalizeDnbBpm,
+  pairTargetBpm,
   camelotNumberDistance,
   normalizePhraseBars,
   resolveBpmHint,
@@ -190,6 +190,7 @@ export function chooseTransition(
     outgoingEffectiveBpm?: number;
     dropAnchored?: boolean;
     window?: PhraseWindow | null;
+    chainTargetBpm?: number | null;
   } = {},
 ): ChosenTransition {
   const outCanon = options.outgoingEffectiveBpm ?? tempoBpm(outgoing);
@@ -207,10 +208,10 @@ export function chooseTransition(
   if (tempoMismatch) {
     return crossfade("tempo-out-of-range", SHORT_CROSSFADE_MS);
   }
-  const target =
-    options.outgoingEffectiveBpm != null
-      ? outCanon
-      : (normalizeDnbBpm((outCanon + inCanon) / 2)?.bpm ?? (outCanon + inCanon) / 2);
+  const target = pairTargetBpm(outCanon, inCanon, {
+    chainTargetBpm: options.chainTargetBpm,
+    outgoingLocked: options.outgoingEffectiveBpm != null,
+  });
   const outgoingRate = playbackRateForBpm(outCanon, target);
   const incomingRate = playbackRateForBpm(inCanon, target);
   try {
@@ -346,7 +347,7 @@ export function buildEntries(
   tracks: TimelineTrack[],
   overlapMs = DEFAULT_TRANSITION_OVERLAP_MS,
   existing?: Map<string, Partial<SetPlanEntry>>,
-  options: { dropAnchored?: boolean } = {},
+  options: { dropAnchored?: boolean; targetBpm?: number | null } = {},
 ): SetPlanEntry[] {
   const referenceLufs = medianLufs(tracks.map((track) => track.analysis?.integratedLufs));
   const pairWindows: Array<PhraseWindow | null> = [];
@@ -388,6 +389,7 @@ export function buildEntries(
       outgoingEffectiveBpm: outgoingEffective,
       dropAnchored: options.dropAnchored,
       window: pairWindow,
+      chainTargetBpm: options.targetBpm,
     });
     const alignedWindow = bakeWindowAlignment(track, next, pairWindow, {
       targetBpm: result.targetBpm,

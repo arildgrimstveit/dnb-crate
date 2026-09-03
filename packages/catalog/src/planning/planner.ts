@@ -263,7 +263,12 @@ export function draftSetPlan(
   while (safety < PLANNER_CANDIDATE_CAP) {
     safety += 1;
     const currentDuration = planDurationMs(
-      buildEntries(selected.map((track) => ({ ...track, analysis: analyses.get(track.id) ?? null }))),
+      buildEntries(
+        selected.map((track) => ({ ...track, analysis: analyses.get(track.id) ?? null })),
+        undefined,
+        undefined,
+        { dropAnchored: input.dropAnchored, targetBpm: input.targetBpm },
+      ),
     );
     const reservedDuration = reservedEnd
       ? Math.max(reservedEnd.durationMs - DEFAULT_TRANSITION_OVERLAP_MS, 0)
@@ -348,7 +353,7 @@ export function draftSetPlan(
     selected.map((track) => ({ ...track, analysis: analyses.get(track.id) ?? null })),
     undefined,
     undefined,
-    { dropAnchored: input.dropAnchored },
+    { dropAnchored: input.dropAnchored, targetBpm: input.targetBpm },
   );
   const duration = planDurationMs(entries);
   const partial =
