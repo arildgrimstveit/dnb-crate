@@ -41,7 +41,21 @@ Joins:
 - 11 Falling Down → Saint Angel — `crossfade` **8 s** (`tempo-out-of-range`)
 - 12 Saint Angel → Angel — `crossfade` 30 s
 
-Ear-check previews (pending user listen): `output/previews/coming-down-witchcraft-phrase-mix-v2.2.wav` (job `16fb2e60-…`, sha256 `4dbc5491…`); `output/previews/witchcraft-tidal-wave-bass-swap-v2.2.wav` (job `bd8c72e2-…`, sha256 `7bba62b0…`; planner type on this pair is `phrase_mix`, preview forced `bass_swap` 16). Did not overwrite `witchcraft-tidal-wave-bass-swap.wav`.
+Ear-check (2026-09-03), hour `hour-mix-v2.2.wav` plus the two standalone previews. Overall **definitely better** than v2.1.
+
+- Witchcraft → Tidal Wave `bass_swap` preview — **very good** (job `bd8c72e2-…`, sha256 `7bba62b0…`; planner type on this pair is `phrase_mix`, preview forced `bass_swap` 16). Did not overwrite `witchcraft-tidal-wave-bass-swap.wav`.
+- Coming Down → Witchcraft — hour **okay** / preview **pretty good** (job `16fb2e60-…`, sha256 `4dbc5491…`).
+- Complicated → Tidal Wave — **pairing fail**. 8 s cut is not the complaint; Complicated outro + Tidal Wave intro do not match. Preferred Tidal Wave in is the Witchcraft `bass_swap`.
+- Tidal Wave → Coming Down — Tidal Wave **fades early**; vocals still going when Coming Down starts (`phrase_mix` 32, mix-out 110518).
+- Witchcraft → It Must Be — **good**, but Witchcraft **fades a bit early** (30 s crossfade, mix-out 165554).
+- It Must Be → Turn Up the Bass — **amazing**.
+- Turn Up the Bass → Like a Memory — **very very good**; dead air gone.
+- Like a Memory → Departure — **very good**.
+- Departure → Last Jungle — **very good**.
+- Last Jungle → Basic Instinct — **good**.
+- Basic Instinct → Falling Down — **good**.
+- Falling Down → Saint Angel — **okay**; tracks do not fit well together.
+- Saint Angel → Angel — **quite perfect**.
 
 Missing-grid + tempo-mismatch joins now use 8 s (Complicated → Tidal Wave; Basic Instinct → Falling Down; Falling Down → Saint Angel). Matching-tempo missing grids stay 30 s.
 
