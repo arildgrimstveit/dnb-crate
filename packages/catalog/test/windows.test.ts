@@ -61,6 +61,24 @@ describe("phrase windows", () => {
     expect(incomingLow?.fromDb).toBeNull();
   });
 
+  it("uses 16 bars instead of a 32-bar duck when the incoming head is quiet", () => {
+    const outgoing = track(
+      "out",
+      [section("drop", 16, 48, 0.9), section("outro", 48, 72, 0.2)],
+      72,
+    );
+    const incoming = track(
+      "in",
+      [section("intro", 0, 16, 0.15), section("build", 16, 48, 0.2), section("drop", 48, 80, 0.85)],
+      80,
+    );
+    const window = planPhraseWindow(outgoing, incoming);
+    expect(window.exitKind).toBe("quietTail");
+    expect(window.barCount).toBe(16);
+    expect(window.mixInBar).toBe(32);
+    expect(window.phraseShape).not.toBe("landing");
+  });
+
   it("mixes out at the outro phrase boundary as quietTail", () => {
     const outgoing = track(
       "out",

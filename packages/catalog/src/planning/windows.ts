@@ -409,8 +409,20 @@ export function planPhraseWindow(
     };
   }
 
+  let headRel = incomingHeadRelEnergy(incoming, chosen.mixInMs, inBpm);
+  if (
+    chosen.barCount === 32 &&
+    chosen.exit.exitKind === "quietTail" &&
+    headRel < KIT_ON
+  ) {
+    const sixteen = candidates.find((item) => item.barCount === 16);
+    if (sixteen) {
+      chosen = sixteen;
+      headRel = incomingHeadRelEnergy(incoming, chosen.mixInMs, inBpm);
+    }
+  }
+
   let phraseShape = chosen.exit.phraseShape;
-  const headRel = incomingHeadRelEnergy(incoming, chosen.mixInMs, inBpm);
   if (headRel >= KIT_ON && phraseShape !== "landing") {
     phraseShape = "sequential";
   } else if (headRel >= KIT_ON && chosen.barCount > 8 && phraseShape === "landing") {
