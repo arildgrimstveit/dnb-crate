@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createCatalogRuntime } from "../src/index.ts";
-import type { AppConfig } from "@dnb-crate/domain";
+import { DSP_ANALYZER_NAME, type AppConfig, type SonicDescriptors } from "@dnb-crate/domain";
 import { validateSetPlan } from "../src/planning/validate.ts";
 import { analysisToTimeline, buildEntries, chooseTransition, type TimelineAnalysis, type TimelineTrack } from "../src/planning/timeline.ts";
 import { planTransition } from "../src/planning/transition-planner.ts";
@@ -42,10 +42,11 @@ function seedTrack(
   spec: {
     title: string;
     artist: string;
-    bpm: number;
+    bpm?: number | null;
     camelot: string;
-    energy: number;
+    energy?: number | null;
     moods?: string[];
+    genres?: string[];
     rating?: number;
     durationMs?: number;
   },
@@ -62,19 +63,82 @@ function seedTrack(
     durationMs: spec.durationMs ?? 150_000,
     sampleRateHz: 44100,
     channels: 2,
-    bpm: spec.bpm,
-    bpmSource: "manual",
+    bpm: spec.bpm ?? null,
+    bpmSource: spec.bpm == null ? null : "manual",
     musicalKey: key,
     camelotKey: spec.camelot,
     keySource: "manual",
   });
   catalog.service.updateTrackMetadata(id, {
-    energy: spec.energy,
+    energy: spec.energy === undefined ? 5 : spec.energy,
     rating: spec.rating ?? 4,
     moods: spec.moods ?? ["liquid"],
-    subgenres: ["liquid"],
+    subgenres: spec.genres ? [] : ["liquid"],
+    genres: spec.genres,
   });
   return id;
+}
+
+function stubDescriptors(
+  catalog: ReturnType<typeof runtime>,
+  trackId: string,
+  descriptors: Partial<SonicDescriptors> & { energy?: number | null },
+  options: { gridRejected?: boolean; bpm?: number | null; bpmRaw?: number | null; bpmConfidence?: number | null } = {},
+): void {
+  catalog.analyses.upsert({
+    trackId,
+    analyzerName: DSP_ANALYZER_NAME,
+    analyzerVersion: "3.0.0",
+    bpm: options.bpm ?? 174,
+    bpmConfidence: options.bpmConfidence ?? 0.8,
+    bpmRaw: options.bpmRaw ?? options.bpm ?? 174,
+    referenceBpm: null,
+    beatTimesMs: [],
+    downbeatTimesMs: [],
+    gridRejected: options.gridRejected ?? false,
+    gridRejectionReason: options.gridRejected ? "low confidence" : null,
+    gridSource: "analyzed",
+    musicalKey: null,
+    keyConfidence: null,
+    keyMode: null,
+    camelotKey: null,
+    tempoStability: null,
+    downbeatConfidence: null,
+    integratedLufs: null,
+    truePeakDb: null,
+    lowBandEnergy: null,
+    midBandEnergy: null,
+    highBandEnergy: null,
+    waveformSummary: null,
+    beatAnchorMs: null,
+    descriptors: {
+      integratedLufs: null,
+      shortTermLufsMean: null,
+      shortTermLufsMax: null,
+      truePeakDb: null,
+      subBassRatio: descriptors.subBassRatio ?? 0.5,
+      brightness: descriptors.brightness ?? 0.1,
+      onsetDensity: null,
+      dynamicRange: null,
+      dropIntensity: null,
+      suggestedEnergy: descriptors.suggestedEnergy ?? (descriptors.energy != null ? Math.round(1 + 9 * descriptors.energy) : 6),
+      energy: descriptors.energy ?? null,
+      danceability: descriptors.danceability ?? null,
+      acousticness: descriptors.acousticness ?? null,
+      melodicness: descriptors.melodicness ?? null,
+      valence: descriptors.valence ?? null,
+      waveformSummary: [],
+      lowBandEnergy: null,
+      midBandEnergy: null,
+      highBandEnergy: null,
+      chromaVector: null,
+      tempoEvidence: null,
+    },
+    engineRuntimeMs: 1,
+    analyzedAt: new Date().toISOString(),
+    suggestedCues: [],
+    sections: [],
+  });
 }
 
 describe("set planning", () => {
@@ -920,6 +984,208 @@ describe("applyTransition and silence windows", () => {
       audioEndMsByTrackId: new Map([[track.id, 242_800]]),
     });
     expect(result.warnings.some((issue) => issue.code === "WINDOW_IN_SILENCE")).toBe(true);
+  });
+});
+
+describe("descriptor filters and mood presets", () => {
+  it("hard-filters the pool by descriptor energy", () => {
+    const catalog = runtime();
+    const low = seedTrack(catalog, { title: "Low", artist: "A", bpm: 174, camelot: "8A", energy: 5 });
+    const high = seedTrack(catalog, { title: "High", artist: "B", bpm: 174, camelot: "9A", energy: 5 });
+    stubDescriptors(catalog, low, { energy: 0.4 });
+    stubDescriptors(catalog, high, { energy: 0.85 });
+    const created = catalog.service.createSetPlan({
+      name: "Peak only",
+      targetDurationMs: 300_000,
+      descriptors: { energy: { min: 0.7 } },
+      seed: 1,
+    });
+    const ids = created.plan.entries.map((entry) => entry.trackId);
+    expect(ids).toContain(high);
+    expect(ids).not.toContain(low);
+    expect(created.explanation.rejected.some((row) => row.reason === "DESCRIPTOR_OUT_OF_RANGE")).toBe(
+      true,
+    );
+  });
+
+  it("scores mood presets when manual moods are empty and ignores them when set", () => {
+    const catalog = runtime();
+    const liquid = seedTrack(catalog, {
+      title: "Liquid Bed",
+      artist: "A",
+      bpm: 174,
+      camelot: "8A",
+      energy: 5,
+      moods: [],
+    });
+    const peak = seedTrack(catalog, {
+      title: "Peak Bed",
+      artist: "B",
+      bpm: 174,
+      camelot: "9A",
+      energy: 5,
+      moods: [],
+    });
+    stubDescriptors(catalog, liquid, { energy: 0.5, melodicness: 0.7, danceability: 0.65 });
+    stubDescriptors(catalog, peak, { energy: 0.85, melodicness: 0.2, danceability: 0.8 });
+    const created = catalog.service.createSetPlan({
+      name: "Preset liquid",
+      targetDurationMs: 180_000,
+      startTrackId: liquid,
+      preferredMoods: ["liquid"],
+      seed: 1,
+    });
+    expect(created.explanation.selected[0]?.score.reasons).toContain("MOOD_PRESET");
+
+    const manual = seedTrack(catalog, {
+      title: "Manual Peak",
+      artist: "C",
+      bpm: 174,
+      camelot: "10A",
+      energy: 5,
+      moods: ["liquid"],
+    });
+    stubDescriptors(catalog, manual, { energy: 0.85, melodicness: 0.1 });
+    const withManual = catalog.service.createSetPlan({
+      name: "Manual wins",
+      targetDurationMs: 180_000,
+      startTrackId: manual,
+      preferredMoods: ["liquid"],
+      seed: 1,
+    });
+    expect(withManual.explanation.selected[0]?.score.reasons).toContain("MOOD_MATCH");
+    expect(withManual.explanation.selected[0]?.score.reasons).not.toContain("MOOD_PRESET");
+  });
+
+  it("uses descriptor energy for arc validation", () => {
+    const catalog = runtime();
+    const id = seedTrack(catalog, {
+      title: "Arc",
+      artist: "A",
+      bpm: 174,
+      camelot: "8A",
+      energy: null,
+    });
+    stubDescriptors(catalog, id, { energy: 0.8 });
+    const created = catalog.service.createSetPlan({
+      name: "Arc energy",
+      targetDurationMs: 150_000,
+      startTrackId: id,
+      requestedArc: [
+        { atFraction: 0, targetEnergy: 8 },
+        { atFraction: 1, targetEnergy: 8 },
+      ],
+      seed: 1,
+    });
+    expect(created.validation.diagnostics.energyByEntry[0]?.actualEnergy).toBe(8);
+  });
+
+  it("never co-selects the same recording_key", () => {
+    const catalog = runtime();
+    const a = seedTrack(catalog, { title: "Copy A", artist: "A", bpm: 174, camelot: "8A", energy: 6 });
+    const b = seedTrack(catalog, { title: "Copy B", artist: "A", bpm: 174, camelot: "8A", energy: 6 });
+    catalog.db
+      .prepare("UPDATE tracks SET recording_key = ? WHERE id IN (?, ?)")
+      .run("mbid:same-recording", a, b);
+    const created = catalog.service.createSetPlan({
+      name: "Dedupe",
+      targetDurationMs: 400_000,
+      seed: 1,
+    });
+    const ids = created.plan.entries.map((entry) => entry.trackId);
+    expect(ids.includes(a) && ids.includes(b)).toBe(false);
+    expect(created.explanation.rejected.some((row) => row.reason === "DUPLICATE_RECORDING")).toBe(
+      true,
+    );
+  });
+
+  it("treats Chase & Status and Chase And Status as one artist for spacing", () => {
+    const catalog = runtime();
+    const a = seedTrack(catalog, {
+      title: "One",
+      artist: "Chase & Status",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
+    const b = seedTrack(catalog, {
+      title: "Two",
+      artist: "Chase And Status",
+      bpm: 174,
+      camelot: "9A",
+      energy: 7,
+    });
+    const created = catalog.service.createSetPlan({
+      name: "Spacing",
+      targetDurationMs: 300_000,
+      startTrackId: a,
+      endTrackId: b,
+      artistRepeatSpacing: 1,
+      seed: 1,
+    });
+    expect(created.validation.warnings.some((issue) => issue.code === "ARTIST_REPEAT")).toBe(true);
+  });
+
+  it("excludes IDM via genre filters", () => {
+    const catalog = runtime();
+    const keep = seedTrack(catalog, {
+      title: "Keep",
+      artist: "A",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+      genres: ["drum and bass"],
+    });
+    const drop = seedTrack(catalog, {
+      title: "Drop",
+      artist: "B",
+      bpm: 174,
+      camelot: "9A",
+      energy: 6,
+      genres: ["idm"],
+    });
+    const created = catalog.service.createSetPlan({
+      name: "No IDM",
+      targetDurationMs: 300_000,
+      genres: { exclude: ["idm"] },
+      seed: 1,
+    });
+    const ids = created.plan.entries.map((entry) => entry.trackId);
+    expect(ids).toContain(keep);
+    expect(ids).not.toContain(drop);
+    expect(created.explanation.rejected.some((row) => row.reason === "GENRE_EXCLUDED")).toBe(true);
+  });
+
+  it("lets bpmHint satisfy BPM filters and keeps the join as crossfade", () => {
+    const catalog = runtime();
+    const grid = seedTrack(catalog, { title: "Grid", artist: "A", bpm: 174, camelot: "8A", energy: 6 });
+    const hint = seedTrack(catalog, {
+      title: "Hint",
+      artist: "B",
+      bpm: null,
+      camelot: "9A",
+      energy: 6,
+    });
+    stubDescriptors(catalog, hint, { energy: 0.6 }, {
+      gridRejected: true,
+      bpm: null,
+      bpmRaw: 174,
+      bpmConfidence: 0.55,
+    });
+    const created = catalog.service.createSetPlan({
+      name: "Hint pool",
+      targetDurationMs: 300_000,
+      bpmMin: 170,
+      bpmMax: 180,
+      startTrackId: grid,
+      endTrackId: hint,
+      seed: 1,
+    });
+    expect(created.plan.entries.some((entry) => entry.trackId === hint)).toBe(true);
+    const hintScore = created.explanation.selected.find((row) => row.trackId === hint);
+    expect(hintScore?.score.reasons).toContain("BPM_HINT_ONLY");
+    const join = created.plan.entries[0]?.transitionToNext;
+    expect(join?.type).toBe("crossfade");
   });
 });
 

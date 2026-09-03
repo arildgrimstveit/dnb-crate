@@ -22,7 +22,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `search_tracks`
 
-- Input: optional `query`, `artist`, `bpmMin`/`bpmMax`, `musicalKey`, `camelotKey`, `energyMin`/`energyMax`, `minRating`, `subgenres` + `subgenresMatch`, `moods` + `moodsMatch`, `tags` + `tagsMatch`, `analysisStatus`, `sort`, `direction`, `limit` (1–50), `cursor`
+- Input: optional `query`, `artist`, `bpmMin`/`bpmMax`, `musicalKey`, `camelotKey`, `energyMin`/`energyMax`, `minRating`, `subgenres` + `subgenresMatch`, `moods` + `moodsMatch`, `tags` + `tagsMatch`, `analysisStatus`, `descriptors` (`energy`/`danceability`/`valence`/`acousticness`/`melodicness`/`subBass`/`brightness` each `{min,max}`), `genres` include/exclude, `sort`, `direction`, `limit` (1–50), `cursor`
 - Output data: `{ tracks, nextCursor, limit, sort, direction }`
 
 ## `get_track`
@@ -40,7 +40,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 ## `get_library_stats`
 
 - Input: `{}`
-- Output data: counts, `extensionCounts`, missing-field counts, `totalDurationMs`, `analysisCoverage` (analyzed/notAnalyzed, engine versions, accepted/rejected/reference/bpmHintOnly), `metadataCoverage` (bpm/key by source, energy, moods, genres, isrc, label, releaseDate, recordingMbid, duplicateGroups)
+- Output data: counts, `extensionCounts`, missing-field counts, `totalDurationMs`, `analysisCoverage` (analyzed/notAnalyzed, engine versions, accepted/rejected/reference/bpmHintOnly), `metadataCoverage` (bpm/key by source, energy, moods, genres, isrc, label, releaseDate, recordingMbid, duplicateGroups), `descriptorPercentiles` (p10/p50/p90 for energy, danceability, valence, acousticness, melodicness, subBass, brightness)
 
 ## `set_cue_points`
 
@@ -120,14 +120,15 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `find_compatible_tracks`
 
-- Input: `{ sourceTrackId, direction?, limit?, preferredMoods?, ... }`
+- Input: `{ sourceTrackId, direction?, limit?, preferredMoods?, descriptors?, genres?, ... }`
 - Output: ranked candidates with score components and reason codes
 
 ## `create_set_plan`
 
-- Input: name, optional duration/BPM/arc/required/excluded/preferences/start/end/seed
+- Input: name, optional duration/BPM/arc/required/excluded/preferences/start/end/seed, `descriptors` 0–1 ranges, `genres` include/exclude
 - Output: `{ plan, explanation, validation, partial }`
 - Errors: `TRACK_NOT_FOUND` when a required/start/end id is not eligible
+- Hard-rejects `NO_ANALYSIS`, `DESCRIPTOR_OUT_OF_RANGE`, `GENRE_EXCLUDED`, `DUPLICATE_RECORDING`
 
 ## `get_set_plan` / `list_set_plans`
 

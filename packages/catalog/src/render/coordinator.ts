@@ -32,6 +32,7 @@ import {
   type TransitionType,
   type ValidateSetPlanResult,
   type ValidationIssue,
+  effectiveEnergy,
 } from "@dnb-crate/domain";
 import {
   detectFfmpeg,
@@ -226,8 +227,16 @@ export class RenderCoordinator {
   ): Promise<ValidateSetPlanResult> {
     const stored = this.requirePlan(setPlanId);
     const tracksById = new Map(this.tracks.listAll().map((track) => [track.id, track]));
+    const effectiveEnergyByTrackId = new Map<string, number>();
+    for (const track of tracksById.values()) {
+      const energy = effectiveEnergy(track, this.analyses.findByTrackId(track.id)?.descriptors ?? null);
+      if (energy != null) {
+        effectiveEnergyByTrackId.set(track.id, energy);
+      }
+    }
     const structural = validateSetPlan(stored.plan, tracksById, {
       audioEndMsByTrackId: this.audioEndMsByTrackId(),
+      effectiveEnergyByTrackId,
     });
     const renderReadiness = await this.assessReadiness(stored.plan, tracksById, options);
     return { ...structural, renderReadiness };

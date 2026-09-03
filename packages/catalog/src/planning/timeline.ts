@@ -46,6 +46,16 @@ export type TimelineAnalysis = {
   mixOutMs: number | null;
   headEnergy: number | null;
   tailEnergy: number | null;
+  descriptors?: {
+    energy: number | null;
+    danceability: number | null;
+    valence: number | null;
+    acousticness: number | null;
+    melodicness: number | null;
+    subBassRatio: number | null;
+    brightness: number | null;
+    suggestedEnergy: number | null;
+  } | null;
 };
 
 export type TimelineTrack = Pick<Track, "id" | "durationMs" | "energy" | "bpm"> & {
@@ -421,6 +431,13 @@ export function analysisToTimeline(
     beatTimesMs?: number[];
     descriptors: {
       suggestedEnergy: number | null;
+      energy?: number | null;
+      danceability?: number | null;
+      valence?: number | null;
+      acousticness?: number | null;
+      melodicness?: number | null;
+      subBassRatio?: number | null;
+      brightness?: number | null;
       audioStartMs?: number | null;
       audioEndMs?: number | null;
     } | null;
@@ -490,5 +507,17 @@ export function analysisToTimeline(
     mixOutMs: mixOut.ms,
     headEnergy: sectionEnergyAt(sections, mixIn.ms),
     tailEnergy: sectionEnergyAt(sections, mixOut.ms),
+    descriptors: analysis.descriptors
+      ? {
+          energy: analysis.descriptors.energy ?? null,
+          danceability: analysis.descriptors.danceability ?? null,
+          valence: analysis.descriptors.valence ?? null,
+          acousticness: analysis.descriptors.acousticness ?? null,
+          melodicness: analysis.descriptors.melodicness ?? null,
+          subBassRatio: analysis.descriptors.subBassRatio ?? null,
+          brightness: analysis.descriptors.brightness ?? null,
+          suggestedEnergy: analysis.descriptors.suggestedEnergy ?? null,
+        }
+      : null,
   };
 }

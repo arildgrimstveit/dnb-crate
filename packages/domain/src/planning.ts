@@ -1,3 +1,4 @@
+import type { DescriptorFilters } from "./mood-presets.ts";
 import type { RenderReadiness } from "./render.ts";
 import type { BpmSource, Track } from "./track.ts";
 
@@ -85,6 +86,8 @@ export type CreateSetPlanInput = {
   startTrackId?: string;
   endTrackId?: string;
   seed?: number;
+  descriptors?: DescriptorFilters;
+  genres?: { include?: string[]; exclude?: string[] };
 };
 
 export type SelectionExplanation = {

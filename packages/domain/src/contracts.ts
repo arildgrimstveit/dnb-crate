@@ -6,6 +6,26 @@ export const trackIdSchema = z.string().uuid();
 
 const stringListSchema = z.array(z.string().trim().min(1).max(64)).max(20);
 
+export const descriptorRangeSchema = z.object({
+  min: z.number().min(0).max(1).optional(),
+  max: z.number().min(0).max(1).optional(),
+});
+
+export const descriptorFiltersSchema = z.object({
+  energy: descriptorRangeSchema.optional(),
+  danceability: descriptorRangeSchema.optional(),
+  valence: descriptorRangeSchema.optional(),
+  acousticness: descriptorRangeSchema.optional(),
+  melodicness: descriptorRangeSchema.optional(),
+  subBass: descriptorRangeSchema.optional(),
+  brightness: descriptorRangeSchema.optional(),
+});
+
+export const genreFiltersSchema = z.object({
+  include: stringListSchema.optional(),
+  exclude: stringListSchema.optional(),
+});
+
 export const searchTracksInputSchema = z.object({
   query: z
     .string()
@@ -63,6 +83,10 @@ export const searchTracksInputSchema = z.object({
     .max(500)
     .optional()
     .describe("Opaque pagination cursor from a previous response"),
+  descriptors: descriptorFiltersSchema
+    .optional()
+    .describe("Hard 0–1 descriptor ranges. Tracks without a DSP row fail non-energy filters."),
+  genres: genreFiltersSchema.optional(),
 });
 
 export type SearchTracksInput = z.infer<typeof searchTracksInputSchema>;
@@ -204,6 +228,14 @@ export const analysisCoverageSchema = z.object({
   bpmHintOnly: z.number().int(),
 });
 
+export const descriptorPercentileSchema = z
+  .object({
+    p10: z.number(),
+    p50: z.number(),
+    p90: z.number(),
+  })
+  .nullable();
+
 export const metadataCoverageSchema = z.object({
   bpmBySource: z.record(z.string(), z.number().int()),
   keyBySource: z.record(z.string(), z.number().int()),
@@ -230,6 +262,15 @@ export const libraryStatsDataSchema = z.object({
   missingRatingCount: z.number().int(),
   analysisCoverage: analysisCoverageSchema,
   metadataCoverage: metadataCoverageSchema,
+  descriptorPercentiles: z.object({
+    energy: descriptorPercentileSchema,
+    danceability: descriptorPercentileSchema,
+    valence: descriptorPercentileSchema,
+    acousticness: descriptorPercentileSchema,
+    melodicness: descriptorPercentileSchema,
+    subBass: descriptorPercentileSchema,
+    brightness: descriptorPercentileSchema,
+  }),
 });
 
 export const serverStatusDataSchema = z.object({
@@ -351,6 +392,8 @@ export const findCompatibleTracksInputSchema = z.object({
   brightnessMin: z.number().min(0).max(1).optional(),
   energyMin: z.number().int().min(1).max(10).optional(),
   energyMax: z.number().int().min(1).max(10).optional(),
+  descriptors: descriptorFiltersSchema.optional(),
+  genres: genreFiltersSchema.optional(),
 });
 
 const scoreBreakdownSchema = z.object({
@@ -461,6 +504,10 @@ export const createSetPlanInputSchema = z.object({
   startTrackId: trackIdSchema.optional(),
   endTrackId: trackIdSchema.optional(),
   seed: z.number().int().optional().describe("Reproducibility seed. Default 1."),
+  descriptors: descriptorFiltersSchema
+    .optional()
+    .describe("Hard 0–1 descriptor ranges on the planner pool"),
+  genres: genreFiltersSchema.optional().describe("Normalized include/exclude genre labels"),
 });
 
 export const getSetPlanInputSchema = z.object({

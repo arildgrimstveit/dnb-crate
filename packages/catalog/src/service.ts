@@ -49,6 +49,9 @@ import {
   resolveBpmHint,
   resolveCanonicalBpm,
   scoreCandidate,
+  effectiveEnergy,
+  genresMatchFilter,
+  matchesDescriptorFilters,
   toPublicTrack,
 } from "@dnb-crate/domain";
 import { ffmpegMixReady } from "@dnb-crate/audio-renderer";
@@ -747,6 +750,8 @@ export class CatalogService {
     brightnessMin?: number;
     energyMin?: number;
     energyMax?: number;
+    descriptors?: CreateSetPlanInput["descriptors"];
+    genres?: CreateSetPlanInput["genres"];
   }): { sourceTrackId: string; candidates: CompatibleTrack[] } {
     const source = this.requireTrack(input.sourceTrackId);
     const limit = Math.min(input.limit ?? 10, COMPATIBLE_TRACKS_LIMIT_MAX);
@@ -768,11 +773,19 @@ export class CatalogService {
             return false;
           }
         }
-        const desc = this.analyses.findByTrackId(track.id)?.descriptors;
+        const desc = this.analyses.findByTrackId(track.id)?.descriptors ?? null;
         if (input.subBassMin !== undefined && (desc?.subBassRatio ?? -1) < input.subBassMin) {
           return false;
         }
         if (input.brightnessMin !== undefined && (desc?.brightness ?? -1) < input.brightnessMin) {
+          return false;
+        }
+        const descriptorMatch = matchesDescriptorFilters(track, desc, input.descriptors);
+        if (!descriptorMatch.ok) {
+          return false;
+        }
+        const genreMatch = genresMatchFilter(track.genres, input.genres);
+        if (!genreMatch.ok) {
           return false;
         }
         return true;
@@ -809,6 +822,10 @@ export class CatalogService {
               ? (candA.sections.find((s) => s.type === "intro")!.endMs -
                 candA.sections.find((s) => s.type === "intro")!.startMs)
               : null,
+          bpmHint: candA ? resolveBpmHint(candA).bpm : null,
+          sourceBpmHint: srcA ? resolveBpmHint(srcA).bpm : null,
+          descriptors: candA?.descriptors ?? null,
+          sourceDescriptors: srcA?.descriptors ?? null,
         }),
       };
       })
@@ -845,6 +862,7 @@ export class CatalogService {
       const validation = validateSetPlan(drafted.plan, tracksById, {
         artistRepeatSpacing: input.artistRepeatSpacing,
         audioEndMsByTrackId: this.audioEndMsByTrackId(),
+        effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
       });
       const stored = this.setPlans.save(
         drafted.plan,
@@ -904,6 +922,7 @@ export class CatalogService {
     };
     const validation = validateSetPlan(plan, tracksById, {
       audioEndMsByTrackId: this.audioEndMsByTrackId(),
+      effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
     });
     const saved = this.setPlans.save(plan, stored.seed, stored.explanation);
     return {
@@ -1134,6 +1153,7 @@ export class CatalogService {
     };
     const validation = validateSetPlan(plan, tracksById, {
       audioEndMsByTrackId: this.audioEndMsByTrackId(),
+      effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
     });
     if (!validation.valid) {
       throw new DomainError(
@@ -1202,6 +1222,17 @@ export class CatalogService {
       throw new DomainError("SET_PLAN_NOT_FOUND", `No set plan with id ${setPlanId}`);
     }
     return stored;
+  }
+
+  private effectiveEnergyByTrackId(): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const track of this.repository.listAll()) {
+      const energy = effectiveEnergy(track, this.analyses.findByTrackId(track.id)?.descriptors ?? null);
+      if (energy != null) {
+        out.set(track.id, energy);
+      }
+    }
+    return out;
   }
 
   getLibraryStats(): LibraryStats {

@@ -6,6 +6,7 @@ import {
   MIN_PLAYABLE_DURATION_MS,
   camelotDistance,
   interpolateEnergy,
+  normalizePersonName,
   type SetPlanV1,
   type Track,
   type ValidateSetPlanResult,
@@ -17,11 +18,16 @@ import { planDurationMs, playableMs } from "./timeline.ts";
 export function validateSetPlan(
   plan: SetPlanV1,
   tracksById: Map<string, Track>,
-  options?: { artistRepeatSpacing?: number; audioEndMsByTrackId?: Map<string, number> },
+  options?: {
+    artistRepeatSpacing?: number;
+    audioEndMsByTrackId?: Map<string, number>;
+    effectiveEnergyByTrackId?: Map<string, number>;
+  },
 ): ValidateSetPlanResult {
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
   const seen = new Set<string>();
+  const seenRecordings = new Set<string>();
   const spacing = options?.artistRepeatSpacing ?? 1;
   const recentArtists: Array<string | null> = [];
 
@@ -45,6 +51,17 @@ export function validateSetPlan(
       });
     }
     seen.add(entry.trackId);
+    if (track.recordingKey) {
+      if (seenRecordings.has(track.recordingKey)) {
+        errors.push({
+          code: "DUPLICATE_RECORDING",
+          message: `Recording ${track.recordingKey} appears more than once`,
+          entryId: entry.id,
+          trackId: track.id,
+        });
+      }
+      seenRecordings.add(track.recordingKey);
+    }
     if (entry.timelineStartMs < 0) {
       errors.push({
         code: "NEGATIVE_TIMELINE",
@@ -104,7 +121,7 @@ export function validateSetPlan(
         trackId: track.id,
       });
     }
-    const artist = track.artist?.toLowerCase() ?? null;
+    const artist = track.artistCanonical ?? (track.artist ? normalizePersonName(track.artist) : null);
     if (
       spacing > 0 &&
       artist !== null &&
@@ -133,7 +150,8 @@ export function validateSetPlan(
     const fraction = plan.entries.length <= 1 ? 0 : index / (plan.entries.length - 1);
     const targetEnergy = interpolateEnergy(plan.requestedArc, fraction);
     const track = tracksById.get(entry.trackId);
-    const actualEnergy = track?.energy ?? null;
+    const actualEnergy =
+      options?.effectiveEnergyByTrackId?.get(entry.trackId) ?? track?.energy ?? null;
     const deviation = actualEnergy === null ? null : actualEnergy - targetEnergy;
     if (deviation !== null && Math.abs(deviation) > MAX_ENERGY_DEVIATION) {
       warnings.push({

@@ -18,6 +18,9 @@ The planner is deterministic. The host model translates “soulful liquid, peak 
 | Repeated-artist penalty | −20                       | Inside `artistRepeatSpacing` (default 1 = no back-to-back) |
 | Recently-used penalty   | −8                        | Already in the plan                                        |
 | Missing BPM/key/energy  | −10                       | Split across the three fields                              |
+| Structure               | 6                         | Outro/intro length similarity when both exist              |
+
+Effective energy is `track.energy ?? round(1 + 9·descriptors.energy)` in scoring and arc validation. Suggested-only energy keeps the ×0.6 weight. `bpmHint` scores BPM at half weight (`BPM_HINT_ONLY`) and satisfies pool BPM filters; aligned templates still need an accepted grid. When manual moods are empty, `preferredMoods` score mood presets (`MOOD_PRESET`). Duplicate `recording_key` is rejected (`DUPLICATE_RECORDING`). Artist spacing uses `artist_canonical`.
 
 Identical catalog + constraints + seed → identical plan.
 

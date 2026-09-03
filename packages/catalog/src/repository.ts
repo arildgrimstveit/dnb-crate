@@ -571,30 +571,64 @@ export class TrackRepository {
     );
     this.pushListFilter(where, params, "track_tags", "tag", input.tags, input.tagsMatch ?? "any");
 
-    if (
-      input.subBassMin !== undefined ||
-      input.subBassMax !== undefined ||
-      input.brightnessMin !== undefined ||
-      input.brightnessMax !== undefined
-    ) {
+    const descriptorBounds: Array<{ path: string; min?: number; max?: number }> = [];
+    if (input.subBassMin !== undefined || input.subBassMax !== undefined) {
+      descriptorBounds.push({
+        path: "$.subBassRatio",
+        min: input.subBassMin,
+        max: input.subBassMax,
+      });
+    }
+    if (input.brightnessMin !== undefined || input.brightnessMax !== undefined) {
+      descriptorBounds.push({
+        path: "$.brightness",
+        min: input.brightnessMin,
+        max: input.brightnessMax,
+      });
+    }
+    const nested = input.descriptors;
+    if (nested) {
+      const map: Array<[string, string]> = [
+        ["energy", "$.energy"],
+        ["danceability", "$.danceability"],
+        ["valence", "$.valence"],
+        ["acousticness", "$.acousticness"],
+        ["melodicness", "$.melodicness"],
+        ["subBass", "$.subBassRatio"],
+        ["brightness", "$.brightness"],
+      ];
+      for (const [key, jsonPath] of map) {
+        const range = nested[key as keyof typeof nested];
+        if (range?.min !== undefined || range?.max !== undefined) {
+          descriptorBounds.push({ path: jsonPath, min: range.min, max: range.max });
+        }
+      }
+    }
+    for (const bound of descriptorBounds) {
       where.push(`EXISTS (
         SELECT 1 FROM track_analyses ta
         WHERE ta.track_id = tracks.id
-          AND (? IS NULL OR json_extract(ta.descriptors_json, '$.subBassRatio') >= ?)
-          AND (? IS NULL OR json_extract(ta.descriptors_json, '$.subBassRatio') <= ?)
-          AND (? IS NULL OR json_extract(ta.descriptors_json, '$.brightness') >= ?)
-          AND (? IS NULL OR json_extract(ta.descriptors_json, '$.brightness') <= ?)
+          AND (? IS NULL OR json_extract(ta.descriptors_json, '${bound.path}') >= ?)
+          AND (? IS NULL OR json_extract(ta.descriptors_json, '${bound.path}') <= ?)
       )`);
-      params.push(
-        input.subBassMin ?? null,
-        input.subBassMin ?? 0,
-        input.subBassMax ?? null,
-        input.subBassMax ?? 1,
-        input.brightnessMin ?? null,
-        input.brightnessMin ?? 0,
-        input.brightnessMax ?? null,
-        input.brightnessMax ?? 1,
+      params.push(bound.min ?? null, bound.min ?? 0, bound.max ?? null, bound.max ?? 1);
+    }
+
+    if (input.genres?.include && input.genres.include.length > 0) {
+      const include = input.genres.include.map((item) => item.trim().toLowerCase());
+      const placeholders = include.map(() => "LOWER(?)").join(", ");
+      where.push(
+        `EXISTS (SELECT 1 FROM track_genres WHERE track_id = tracks.id AND LOWER(genre) IN (${placeholders}))`,
       );
+      params.push(...include);
+    }
+    if (input.genres?.exclude && input.genres.exclude.length > 0) {
+      const exclude = input.genres.exclude.map((item) => item.trim().toLowerCase());
+      const placeholders = exclude.map(() => "LOWER(?)").join(", ");
+      where.push(
+        `NOT EXISTS (SELECT 1 FROM track_genres WHERE track_id = tracks.id AND LOWER(genre) IN (${placeholders}))`,
+      );
+      params.push(...exclude);
     }
 
     if (input.cursor) {
@@ -710,6 +744,7 @@ export class TrackRepository {
       missingRatingCount: row.missing_rating_count,
       analysisCoverage: this.analysisCoverage(),
       metadataCoverage: this.metadataCoverage(),
+      descriptorPercentiles: this.descriptorPercentiles(),
     };
   }
 
@@ -736,6 +771,73 @@ export class TrackRepository {
       out[item.source] = item.n;
     }
     return out;
+  }
+
+  private percentileTriple(values: number[]): LibraryStats["descriptorPercentiles"]["energy"] {
+    if (values.length === 0) {
+      return null;
+    }
+    const sorted = [...values].sort((a, b) => a - b);
+    const at = (p: number): number => {
+      const index = Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))));
+      return sorted[index]!;
+    };
+    return { p10: at(0.1), p50: at(0.5), p90: at(0.9) };
+  }
+
+  private descriptorPercentiles(): LibraryStats["descriptorPercentiles"] {
+    const empty = {
+      energy: null,
+      danceability: null,
+      valence: null,
+      acousticness: null,
+      melodicness: null,
+      subBass: null,
+      brightness: null,
+    };
+    if (!this.tableExists("track_analyses") || !this.hasColumn("track_analyses", "descriptors_json")) {
+      return empty;
+    }
+    const rows = this.db
+      .prepare("SELECT descriptors_json FROM track_analyses WHERE descriptors_json IS NOT NULL")
+      .all() as { descriptors_json: string }[];
+    const buckets: Record<string, number[]> = {
+      energy: [],
+      danceability: [],
+      valence: [],
+      acousticness: [],
+      melodicness: [],
+      subBass: [],
+      brightness: [],
+    };
+    for (const row of rows) {
+      try {
+        const parsed = JSON.parse(row.descriptors_json) as Record<string, unknown>;
+        const push = (key: string, value: unknown): void => {
+          if (typeof value === "number" && Number.isFinite(value)) {
+            buckets[key]?.push(value);
+          }
+        };
+        push("energy", parsed.energy);
+        push("danceability", parsed.danceability);
+        push("valence", parsed.valence);
+        push("acousticness", parsed.acousticness);
+        push("melodicness", parsed.melodicness);
+        push("subBass", parsed.subBassRatio);
+        push("brightness", parsed.brightness);
+      } catch {
+        // skip malformed rows
+      }
+    }
+    return {
+      energy: this.percentileTriple(buckets.energy ?? []),
+      danceability: this.percentileTriple(buckets.danceability ?? []),
+      valence: this.percentileTriple(buckets.valence ?? []),
+      acousticness: this.percentileTriple(buckets.acousticness ?? []),
+      melodicness: this.percentileTriple(buckets.melodicness ?? []),
+      subBass: this.percentileTriple(buckets.subBass ?? []),
+      brightness: this.percentileTriple(buckets.brightness ?? []),
+    };
   }
 
   private analysisCoverage(): LibraryStats["analysisCoverage"] {

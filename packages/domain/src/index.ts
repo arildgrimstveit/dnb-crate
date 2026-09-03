@@ -181,6 +181,23 @@ export { silentLogger, type Logger } from "./logger.ts";
 export { fail, ok, type ToolErrorBody, type ToolResult } from "./tool-result.ts";
 export { interpolateEnergy, scoreCandidate, hashSeed, type ScoreContext } from "./compatibility.ts";
 export {
+  MOOD_PRESETS,
+  moodPresetFor,
+  type DescriptorFilters,
+  type DescriptorRange,
+} from "./mood-presets.ts";
+export {
+  continuousEnergy,
+  descriptorValue,
+  effectiveEnergy,
+  genresMatchFilter,
+  hasDescriptorFilters,
+  matchesDescriptorFilters,
+  moodPresetScore,
+  valueInRange,
+  type DescriptorValues,
+} from "./descriptor-filters.ts";
+export {
   type AnalysisEngineId,
   type AnalysisStatus,
   type BpmSource,

@@ -1,5 +1,14 @@
+import { readFileSync } from "node:fs";
+
 import { createCatalogRuntime } from "@dnb-crate/catalog";
-import { APP_NAME, APP_VERSION, loadConfig, type AnalysisEngineId, type Logger } from "@dnb-crate/domain";
+import {
+  APP_NAME,
+  APP_VERSION,
+  createSetPlanInputSchema,
+  loadConfig,
+  type AnalysisEngineId,
+  type Logger,
+} from "@dnb-crate/domain";
 import pino from "pino";
 
 function createLogger(level: string): Logger {
@@ -51,6 +60,7 @@ Commands:
   transition:plan --from UUID --to UUID [--type phrase_mix|bass_swap|crossfade|any] [--bars 16|32]
   transition:validate --from UUID --to UUID --type phrase_mix|bass_swap|crossfade
   plan:create --name TEXT [--duration-ms N] [--seed N] [--end-query TEXT]
+  plan:create --brief-json FILE
   plan:clone --id UUID --name TEXT [--replan]
   plan:list
   plan:get --id UUID
@@ -331,9 +341,22 @@ async function main(): Promise<void> {
         break;
       }
       case "plan:create": {
+        const briefPath = option(args, "--brief-json");
+        if (briefPath) {
+          const parsed = createSetPlanInputSchema.safeParse(
+            JSON.parse(readFileSync(briefPath, "utf8")),
+          );
+          if (!parsed.success) {
+            throw new Error(
+              `plan:create --brief-json is invalid: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`,
+            );
+          }
+          printJson({ ok: true, data: runtime.service.createSetPlan(parsed.data) });
+          break;
+        }
         const name = option(args, "--name");
         if (!name) {
-          throw new Error("plan:create requires --name");
+          throw new Error("plan:create requires --name or --brief-json");
         }
         const durationRaw = option(args, "--duration-ms");
         const seedRaw = option(args, "--seed");

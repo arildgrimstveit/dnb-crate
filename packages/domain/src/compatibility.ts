@@ -1,4 +1,11 @@
 import { DEFAULT_SCORE_WEIGHTS } from "./constants.ts";
+import {
+  effectiveEnergy,
+  moodPresetScore,
+  type DescriptorValues,
+} from "./descriptor-filters.ts";
+import { normalizeGenre } from "./genres.ts";
+import { normalizePersonName } from "./identity.ts";
 import { camelotDistance } from "./keys.ts";
 import type { EnergyDirection, ScoreBreakdown, ScoreComponents } from "./planning.ts";
 import type { Track } from "./track.ts";
@@ -22,6 +29,10 @@ export type ScoreContext = {
   sourceSuggestedEnergy?: number | null;
   outgoingOutroMs?: number | null;
   incomingIntroMs?: number | null;
+  bpmHint?: number | null;
+  sourceBpmHint?: number | null;
+  descriptors?: DescriptorValues | null;
+  sourceDescriptors?: DescriptorValues | null;
 };
 
 function overlapScore(left: string[], right: string[]): number {
@@ -109,19 +120,41 @@ export function scoreCandidate(
 ): ScoreBreakdown {
   const { candidate, source } = ctx;
   const reasons: string[] = [];
-  const mood = overlapScore(candidate.moods, ctx.preferredMoods);
-  const subgenre = overlapScore(candidate.subgenres, ctx.preferredSubgenres);
+  const moodResult = moodPresetScore(
+    ctx.preferredMoods,
+    candidate.moods,
+    candidate,
+    ctx.descriptors,
+  );
+  const mood = moodResult.score;
+  const candidateSubgenres =
+    candidate.subgenres.length > 0
+      ? candidate.subgenres
+      : (candidate.genres ?? []).map(normalizeGenre);
+  const subgenreScale = candidate.subgenres.length === 0 && candidateSubgenres.length > 0 ? 0.5 : 1;
+  const subgenre = overlapScore(candidateSubgenres, ctx.preferredSubgenres.map(normalizeGenre));
   const tagBonus = overlapScore(candidate.tags, ctx.preferredTags);
-  const candidateEnergy = candidate.energy ?? ctx.suggestedEnergy ?? null;
-  const sourceEnergy = source?.energy ?? ctx.sourceSuggestedEnergy ?? null;
+  const candidateEnergy = effectiveEnergy(candidate, {
+    energy: ctx.descriptors?.energy ?? null,
+    suggestedEnergy: ctx.suggestedEnergy ?? ctx.descriptors?.suggestedEnergy ?? null,
+  });
+  const sourceEnergy = source
+    ? effectiveEnergy(source, {
+        energy: ctx.sourceDescriptors?.energy ?? null,
+        suggestedEnergy: ctx.sourceSuggestedEnergy ?? ctx.sourceDescriptors?.suggestedEnergy ?? null,
+      })
+    : null;
   const energy = energyScore(
     candidateEnergy,
     ctx.targetEnergy,
     sourceEnergy,
     ctx.direction,
   );
-  const energyWeightScale = candidate.energy === null && ctx.suggestedEnergy != null ? 0.6 : 1;
-  const bpm = bpmScore(source?.bpm ?? null, candidate.bpm, null);
+  const energyWeightScale = candidate.energy === null && candidateEnergy != null ? 0.6 : 1;
+  const candidateBpm = candidate.bpm ?? ctx.bpmHint ?? null;
+  const sourceBpm = source?.bpm ?? ctx.sourceBpmHint ?? null;
+  const bpmScale = candidate.bpm == null && ctx.bpmHint != null ? 0.5 : 1;
+  const bpm = bpmScore(sourceBpm, candidateBpm, null);
   const harmonic = harmonicScore(
     source?.camelotKey ?? null,
     candidate.camelotKey,
@@ -134,30 +167,39 @@ export function scoreCandidate(
     structureRaw = clamp01(1 - Math.abs(outro - intro) / Math.max(outro, intro, 1));
   }
   const rating = candidate.rating === null ? 0 : (candidate.rating - 1) / 4;
+  const candidateArtistKey =
+    candidate.artistCanonical ?? (candidate.artist ? normalizePersonName(candidate.artist) : null);
   const preferredArtist =
-    candidate.artist !== null &&
-    ctx.preferredArtists.some((artist) => artist.toLowerCase() === candidate.artist!.toLowerCase())
+    candidateArtistKey !== null &&
+    ctx.preferredArtists.some(
+      (artist) => normalizePersonName(artist) === candidateArtistKey,
+    )
       ? 1
       : 0;
   const exploration = hashSeed(ctx.seed, candidate.id) * clamp01(ctx.explorationWeight);
-  const artistKey = candidate.artist?.toLowerCase() ?? null;
+  const artistKey = candidateArtistKey;
   const recentWindow = ctx.recentArtistIds.slice(-Math.max(ctx.artistRepeatSpacing, 0));
   const repeatedArtist =
     artistKey !== null &&
-    recentWindow.some((item) => item !== null && item.toLowerCase() === artistKey)
+    recentWindow.some(
+      (item) => item !== null && normalizePersonName(item) === artistKey,
+    )
       ? 1
       : 0;
   const recentlyUsed = ctx.alreadyUsed ? 1 : 0;
   const missingMetadata =
-    (candidate.bpm === null ? 0.34 : 0) +
+    (candidate.bpm === null && ctx.bpmHint == null ? 0.34 : 0) +
     (candidate.camelotKey === null ? 0.33 : 0) +
-    (candidate.energy === null && ctx.suggestedEnergy == null ? 0.33 : 0);
+    (candidateEnergy == null ? 0.33 : 0);
 
-  if (mood > 0) {
+  if (mood > 0 && moodResult.route === "manual") {
     reasons.push("MOOD_MATCH");
   }
+  if (mood > 0 && moodResult.route === "preset") {
+    reasons.push("MOOD_PRESET");
+  }
   if (subgenre > 0) {
-    reasons.push("SUBGENRE_MATCH");
+    reasons.push(candidate.subgenres.length > 0 ? "SUBGENRE_MATCH" : "GENRE_MATCH");
   }
   if (tagBonus > 0) {
     reasons.push("TAG_MATCH");
@@ -167,13 +209,15 @@ export function scoreCandidate(
   } else if (source?.camelotKey && candidate.camelotKey && harmonic < 0.45) {
     reasons.push("HARMONIC_CLASH");
   }
-  if (candidate.bpm === null) {
+  if (candidate.bpm === null && ctx.bpmHint != null) {
+    reasons.push("BPM_HINT_ONLY");
+  } else if (candidate.bpm === null) {
     reasons.push("MISSING_BPM");
   }
   if (candidate.camelotKey === null) {
     reasons.push("MISSING_KEY");
   }
-  if (candidate.energy === null && ctx.suggestedEnergy == null) {
+  if (candidateEnergy == null) {
     reasons.push("MISSING_ENERGY");
   }
   if (structureRaw >= 0.7) {
@@ -185,9 +229,9 @@ export function scoreCandidate(
 
   const components: ScoreComponents = {
     mood: mood * weights.mood + tagBonus * (weights.mood / 2),
-    subgenre: subgenre * weights.subgenre,
+    subgenre: subgenre * weights.subgenre * subgenreScale,
     energy: energy * weights.energy * energyWeightScale,
-    bpm: bpm * weights.bpm,
+    bpm: bpm * weights.bpm * bpmScale,
     harmonic: harmonic * weights.harmonic,
     rating: rating * weights.rating,
     preferredArtist: preferredArtist * weights.preferredArtist,
