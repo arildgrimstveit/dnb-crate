@@ -18,7 +18,7 @@ Do not overwrite:
 
 | File | Why |
 | --- | --- |
-| `output/renders/hour-peak-v3.3.flac` | Accepted Peak hour (mix 6.4.0; mix tags 6.5.0) |
+| `output/renders/hour-peak-v3.3.flac` | Canonical Peak hour (mix 6.4.0; tags 6.5.0). Closer listen: joins 1–4 rough; from 20:26 much better |
 | `output/renders/hour-peak-v3.2.flac` | Complementary-curve A/B (12:08 still bad) |
 | `output/renders/hour-peak-v3.1.wav` | First listenably mixed Peak (6.1.0); source of the join-by-join notes |
 | `output/renders/hour-peak-v3.wav` | Broken pairwise mash (6.0.0); LUFS −17.9 |
@@ -46,42 +46,58 @@ Do not overwrite:
 
 Plan `5cb141aa-…`, 16 tracks, duration **59:43** (3583076 ms). All 15 joins are `phrase_mix`, beat-aligned. Times are overlap starts in the listen files (same timestamps on v3.1 / v3.2 / v3.3).
 
-Verdicts: **v3.1** is the detailed first listen. **v3.2** and **v3.3** only where they were re-checked. Accepted hour is **v3.3**.
+Verdicts: **v3.1** is the detailed first listen. **v3.2** and **v3.3** only where they were re-checked. Canonical copy is **v3.3**. Closer listen of v3.3: joins **1–4 are a bit rough**; from **Inemuri → Calling for a Sign** (20:26) onward the transitions are much better. That later run is the quality bar, not the opening 20 minutes.
 
 | # | Start | Outgoing → incoming | Bars | v3.1 | v3.2 | v3.3 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 0:00 | Pendulum — Under The Waves | | | | |
-| | **4:25** | → Logistics — Chant | 16 | very good | *(kept)* | accepted |
+| | **4:25** | → Logistics — Chant | 16 | very good | *(kept)* | closer: **rough** |
 | 2 | 4:25 | Logistics — Chant | | | | |
-| | **8:00** | → Sub Focus — Let The Story Begin | 16 | very good | *(kept)* | accepted |
+| | **8:00** | → Sub Focus — Let The Story Begin | 16 | very good | *(kept)* | closer: **rough** |
 | 3 | 8:00 | Sub Focus — Let The Story Begin | | | | |
-| | **12:08** | → Technimatic — Let It Fall | **32** | uncomfortable: kits clash, noisy, beats OK. Let It Fall drums start on bar 1 of the intro | still two kits | sequential drums; **accepted** |
+| | **12:08** | → Technimatic — Let It Fall | **32** | uncomfortable: kits clash, noisy, beats OK. Let It Fall drums start on bar 1 of the intro | still two kits | sequential; closer still **rough** |
 | 4 | 12:08 | Technimatic — Let It Fall | | | | |
-| | **16:28** | → Logistics — Inemuri | 16 | too sudden: outgoing volume drops when the overlap starts | **good now** | accepted |
+| | **16:28** | → Logistics — Inemuri | 16 | too sudden: outgoing volume drops when the overlap starts | **good now** | closer: **rough** |
 | 5 | 16:28 | Logistics — Inemuri | | | | |
-| | **20:26** | → Sub Focus — Calling for a Sign (feat. Kelli-Leigh) | 16 | **absolutely beautiful** | *(not re-called; do not regress)* | accepted |
+| | **20:26** | → Sub Focus — Calling for a Sign (feat. Kelli-Leigh) | 16 | **absolutely beautiful** | *(not re-called; do not regress)* | closer: **much better from here** |
 | 6 | 20:26 | Sub Focus — Calling for a Sign | | | | |
-| | **23:32** | → Nu:Logic — Dreamweaver | **32** | Dreamweaver drums a bit abrupt; otherwise beat-matched and OK | **much better** | accepted |
+| | **23:32** | → Nu:Logic — Dreamweaver | **32** | Dreamweaver drums a bit abrupt; otherwise beat-matched and OK | **much better** | closer: still in the good half |
 | 7 | 23:32 | Nu:Logic — Dreamweaver | | | | |
-| | **27:23** | → Technimatic — Breathe In | 16 | **perfect** | *(kept)* | accepted |
+| | **27:23** | → Technimatic — Breathe In | 16 | **perfect** | *(kept)* | closer: good half |
 | 8 | 27:23 | Technimatic — Breathe In | | | | |
-| | **31:28** | → Technimatic — Hold on a While | 16 | **perfect** | *(kept)* | accepted |
+| | **31:28** | → Technimatic — Hold on a While | 16 | **perfect** | *(kept)* | closer: good half |
 | 9 | 31:28 | Technimatic — Hold on a While | | | | |
-| | **34:24** | → Nu:Logic — Red Velvet | 16 | **perfect** | *(kept)* | accepted |
+| | **34:24** | → Nu:Logic — Red Velvet | 16 | **perfect** | *(kept)* | closer: good half |
 | 10 | 34:24 | Nu:Logic — Red Velvet | | | | |
-| | **38:05** | → Technimatic — Moment to Moment | 16 | **perfect** | *(kept)* | accepted |
+| | **38:05** | → Technimatic — Moment to Moment | 16 | **perfect** | *(kept)* | closer: good half |
 | 11 | 38:05 | Technimatic — Moment to Moment | | | | |
-| | **41:54** | → Technimatic — Colour Me In | **32** | sudden outgoing drop; Colour Me In drums kick in roughly | **much better** | accepted |
+| | **41:54** | → Technimatic — Colour Me In | **32** | sudden outgoing drop; Colour Me In drums kick in roughly | **much better** | closer: good half |
 | 12 | 41:54 | Technimatic — Colour Me In | | | | |
-| | **45:57** | → Sub Focus — Until The End | 16 | **perfect** | *(kept)* | accepted |
+| | **45:57** | → Sub Focus — Until The End | 16 | **perfect** | *(kept)* | closer: good half |
 | 13 | 45:57 | Sub Focus — Until The End | | | | |
-| | **49:10** | → Sub Focus — Tidal Wave | **32** | very very good, but overlap feels compressed (detail/punch gone) | **compression gone** | accepted |
+| | **49:10** | → Sub Focus — Tidal Wave | **32** | very very good, but overlap feels compressed (detail/punch gone) | **compression gone** | closer: good half |
 | 14 | 49:10 | Sub Focus — Tidal Wave | | | | |
-| | **51:00** | → Pendulum — Streamline | **32** | very very good; same squash from 51:00 | **compression gone** | accepted |
+| | **51:00** | → Pendulum — Streamline | **32** | very very good; same squash from 51:00 | **compression gone** | closer: good half |
 | 15 | 51:00 | Pendulum — Streamline | | | | |
-| | **55:39** | → Sub Focus — Vapourise | **32** | very good; same squash | **compression gone** | accepted |
+| | **55:39** | → Sub Focus — Vapourise | **32** | very good; same squash | **compression gone** | closer: good half |
 
-Joins 9 and 10 still report `downbeatOffsetMs` ≈ 343 ms (`alignmentMode: beat`, ~one beat). That did not block acceptance. Bar-mode alignment needs `downbeatConfidence` ≥ 0.5 on both sides; this crate’s stored confidences are usually below that.
+Joins 9 and 10 still report `downbeatOffsetMs` ≈ 343 ms (`alignmentMode: beat`, ~one beat). That did not block the back half.
+
+## Why the opening 20 minutes are rougher (v3.3 closer listen)
+
+The template is the same all the way through: every join is `phrase_mix`, complementary except **12:08** (sequential). The split at **20:26** is not “we switched algorithm.”
+
+| Join | Mix-out section | Mix-in section | Bars |
+| --- | --- | --- | --- |
+| 1 Under The Waves → Chant | **drop 0.33** | intro 0.07 | 16 |
+| 2 Chant → Story Begin | breakdown 0.09 | intro 0.08 | 16 |
+| 3 Story Begin → Let It Fall | **drop 0.33** | intro 0.22 (kit already on) | **32** sequential |
+| 4 Let It Fall → Inemuri | **drop 0.41** | intro 0.08 | 16 |
+| 5 Inemuri → Calling for a Sign | **build 0.38** | intro 0.11 | 16 |
+
+Joins **1** and **4** leave a full drop hanging over a quiet intro for ~22 s. Join **3** is the known two-kit 32-bar. Join **2** looks like later breakdown→intro joins that sounded perfect (Dreamweaver → Breathe In, Hold on a While → Red Velvet), so that one is more pairing than curve.
+
+The good half starts when mix-out is a **build** (Inemuri) into Calling for a Sign, then the Nu:Logic / Technimatic run. Drop→quiet-intro can still work (Breathe In → Hold on a While, drop 0.41 → intro 0.03, was perfect) — so do not blindly sequential every drop outro. The opening four are the ones to re-check on the next Peak pass: earlier mix-out, shorter phrase, or different pairing.
 
 ## Why 12:08 was the hard one
 
@@ -89,7 +105,7 @@ Technimatic *Let It Fall* mix-in is **209 ms** into a **66 s intro** the analyze
 
 The planner still picked `phrase_mix` (`matched-grid-phrase`) because `bothHot` needs head and tail ≥ **0.6**. It also picked **32 bars** because the incoming intro is ≥ 28 bars — which *lengthened* the kit stack.
 
-Complementary mid/high (6.3.0) still left two kits in the room. Sequential (6.4.0) holds incoming mid/high until mid-phrase (~22 s into the 44 s overlap), then brings Let It Fall’s kit in. That was enough to accept the hour.
+Complementary mid/high (6.3.0) still left two kits in the room. Sequential (6.4.0) holds incoming mid/high until mid-phrase (~22 s into the 44 s overlap), then brings Let It Fall’s kit in. That made 12:08 listenable; a closer pass still files it with the rough opening, not with the back half.
 
 **Rule now in code:** `choosePhraseShape` → `sequential` only when outgoing section is `drop` with energy ≥ **0.3** *and* incoming section energy ≥ **0.15**. On this Peak plan that fired **once** (Story Begin → Let It Fall). Streamline → Vapourise (incoming intro 0.204, outgoing drop 0.255) stays complementary on purpose.
 
@@ -149,6 +165,7 @@ Only 1→2 is a phrase mix. The rest are crossfades. That is a feature: liquid i
 
 These showed up in ear-check or analysis dumps; they are not implemented:
 
+- **Drop hanging over a quiet intro.** Under The Waves → Chant and Let It Fall → Inemuri mix out of drops (0.33 / 0.41) into intros ~0.07. Do not sequential those blindly (Breathe In → Hold on a While is the same shape and was perfect). Prefer an earlier mix-out or a shorter phrase on the next Peak pass.
 - **Drum-aware mix-in.** Detect kit-on-from-bar-1 even when the section is labelled `intro` (onset density / mid energy in the first 8 bars of the incoming window). Sequential thresholds are a coarse proxy.
 - **32-bar policy.** Do not auto-extend to 32 bars solely because the intro is long if that intro is already a kit. Consider 16 bars + sequential instead.
 - **Bar-phase alignment on this crate.** Peak still uses `alignmentMode: beat` because downbeat confidence is &lt; 0.5. Joins 9–10 are ~one beat off; accepted anyway.

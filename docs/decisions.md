@@ -8,7 +8,7 @@ FFmpeg copies tags from the first `-i` unless told not to, so hour renders were 
 
 Automated `render:check` only catches silence and timestamps. What sounded good or bad on Liquid v3, Peak v3.1–v3.3, and the v2.2 hour is written in **`docs/mixing-lessons.md`**. That file is the keep-list, join-by-join Peak table, and the rules for later hours (one kit at a time, no halfway volume cliff, no limiter on the mix so far, do not 32-bar a drum intro). Session rows stay in `docs/manual-test-log.md`.
 
-Accepted Peak copy: `output/renders/hour-peak-v3.3.flac`. Accepted Liquid copy: `output/renders/hour-liquid-v3.wav`. Do not overwrite them.
+Canonical Peak copy: `output/renders/hour-peak-v3.3.flac` (closer listen: joins 1–4 rough; from 20:26 much better). Accepted Liquid copy: `output/renders/hour-liquid-v3.wav`. Do not overwrite them.
 
 ## 2026-09-03 — Metadata enrichment is network opt-in
 
