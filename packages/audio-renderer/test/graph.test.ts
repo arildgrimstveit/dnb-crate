@@ -194,6 +194,11 @@ describe("parsers", () => {
         "Integrated loudness:\n    I:         -14.4 LUFS\n  True peak:\n    Peak:       -1.02 dBFS",
       ),
     ).toEqual({ integratedLufs: -14.4, truePeakDb: -1.02 });
+    expect(
+      parseEbur128(
+        "t: 0.1 TARGET:-23 LUFS    M: -70.0 S: -70.0     I:  -70.0 LUFS\n  Integrated loudness:\n    I:         -8.4 LUFS\n  True peak:\n    Peak:       -1.02 dBFS",
+      ),
+    ).toEqual({ integratedLufs: -8.4, truePeakDb: -1.02 });
     expect(parseOutTimeMs("out_time_us=2500000\nprogress=continue")).toBe(2500);
     const probe = parseFfprobeJson(
       JSON.stringify({

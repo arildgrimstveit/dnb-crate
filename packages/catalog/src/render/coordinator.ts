@@ -15,6 +15,8 @@ import {
   DEFAULT_TRUE_PEAK_CEILING_DB,
   DomainError,
   MIN_ANALYSIS_CONFIDENCE,
+  RENDER_CHECK_LEVEL_STEP_FAIL_LU,
+  RENDER_CHECK_RESIDUAL_FAIL_MS,
   RENDERER_VERSION,
   assertPlaybackRate,
   clampMixPresetParams,
@@ -58,8 +60,17 @@ import {
   type ProcessRunner,
 } from "@dnb-crate/audio-renderer";
 
+import {
+  alignmentResidualMs,
+  firstDropMs,
+  joinCamelotDistance,
+  measureLevelStepLu,
+  paramNumber,
+  paramString,
+} from "./check-metrics.ts";
 import { fingerprintFile } from "../fingerprint.ts";
 import { isPathInsideAnyRoot, isPathInsideRoot } from "../paths.ts";
+import { sectionEnergyAt } from "../planning/cues.ts";
 import { planDurationMs, playableOutputMs } from "../planning/timeline.ts";
 import { validateSetPlan } from "../planning/validate.ts";
 import type { TrackRepository } from "../repository.ts";
@@ -73,11 +84,24 @@ export type RenderCheckJoin = {
   incomingTitle: string;
   template: string;
   barCount: number | null;
+  phraseShape: string | null;
+  exitKind: string | null;
+  mixOutMs: number | null;
+  mixInMs: number | null;
+  incomingDropMs: number | null;
+  outgoingLufs: number | null;
+  incomingLufs: number | null;
+  outgoingGainDb: number;
+  incomingGainDb: number;
+  camelotDistance: number | null;
+  residualMs: number | null;
+  levelStepLu: number | null;
+  lowOverlapSec: number | null;
   outgoingRate: number;
   incomingRate: number;
   downbeatOffsetMs: number | null;
   alignmentPeriodMs: number | null;
-  alignmentMode: "bar" | "beat" | null;
+  alignmentMode: "bar" | "beat" | "phrase" | null;
   windowInSilence: boolean;
   overlapAtMs: number | null;
 };
@@ -109,9 +133,13 @@ export type PreparedSegment = MixSegment & {
   targetBpm: number | null;
   downbeatOffsetMs: number | null;
   alignmentPeriodMs: number | null;
-  alignmentMode: "bar" | "beat" | null;
+  alignmentMode: "bar" | "beat" | "phrase" | null;
   downbeatConfidence: number | null;
   mixParams: Partial<MixPresetParams> | null;
+  mixOutMs: number | null;
+  mixInMs: number | null;
+  exitKind: string | null;
+  incomingDropMs: number | null;
 };
 
 type RenderSettings = {
@@ -470,52 +498,110 @@ export class RenderCoordinator {
       const outEntry = entries.find((entry) => entry.trackId === outgoing.trackId);
       const outTrack = this.tracks.findById(outgoing.trackId);
       const inTrack = this.tracks.findById(incoming.trackId);
-      const analysis = this.analyses.findByTrackId(outgoing.trackId);
+      const outAnalysis = this.analyses.findByTrackId(outgoing.trackId);
+      const inAnalysis = this.analyses.findByTrackId(incoming.trackId);
       const audioEnd =
-        typeof analysis?.descriptors?.audioEndMs === "number"
-          ? analysis.descriptors.audioEndMs
+        typeof outAnalysis?.descriptors?.audioEndMs === "number"
+          ? outAnalysis.descriptors.audioEndMs
           : null;
       const overlap = outgoing.overlapToNextMs ?? 0;
       const windowInSilence =
         audioEnd !== null && outgoing.sourceEndMs > audioEnd + 250;
-      const barRaw = outEntry?.transitionToNext?.parameters.barCount;
+      const params = outEntry?.transitionToNext?.parameters;
+      const barRaw = paramNumber(params, "barCount") ?? outgoing.barCount ?? null;
       const alignmentMode =
-        incoming.alignmentMode === "bar" || incoming.alignmentMode === "beat"
+        incoming.alignmentMode === "bar" ||
+        incoming.alignmentMode === "beat" ||
+        incoming.alignmentMode === "phrase"
           ? incoming.alignmentMode
+          : null;
+      const overlapAtMs =
+        overlap > 0
+          ? Math.round(
+              outgoing.timelineStartMs +
+                playableOutputMs({
+                  sourceStartMs: outgoing.sourceStartMs,
+                  sourceEndMs: outgoing.sourceEndMs,
+                  playbackRate: outgoing.playbackRate,
+                }) -
+                overlap,
+            )
+          : null;
+      const outOverlapStart =
+        outgoing.sourceEndMs - overlap * (outgoing.playbackRate > 0 ? outgoing.playbackRate : 1);
+      const residualMs = alignmentResidualMs(
+        incoming.downbeatOffsetMs,
+        outAnalysis?.beatTimesMs ?? [],
+        inAnalysis?.beatTimesMs ?? [],
+        outOverlapStart,
+        incoming.sourceStartMs,
+        outgoing.playbackRate,
+        incoming.playbackRate,
+        incoming.alignmentPeriodMs ?? null,
+      );
+      const tailEnergy = sectionEnergyAt(outAnalysis?.sections, outOverlapStart) ?? 0;
+      const headEnergy = sectionEnergyAt(inAnalysis?.sections, incoming.sourceStartMs) ?? 0;
+      const lowOverlapSec =
+        overlap > 0 && tailEnergy >= 0.25 && headEnergy >= 0.15
+          ? Number((overlap / 1000).toFixed(2))
+          : overlap > 0
+            ? 0
+            : null;
+      const levelStepLu =
+        overlapAtMs != null
+          ? await measureLevelStepLu(
+              this.runner,
+              binaries.ffmpegPath,
+              outputPath,
+              overlapAtMs,
+              durationMs,
+            )
           : null;
       joins.push({
         order: i,
         outgoingTitle: outTrack?.title ?? outgoing.trackId,
         incomingTitle: inTrack?.title ?? incoming.trackId,
         template: outgoing.transitionTemplate,
-        barCount: typeof barRaw === "number" ? barRaw : null,
+        barCount: barRaw,
+        phraseShape: paramString(params, "phraseShape") ?? outgoing.phraseShape ?? null,
+        exitKind: paramString(params, "exitKind") ?? outgoing.exitKind ?? null,
+        mixOutMs: paramNumber(params, "mixOutMs") ?? outgoing.mixOutMs ?? null,
+        mixInMs: paramNumber(params, "mixInMs") ?? outgoing.mixInMs ?? null,
+        incomingDropMs: firstDropMs(inAnalysis?.sections) ?? outgoing.incomingDropMs ?? null,
+        outgoingLufs: outAnalysis?.integratedLufs ?? outgoing.outgoingLufs ?? null,
+        incomingLufs: inAnalysis?.integratedLufs ?? outgoing.incomingLufs ?? null,
+        outgoingGainDb: outgoing.gainDb,
+        incomingGainDb: incoming.gainDb,
+        camelotDistance: joinCamelotDistance(outTrack?.camelotKey ?? null, inTrack?.camelotKey ?? null),
+        residualMs,
+        levelStepLu,
+        lowOverlapSec,
         outgoingRate: outgoing.playbackRate,
         incomingRate: incoming.playbackRate,
         downbeatOffsetMs: incoming.downbeatOffsetMs,
         alignmentPeriodMs: incoming.alignmentPeriodMs ?? null,
         alignmentMode,
         windowInSilence,
-        overlapAtMs:
-          overlap > 0
-            ? Math.round(
-                outgoing.timelineStartMs +
-                  playableOutputMs({
-                    sourceStartMs: outgoing.sourceStartMs,
-                    sourceEndMs: outgoing.sourceEndMs,
-                    playbackRate: outgoing.playbackRate,
-                  }) -
-                  overlap,
-              )
-            : null,
+        overlapAtMs,
       });
     }
+    const residualFail = joins.some(
+      (join) => join.residualMs != null && Math.abs(join.residualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS,
+    );
+    const levelFail = joins.some(
+      (join) => join.levelStepLu != null && Math.abs(join.levelStepLu) > RENDER_CHECK_LEVEL_STEP_FAIL_LU,
+    );
     return {
       renderJobId,
       outputPath,
       durationMs,
       interiorSilence,
       joins,
-      ok: interiorSilence.length === 0 && joins.every((join) => !join.windowInSilence),
+      ok:
+        interiorSilence.length === 0 &&
+        joins.every((join) => !join.windowInSilence) &&
+        !residualFail &&
+        !levelFail,
     };
   }
 
@@ -801,7 +887,17 @@ export class RenderCoordinator {
         ffmpegVersion: binaries.ffmpegVersion,
         ffprobeVersion: binaries.ffprobeVersion,
         invocation: mix.invocation,
-        tracks: segments.map((segment, index) => toManifestTrack(segment, mixTypes[index])),
+        tracks: segments.map((segment, index) =>
+          toManifestTrack(
+            segment,
+            mixTypes[index],
+            segments[index + 1],
+            this.tracks.findById(segment.trackId),
+            this.tracks.findById(segments[index + 1]?.trackId ?? ""),
+            this.analyses.findByTrackId(segment.trackId),
+            this.analyses.findByTrackId(segments[index + 1]?.trackId ?? ""),
+          ),
+        ),
         automation,
         warnings,
         createdAt: new Date().toISOString(),
@@ -1055,6 +1151,10 @@ export class RenderCoordinator {
       alignmentMode: null,
       downbeatConfidence: analysis?.downbeatConfidence ?? null,
       mixParams: mixParamsFromEntry(entry),
+      mixOutMs: paramNumber(entry.transitionToNext?.parameters, "mixOutMs"),
+      mixInMs: paramNumber(entry.transitionToNext?.parameters, "mixInMs"),
+      exitKind: paramString(entry.transitionToNext?.parameters, "exitKind"),
+      incomingDropMs: firstDropMs(analysis?.sections),
     };
   }
 
@@ -1163,7 +1263,15 @@ function slicePreview(
   };
 }
 
-function toManifestTrack(segment: PreparedSegment, mix?: MixTransitionSpec): RenderManifestTrack {
+function toManifestTrack(
+  segment: PreparedSegment,
+  mix?: MixTransitionSpec,
+  incoming?: PreparedSegment,
+  outgoingTrack?: Track | null,
+  incomingTrack?: Track | null,
+  outgoingAnalysis?: { integratedLufs: number | null } | null,
+  incomingAnalysis?: { integratedLufs: number | null } | null,
+): RenderManifestTrack {
   const template = mix
     ? mix.type === "phrase_mix"
       ? "phrase_mix"
@@ -1188,9 +1296,18 @@ function toManifestTrack(segment: PreparedSegment, mix?: MixTransitionSpec): Ren
     requestedTransitionType: segment.requestedTransitionType,
     analysisVersion: segment.analysisVersion,
     bpmConfidence: segment.bpmConfidence,
-    downbeatOffsetMs: segment.downbeatOffsetMs,
-    alignmentPeriodMs: segment.alignmentPeriodMs,
-    alignmentMode: segment.alignmentMode,
+    downbeatOffsetMs: incoming?.downbeatOffsetMs ?? segment.downbeatOffsetMs,
+    alignmentPeriodMs: incoming?.alignmentPeriodMs ?? segment.alignmentPeriodMs,
+    alignmentMode: incoming?.alignmentMode ?? segment.alignmentMode,
+    barCount: segment.mixParams?.barCount ?? mix?.barCount ?? null,
+    phraseShape: segment.mixParams?.phraseShape ?? null,
+    exitKind: segment.exitKind,
+    mixOutMs: segment.mixOutMs,
+    mixInMs: segment.mixInMs,
+    incomingDropMs: incoming?.incomingDropMs ?? segment.incomingDropMs,
+    outgoingLufs: outgoingAnalysis?.integratedLufs ?? null,
+    incomingLufs: incomingAnalysis?.integratedLufs ?? null,
+    camelotDistance: joinCamelotDistance(outgoingTrack?.camelotKey ?? null, incomingTrack?.camelotKey ?? null),
   };
 }
 

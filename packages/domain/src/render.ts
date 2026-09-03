@@ -57,7 +57,16 @@ export type RenderManifestTrack = {
   bpmConfidence: number | null;
   downbeatOffsetMs: number | null;
   alignmentPeriodMs: number | null;
-  alignmentMode?: "bar" | "beat" | null;
+  alignmentMode?: "bar" | "beat" | "phrase" | null;
+  barCount?: number | null;
+  phraseShape?: string | null;
+  exitKind?: string | null;
+  mixOutMs?: number | null;
+  mixInMs?: number | null;
+  incomingDropMs?: number | null;
+  outgoingLufs?: number | null;
+  incomingLufs?: number | null;
+  camelotDistance?: number | null;
 };
 
 export type RenderManifestV1 = {

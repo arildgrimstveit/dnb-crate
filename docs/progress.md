@@ -1,5 +1,40 @@
 # Progress
 
+## Mixing v4 — baseline (2026-09-03)
+
+Live crate after the v3 whole-library pass. Docs that still say **583** tracks are stale; `library:stats` now reports **431** (430 FLAC, 1 MP3, 34.5 h). The drop is a later library/dedupe pass, not an analysis regression.
+
+- Tracks **431**, analyzed **431 / 431**. DSP `dnb-crate-dsp@3.0.0`: accepted **209**, rejected **213**, reference **9**, `bpmHintOnly` **73**. Envelope 1.0.0: 11 leftover rows.
+- BPM source: published 140, analyzed 153, NULL 138. Key source: manual 8, analyzed 216, NULL 207.
+- Energy / rating / moods: **0**. Enrichment: genres 376, isrc 399, label 409, releaseDate 431, recordingMbid 415, `duplicateGroups` 1.
+- Descriptor p10 / p50 / p90: energy 0.438 / 0.714 / 0.825; danceability 0.269 / 0.472 / 0.656; valence 0.224 / 0.346 / 0.649; acousticness 0.107 / 0.167 / 0.686; melodicness 0.025 / 0.055 / 0.143.
+
+`render:check` v2 on Peak v3.3 job `558bf742-56ed-412a-aaf5-d7f3f834fde6` (`output/renders/hour-peak-v3.3.flac`, duration **3583076** ms). Exit **1**. `interiorSilence: []`. Every join `alignmentMode: beat`, `gainDb` 0, `exitKind` null. Fail gates: residual > 40 ms or |level step| > 3 LU.
+
+| # | Join | Bars | Residual ms | Level step LU | Camelot | mixOut / mixIn ms | LUFS out→in | Fail |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |
+| 0 | Under The Waves → Chant | 16 | 0 | −1.0 | 0 | 264868 / 247 | −9.0 → −7.7 | |
+| 1 | Chant → Let The Story Begin | 16 | 23 | −4.6 | 1 | 215419 / 1000 | −7.7 → −8.4 | level |
+| 2 | Let The Story Begin → Let It Fall | 32 | 0 | −0.9 | 0 | 248604 / 209 | −8.4 → −7.5 | |
+| 3 | Let It Fall → Inemuri | 16 | 0 | −2.8 | 0 | 260893 / 342 | −7.5 → −7.6 | |
+| 4 | Inemuri → Calling for a Sign | 16 | 0 | −1.9 | 0 | 237582 / 342 | −7.6 → −5.6 | |
+| 5 | Calling for a Sign → Dreamweaver | 32 | 0 | +0.6 | 1 | 186551 / 110 | −5.6 → −9.0 | |
+| 6 | Dreamweaver → Breathe In | 16 | 0 | −2.3 | 0 | 231834 / 342 | −9.0 → −7.6 | |
+| 7 | Breathe In → Hold on a While | 16 | 0 | −1.7 | 0 | 244481 / 81 | −7.6 → −7.4 | |
+| 8 | Hold on a While → Red Velvet | 16 | 0 | −8.2 | 0 | 176633 / 52 | −7.4 → −7.4 | level |
+| 9 | Red Velvet → Moment to Moment | 16 | **343** | −4.0 | 1 | 220742 / 0 | −7.4 → −8.3 | residual + level |
+| 10 | Moment to Moment → Colour Me In | 32 | **343** | −0.6 | 1 | 228967 / 0 | −8.3 → −7.7 | residual |
+| 11 | Colour Me In → Until The End | 16 | 0 | −10.8 | 0 | 242756 / 175 | −7.7 → −8.0 | level |
+| 12 | Until The End → Tidal Wave | 32 | 0 | −1.1 | 0 | 193278 / 173 | −8.0 → −7.7 | |
+| 13 | Tidal Wave → Streamline | 32 | 0 | −4.6 | 0 | 110518 / 177 | −7.7 → −10.3 | level |
+| 14 | Streamline → Vapourise | 32 | 0 | −1.1 | 0 | 278796 / 179 | −10.3 → −8.9 | |
+
+The two **343 ms** residuals are one beat (`alignmentPeriodMs` 345) on joins whose mix-in is source 0 — the `applyAlignmentOffset` +1-period path. Joins 2 and 14 report `lowOverlapSec` 44.14 (section-energy proxy: both sides hot). Plan: `docs/plans/mixing-v4-handover.md`.
+
+### WP0 shipped
+
+Plan file, crate-count refresh (431), manifest join fields (`barCount`, `phraseShape`, `exitKind`, mix windows, LUFS, Camelot), `render:check` v2 (residual, level step, low-overlap proxy, key distance). `parseEbur128` now takes the Summary `I:` so 10 s windows are not read as the first momentary −70 LUFS line.
+
 ## Crate v3 — baseline (2026-09-03)
 
 `library:stats` before WP1–WP5. Live crate, no re-analysis.
