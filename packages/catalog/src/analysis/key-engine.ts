@@ -22,7 +22,11 @@ async function findOnPath(name: string): Promise<string | null> {
     "keyfinder-cli",
     process.platform === "win32" ? "keyfinder-cli.exe" : "keyfinder-cli",
   );
-  const dirs = [path.dirname(bundled), process.cwd(), ...(process.env.PATH ?? "").split(path.delimiter)];
+  const dirs = [
+    path.dirname(bundled),
+    process.cwd(),
+    ...(process.env.PATH ?? "").split(path.delimiter),
+  ];
   const extra = [bundled];
   for (const candidate of extra) {
     try {
@@ -164,9 +168,11 @@ export async function runKeyEngine(
   };
 }
 
-export function parseKeyStdout(
-  stdout: string,
-): { musicalKey: string | null; camelotKey: string | null; keyConfidence: number | null } {
+export function parseKeyStdout(stdout: string): {
+  musicalKey: string | null;
+  camelotKey: string | null;
+  keyConfidence: number | null;
+} {
   const first = stdout.trim().split(/\s+/)[0] ?? "";
   const normalized = normalizeKey(first);
   return {

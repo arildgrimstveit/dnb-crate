@@ -56,19 +56,19 @@ export function createFakeHttpClient(routes: FakeHttpRoute[]): HttpClient & { ca
   }));
   return {
     calls,
-    async get(url) {
+    get(url) {
       calls.push(url);
       const hit = remaining.find((route) =>
         typeof route.match === "string" ? url.includes(route.match) : route.match.test(url),
       );
       if (!hit) {
-        return { status: 404, body: "{\"error\":\"not found\"}", headers: {} };
+        return Promise.resolve({ status: 404, body: '{"error":"not found"}', headers: {} });
       }
       const next = hit.queue?.shift();
       const status = next?.status ?? hit.status ?? 200;
       const raw = next?.body ?? hit.body ?? {};
       const body = typeof raw === "string" ? raw : JSON.stringify(raw);
-      return { status, body, headers: next?.headers ?? hit.headers ?? {} };
+      return Promise.resolve({ status, body, headers: next?.headers ?? hit.headers ?? {} });
     },
   };
 }

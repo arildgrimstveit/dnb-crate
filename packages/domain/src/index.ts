@@ -85,7 +85,13 @@ export {
   PHRASE_MIX_HIGHPASS_HZ,
   ANALYSIS_JOB_LIST_LIMIT_MAX,
 } from "./constants.ts";
-export { type AppConfig, appConfigSchema, type LogLevel, logLevelSchema, analysisEngineIdSchema } from "./config.ts";
+export {
+  type AppConfig,
+  appConfigSchema,
+  type LogLevel,
+  logLevelSchema,
+  analysisEngineIdSchema,
+} from "./config.ts";
 export {
   hasDrumAndBassGenre,
   isDrumAndBassGenre,

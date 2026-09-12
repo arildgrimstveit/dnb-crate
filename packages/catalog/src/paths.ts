@@ -1,14 +1,14 @@
 import path from "node:path";
 
-function forCompare(filePath: string): string {
+export function normalizedPath(filePath: string): string {
   const normalized = path.resolve(filePath).replaceAll("\\", "/");
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 export function isPathInsideRoot(resolvedPath: string, resolvedRoot: string): boolean {
-  const target = forCompare(resolvedPath);
-  const root = forCompare(resolvedRoot);
-  return target === root || target.startsWith(`${root}/`);
+  const target = normalizedPath(resolvedPath);
+  const root = normalizedPath(resolvedRoot);
+  return target === root || target.startsWith(root.endsWith("/") ? root : `${root}/`);
 }
 
 export function isPathInsideAnyRoot(resolvedPath: string, resolvedRoots: string[]): boolean {

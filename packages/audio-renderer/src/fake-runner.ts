@@ -47,7 +47,13 @@ function lastOutputPath(args: string[]): string | null {
  * In-process FFmpeg stand-in for unit tests. Writes a short WAV and English ebur128 text.
  */
 export function createFakeFfmpegRunner(
-  options: { delayMs?: number; failOn?: "mix" | "probe" | "never"; hangUntilAbort?: boolean } = {},
+  options: {
+    delayMs?: number;
+    failOn?: "mix" | "probe" | "never";
+    hangUntilAbort?: boolean;
+    /** ffprobe duration. Default 1s; catalog fixture renders use 15s to match the two-track plan. */
+    probeDurationSec?: number;
+  } = {},
 ): ProcessRunner {
   const failOn = options.failOn ?? "never";
   return {
@@ -91,7 +97,8 @@ export function createFakeFfmpegRunner(
       const isProbe = /ffprobe/i.test(request.executable) || request.args.includes("-print_format");
       const isVersion = request.args.includes("-version");
       const isFilters = request.args.includes("-filters");
-      const isAfadeHelp = request.args.includes("-h") && request.args.some((arg) => arg.includes("afade"));
+      const isAfadeHelp =
+        request.args.includes("-h") && request.args.some((arg) => arg.includes("afade"));
       const isEbur = request.args.some((arg) => arg.includes("ebur128"));
       const isSilence = request.args.some((arg) => arg.includes("silencedetect"));
 
@@ -127,6 +134,7 @@ export function createFakeFfmpegRunner(
         }
         const probed = lastOutputPath(request.args);
         const codecName = probed?.toLowerCase().endsWith(".flac") ? "flac" : "pcm_s24le";
+        const duration = (options.probeDurationSec ?? 1).toFixed(6);
         return {
           exitCode: 0,
           signal: null,
@@ -137,10 +145,10 @@ export function createFakeFfmpegRunner(
                 codec_name: codecName,
                 sample_rate: "48000",
                 channels: 2,
-                duration: "1.000000",
+                duration,
               },
             ],
-            format: { duration: "1.000000" },
+            format: { duration },
           }),
           stderr: "",
         };

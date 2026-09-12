@@ -41,7 +41,11 @@ export type HandoffScore = {
   landingFadeBars?: 2 | 4 | 8;
 };
 
-export function sliceBars(bars: BarSeries | null | undefined, startBar: number, count: number): BarSeries | null {
+export function sliceBars(
+  bars: BarSeries | null | undefined,
+  startBar: number,
+  count: number,
+): BarSeries | null {
   if (!bars || bars.rms.length === 0 || count <= 0) {
     return null;
   }
@@ -62,12 +66,25 @@ export function scoreHandoff(candidate: HandoffCandidate): HandoffScore {
   const intent = chooseMixIntent(candidate);
   const bars = candidate.barCount;
   const lateIncoming = candidate.incomingBars?.rms.slice(-4);
-  const landingFadeBars = candidate.phraseShape === "landing"
-    ? ((lateIncoming ? mean(lateIncoming) : candidate.incomingHeadEnergy) < 0.35 ? 2 : bars === 8 ? 4 : 8)
-    : undefined;
-  const events = expandPreset("phrase_mix", {
-    phraseShape: candidate.phraseShape, intent, sequentialHandoff: "supported", landingFadeBars,
-  }, bars, 1);
+  const landingFadeBars =
+    candidate.phraseShape === "landing"
+      ? (lateIncoming ? mean(lateIncoming) : candidate.incomingHeadEnergy) < 0.35
+        ? 2
+        : bars === 8
+          ? 4
+          : 8
+      : undefined;
+  const events = expandPreset(
+    "phrase_mix",
+    {
+      phraseShape: candidate.phraseShape,
+      intent,
+      sequentialHandoff: "supported",
+      landingFadeBars,
+    },
+    bars,
+    1,
+  );
   const gain = (target: string, bar: number): number => {
     let value = target.startsWith("incoming") ? 0 : 1;
     for (const event of events.filter((item) => item.target === target)) {
@@ -106,12 +123,23 @@ export function scoreHandoff(candidate: HandoffCandidate): HandoffScore {
   const quietPrefix = quietIncomingPrefix(candidate);
   const landing = candidate.exitKind === "dropLanding" || candidate.phraseShape === "landing";
   const lengthBias = landing ? (bars === 32 ? 0.28 : bars === 16 ? 0.18 : 0) : 0;
-  const score = floor * 3 - valleyBars * 0.35 + Math.min(coexistenceBars, 16) * 0.035
-    + coexistenceRatio * 1.2 - quietPrefix * (bars >= 16 ? 0.9 : 0.2)
-    - competition * 0.025 + lengthBias;
+  const score =
+    floor * 3 -
+    valleyBars * 0.35 +
+    Math.min(coexistenceBars, 16) * 0.035 +
+    coexistenceRatio * 1.2 -
+    quietPrefix * (bars >= 16 ? 0.9 : 0.2) -
+    competition * 0.025 +
+    lengthBias;
   return {
-    score, intent, energyFloor: floor, drumCompetition: competition / bars,
-    incomingEarly: incomingEarlyScore(candidate), valleyBars, coexistenceBars, landingFadeBars,
+    score,
+    intent,
+    energyFloor: floor,
+    drumCompetition: competition / bars,
+    incomingEarly: incomingEarlyScore(candidate),
+    valleyBars,
+    coexistenceBars,
+    landingFadeBars,
     reasons: [
       "source-window continuity proxy",
       `${valleyBars.toFixed(1)} weighted valley bars`,
@@ -126,10 +154,11 @@ export function pickHandoffCandidate<T extends HandoffCandidate>(candidates: T[]
   }
   const longer = candidates.filter((item) => item.barCount >= 16);
   const banned = longer.length > 0 ? longer : candidates;
-  const laterIncoming = banned.filter((item) => !isQuietIncomingStart(item) && incomingHasEnergy(item));
-  const withoutQuietStart = laterIncoming.length > 0
-    ? banned.filter((item) => !isQuietIncomingStart(item))
-    : banned;
+  const laterIncoming = banned.filter(
+    (item) => !isQuietIncomingStart(item) && incomingHasEnergy(item),
+  );
+  const withoutQuietStart =
+    laterIncoming.length > 0 ? banned.filter((item) => !isQuietIncomingStart(item)) : banned;
   const energeticExits = withoutQuietStart.filter(
     (item) => item.exitKind === "dropLanding" && item.outgoingTailEnergy >= 0.5,
   );
@@ -193,8 +222,7 @@ function pickByScore<T extends HandoffCandidate>(candidates: T[]): T {
         return scoreDiff;
       }
       return b.candidate.barCount - a.candidate.barCount;
-    })[0]!
-    .candidate;
+    })[0]!.candidate;
 }
 
 function incomingEarlyScore(candidate: HandoffCandidate): number {

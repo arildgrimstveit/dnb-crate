@@ -32,8 +32,11 @@ export const RUBBERBAND_MAKEUP_CLAMP_DB = 6;
 
 /** Prepare both joins before accumulation; never stretch an already mixed prefix. */
 export async function prepareBothJoinRegions(
-  runner: ProcessRunner, binaries: FfmpegBinaries, cliPath: string,
-  request: StretchPrepareRequest, sampleRateHz: number,
+  runner: ProcessRunner,
+  binaries: FfmpegBinaries,
+  cliPath: string,
+  request: StretchPrepareRequest,
+  sampleRateHz: number,
 ): Promise<Awaited<ReturnType<typeof prepareCliStretchedSegments>>> {
   const segments: StretchPrepareSegment[] = [];
   const tempPaths: string[] = [];
@@ -46,17 +49,29 @@ export async function prepareBothJoinRegions(
       const tail = request.overlapMs[index] ?? 0;
       resolveRateRegions(source.sourceEndMs - source.sourceStartMs, rate, head, tail);
       let prepared = source;
-      for (const [role, duration] of [["head", head], ["tail", tail]] as const) {
+      for (const [role, duration] of [
+        ["head", head],
+        ["tail", tail],
+      ] as const) {
         if (duration <= 0 || effectivePlaybackRate(rate, duration) === 1) continue;
         // A dummy identity deck gives the head the incoming role without decoding it.
         const dummy = { ...prepared, playbackRate: 1 };
-        const result = await prepareCliStretchedSegments(runner, binaries, cliPath, {
-          ...request,
-          outputPath: `${request.outputPath}.regions-${index}-${role}`,
-          stretchScope: "overlap",
-          segments: role === "head" ? [dummy, { ...prepared, playbackRate: rate }] : [{ ...prepared, playbackRate: rate, stretchTailMs: duration }],
-          overlapMs: role === "head" ? [duration] : [],
-        }, sampleRateHz);
+        const result = await prepareCliStretchedSegments(
+          runner,
+          binaries,
+          cliPath,
+          {
+            ...request,
+            outputPath: `${request.outputPath}.regions-${index}-${role}`,
+            stretchScope: "overlap",
+            segments:
+              role === "head"
+                ? [dummy, { ...prepared, playbackRate: rate }]
+                : [{ ...prepared, playbackRate: rate, stretchTailMs: duration }],
+            overlapMs: role === "head" ? [duration] : [],
+          },
+          sampleRateHz,
+        );
         tempPaths.push(...result.tempPaths);
         warnings.push(...result.warnings);
         invocations.push(result.invocation);
@@ -71,11 +86,7 @@ export async function prepareBothJoinRegions(
   }
 }
 
-const BUNDLED_DIR = path.join(
-  "tools",
-  "rubberband-cli",
-  "rubberband-4.0.0-gpl-executable-windows",
-);
+const BUNDLED_DIR = path.join("tools", "rubberband-cli", "rubberband-4.0.0-gpl-executable-windows");
 
 export function resolveRubberbandCli(explicit?: string | null): string | null {
   const bundled = path.resolve(process.cwd(), BUNDLED_DIR);
@@ -129,7 +140,17 @@ async function measureLufs(
 ): Promise<number | null> {
   const result = await runner.run({
     executable: binaries.ffmpegPath,
-    args: ["-nostdin", "-hide_banner", "-i", filePath, "-filter_complex", "ebur128=peak=true", "-f", "null", "-"],
+    args: [
+      "-nostdin",
+      "-hide_banner",
+      "-i",
+      filePath,
+      "-filter_complex",
+      "ebur128=peak=true",
+      "-f",
+      "null",
+      "-",
+    ],
     abortSignal,
   });
   return parseEbur128(result.stderr).integratedLufs;
@@ -222,168 +243,198 @@ export async function prepareCliStretchedSegments(
 
   try {
     for (let i = 0; i < request.segments.length; i += 1) {
-    const segment = request.segments[i]!;
-    const sourceMs = segment.sourceEndMs - segment.sourceStartMs;
-    const requested = segment.playbackRate ?? 1;
-    const overlapMs = overlapForSegment(request, i);
-    const rate = effectivePlaybackRate(
-      requested,
-      stretchScope === "all" || overlapMs <= 0 ? sourceMs : overlapMs,
-    );
-    if (rate === 1) {
-      segments.push(segment);
-      continue;
-    }
-    const slice = path.join(work, `${path.basename(request.outputPath)}.rb${i}.slice.wav`);
-    const stretched = path.join(work, `${path.basename(request.outputPath)}.rb${i}.wav`);
-    tempPaths.push(slice, stretched);
-    await runFfmpeg(
-      runner,
-      binaries,
-      [
-        "-ss",
-        (segment.sourceStartMs / 1000).toFixed(6),
-        "-i",
-        segment.filePath,
-        "-t",
-        (sourceMs / 1000).toFixed(6),
-        "-ar",
-        String(sampleRateHz),
-        "-ac",
-        "2",
-        "-c:a",
-        "pcm_s24le",
-        slice,
-      ],
-      request.abortSignal,
-    );
-    const overlapOutSec = overlapMs / 1000;
-    const sourceSec = sourceMs / 1000;
-    const overlapSrc = overlapOutSec * rate;
-    const xfade = RATE_SPLICE_XFADE_SEC;
-    const canSplit =
-      stretchScope === "overlap" &&
-      overlapOutSec > 0 &&
-      overlapSrc < sourceSec - xfade &&
-      overlapSrc >= xfade;
+      const segment = request.segments[i]!;
+      const sourceMs = segment.sourceEndMs - segment.sourceStartMs;
+      const requested = segment.playbackRate ?? 1;
+      const overlapMs = overlapForSegment(request, i);
+      const rate = effectivePlaybackRate(
+        requested,
+        stretchScope === "all" || overlapMs <= 0 ? sourceMs : overlapMs,
+      );
+      if (rate === 1) {
+        segments.push(segment);
+        continue;
+      }
+      const slice = path.join(work, `${path.basename(request.outputPath)}.rb${i}.slice.wav`);
+      const stretched = path.join(work, `${path.basename(request.outputPath)}.rb${i}.wav`);
+      tempPaths.push(slice, stretched);
+      await runFfmpeg(
+        runner,
+        binaries,
+        [
+          "-ss",
+          (segment.sourceStartMs / 1000).toFixed(6),
+          "-i",
+          segment.filePath,
+          "-t",
+          (sourceMs / 1000).toFixed(6),
+          "-ar",
+          String(sampleRateHz),
+          "-ac",
+          "2",
+          "-c:a",
+          "pcm_s24le",
+          slice,
+        ],
+        request.abortSignal,
+      );
+      const overlapOutSec = overlapMs / 1000;
+      const sourceSec = sourceMs / 1000;
+      const overlapSrc = overlapOutSec * rate;
+      const xfade = RATE_SPLICE_XFADE_SEC;
+      const canSplit =
+        stretchScope === "overlap" &&
+        overlapOutSec > 0 &&
+        overlapSrc < sourceSec - xfade &&
+        overlapSrc >= xfade;
 
-    if (!canSplit) {
-      await stretchCli(cliPath, rate, slice, stretched, request.abortSignal);
-      const makeup = await applyMakeup(runner, binaries, slice, stretched, request.abortSignal);
-      if (makeup.outputPath !== stretched) {
+      if (!canSplit) {
+        await stretchCli(cliPath, rate, slice, stretched, request.abortSignal);
+        const makeup = await applyMakeup(runner, binaries, slice, stretched, request.abortSignal);
+        if (makeup.outputPath !== stretched) {
+          tempPaths.push(makeup.outputPath);
+        }
+        const probe = await probeAudioFile(
+          runner,
+          binaries,
+          makeup.outputPath,
+          request.abortSignal,
+        );
+        segments.push({
+          ...segment,
+          filePath: makeup.outputPath,
+          sourceStartMs: 0,
+          sourceEndMs: probe.durationMs,
+          playbackRate: 1,
+          stretchTailMs: undefined,
+        });
+        parts.push(`rubberband-r3 -T ${rate.toFixed(6)} makeup=${makeup.gainDb.toFixed(2)}dB`);
+        if (Math.abs(makeup.gainDb) >= 0.15) {
+          warnings.push(
+            `Rubber Band R3 makeup ${makeup.gainDb.toFixed(2)} dB to match the dry slice.`,
+          );
+        }
+        continue;
+      }
+
+      const role = segment.stretchTailMs != null || i === 0 ? "outgoing" : "incoming";
+      const region = path.join(work, `${path.basename(request.outputPath)}.rb${i}.region.wav`);
+      const regionOut = path.join(
+        work,
+        `${path.basename(request.outputPath)}.rb${i}.region-rb.wav`,
+      );
+      const native = path.join(work, `${path.basename(request.outputPath)}.rb${i}.native.wav`);
+      tempPaths.push(region, regionOut, native, stretched);
+      if (role === "outgoing") {
+        const bodySrc = sourceSec - overlapSrc;
+        await runFfmpeg(
+          runner,
+          binaries,
+          [
+            "-i",
+            slice,
+            "-af",
+            `atrim=start=${bodySrc.toFixed(6)},asetpts=PTS-STARTPTS`,
+            "-c:a",
+            "pcm_s24le",
+            region,
+          ],
+          request.abortSignal,
+        );
+        await runFfmpeg(
+          runner,
+          binaries,
+          [
+            "-i",
+            slice,
+            "-af",
+            `atrim=start=0:end=${(bodySrc + xfade).toFixed(6)},asetpts=PTS-STARTPTS`,
+            "-c:a",
+            "pcm_s24le",
+            native,
+          ],
+          request.abortSignal,
+        );
+      } else {
+        await runFfmpeg(
+          runner,
+          binaries,
+          [
+            "-i",
+            slice,
+            "-af",
+            `atrim=start=0:end=${overlapSrc.toFixed(6)},asetpts=PTS-STARTPTS`,
+            "-c:a",
+            "pcm_s24le",
+            region,
+          ],
+          request.abortSignal,
+        );
+        await runFfmpeg(
+          runner,
+          binaries,
+          [
+            "-i",
+            slice,
+            "-af",
+            `atrim=start=${Math.max(0, overlapSrc - xfade).toFixed(6)},asetpts=PTS-STARTPTS`,
+            "-c:a",
+            "pcm_s24le",
+            native,
+          ],
+          request.abortSignal,
+        );
+      }
+      await stretchCli(cliPath, rate, region, regionOut, request.abortSignal);
+      const makeup = await applyMakeup(runner, binaries, region, regionOut, request.abortSignal);
+      if (makeup.outputPath !== regionOut) {
         tempPaths.push(makeup.outputPath);
       }
-      const probe = await probeAudioFile(runner, binaries, makeup.outputPath, request.abortSignal);
+      const left = role === "outgoing" ? native : makeup.outputPath;
+      const right = role === "outgoing" ? makeup.outputPath : native;
+      await runFfmpeg(
+        runner,
+        binaries,
+        [
+          "-i",
+          left,
+          "-i",
+          right,
+          "-filter_complex",
+          `[0:a][1:a]acrossfade=d=${xfade}:o=1:c1=hsin:c2=hsin[out]`,
+          "-map",
+          "[out]",
+          "-c:a",
+          "pcm_s24le",
+          stretched,
+        ],
+        request.abortSignal,
+      );
+      const probe = await probeAudioFile(runner, binaries, stretched, request.abortSignal);
       segments.push({
         ...segment,
-        filePath: makeup.outputPath,
+        filePath: stretched,
         sourceStartMs: 0,
         sourceEndMs: probe.durationMs,
         playbackRate: 1,
         stretchTailMs: undefined,
       });
-      parts.push(`rubberband-r3 -T ${rate.toFixed(6)} makeup=${makeup.gainDb.toFixed(2)}dB`);
+      parts.push(
+        `rubberband-r3 ${role} -T ${rate.toFixed(6)} makeup=${makeup.gainDb.toFixed(2)}dB`,
+      );
       if (Math.abs(makeup.gainDb) >= 0.15) {
-        warnings.push(`Rubber Band R3 makeup ${makeup.gainDb.toFixed(2)} dB to match the dry slice.`);
+        warnings.push(
+          `Rubber Band R3 makeup ${makeup.gainDb.toFixed(2)} dB to match the dry slice.`,
+        );
       }
-      continue;
     }
 
-    const role = segment.stretchTailMs != null || i === 0 ? "outgoing" : "incoming";
-    const region = path.join(work, `${path.basename(request.outputPath)}.rb${i}.region.wav`);
-    const regionOut = path.join(work, `${path.basename(request.outputPath)}.rb${i}.region-rb.wav`);
-    const native = path.join(work, `${path.basename(request.outputPath)}.rb${i}.native.wav`);
-    tempPaths.push(region, regionOut, native, stretched);
-    if (role === "outgoing") {
-      const bodySrc = sourceSec - overlapSrc;
-      await runFfmpeg(
-        runner,
-        binaries,
-        ["-i", slice, "-af", `atrim=start=${bodySrc.toFixed(6)},asetpts=PTS-STARTPTS`, "-c:a", "pcm_s24le", region],
-        request.abortSignal,
-      );
-      await runFfmpeg(
-        runner,
-        binaries,
-        [
-          "-i",
-          slice,
-          "-af",
-          `atrim=start=0:end=${(bodySrc + xfade).toFixed(6)},asetpts=PTS-STARTPTS`,
-          "-c:a",
-          "pcm_s24le",
-          native,
-        ],
-        request.abortSignal,
-      );
-    } else {
-      await runFfmpeg(
-        runner,
-        binaries,
-        ["-i", slice, "-af", `atrim=start=0:end=${overlapSrc.toFixed(6)},asetpts=PTS-STARTPTS`, "-c:a", "pcm_s24le", region],
-        request.abortSignal,
-      );
-      await runFfmpeg(
-        runner,
-        binaries,
-        [
-          "-i",
-          slice,
-          "-af",
-          `atrim=start=${Math.max(0, overlapSrc - xfade).toFixed(6)},asetpts=PTS-STARTPTS`,
-          "-c:a",
-          "pcm_s24le",
-          native,
-        ],
-        request.abortSignal,
-      );
-    }
-    await stretchCli(cliPath, rate, region, regionOut, request.abortSignal);
-    const makeup = await applyMakeup(runner, binaries, region, regionOut, request.abortSignal);
-    if (makeup.outputPath !== regionOut) {
-      tempPaths.push(makeup.outputPath);
-    }
-    const left = role === "outgoing" ? native : makeup.outputPath;
-    const right = role === "outgoing" ? makeup.outputPath : native;
-    await runFfmpeg(
-      runner,
-      binaries,
-      [
-        "-i",
-        left,
-        "-i",
-        right,
-        "-filter_complex",
-        `[0:a][1:a]acrossfade=d=${xfade}:o=1:c1=hsin:c2=hsin[out]`,
-        "-map",
-        "[out]",
-        "-c:a",
-        "pcm_s24le",
-        stretched,
-      ],
-      request.abortSignal,
-    );
-    const probe = await probeAudioFile(runner, binaries, stretched, request.abortSignal);
-    segments.push({
-      ...segment,
-      filePath: stretched,
-      sourceStartMs: 0,
-      sourceEndMs: probe.durationMs,
-      playbackRate: 1,
-      stretchTailMs: undefined,
-    });
-    parts.push(`rubberband-r3 ${role} -T ${rate.toFixed(6)} makeup=${makeup.gainDb.toFixed(2)}dB`);
-    if (Math.abs(makeup.gainDb) >= 0.15) {
-      warnings.push(`Rubber Band R3 makeup ${makeup.gainDb.toFixed(2)} dB to match the dry slice.`);
-    }
-  }
-
-  return {
-    segments,
-    tempPaths,
-    invocation: parts.join(" ; "),
-    warnings,
-  };
+    return {
+      segments,
+      tempPaths,
+      invocation: parts.join(" ; "),
+      warnings,
+    };
   } catch (error) {
     await Promise.all(
       tempPaths.map(async (filePath) => {

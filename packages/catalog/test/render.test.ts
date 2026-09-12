@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { AppConfig, SetPlanV1 } from "@dnb-crate/domain";
 import { DSP_ANALYZER_NAME, DSP_ANALYZER_VERSION, RENDERER_VERSION } from "@dnb-crate/domain";
-import { createFakeFfmpegRunner, ProcessRunError } from "@dnb-crate/audio-renderer";
+import { createFakeFfmpegRunner, ProcessRunError, sha256Json } from "@dnb-crate/audio-renderer";
 
 import { createCatalogRuntime, writeSineWav } from "../src/index.ts";
 
@@ -21,10 +21,10 @@ function testConfig(root: string): AppConfig {
   };
 }
 
-const cleanups: Array<() => void> = [];
-afterEach(() => {
+const cleanups: Array<() => void | Promise<void>> = [];
+afterEach(async () => {
   while (cleanups.length > 0) {
-    cleanups.pop()?.();
+    await cleanups.pop()?.();
   }
 });
 
@@ -144,12 +144,22 @@ describe("render jobs", () => {
     expect(checked.ok).toBe(true);
     expect(checked.interiorSilence).toEqual([]);
     expect(checked.joins).toHaveLength(1);
-    const review={renderJobId:done.id,outputChecksum:manifest.outputChecksumSha256,accepted:true,quote:"An accepted fixture hour"};
-    expect(()=>catalog.service.recordHourFeedback({...review,outputChecksum:"0".repeat(64)})).toThrow("checksum");
-    const feedback=catalog.service.recordHourFeedback(review);
+    const review = {
+      renderJobId: done.id,
+      outputChecksum: manifest.outputChecksumSha256,
+      accepted: true,
+      quote: "An accepted fixture hour",
+    };
+    expect(() =>
+      catalog.service.recordHourFeedback({ ...review, outputChecksum: "0".repeat(64) }),
+    ).toThrow("checksum");
+    const feedback = catalog.service.recordHourFeedback(review);
     expect(catalog.service.recordHourFeedback(review).id).toBe(feedback.id);
     expect(catalog.service.reportSetPlanQuality(plan.id).userAccepted).toBe(true);
-    catalog.service.updateSetPlan({setPlanId:plan.id,setTrim:{entryId:plan.entries[0]!.id,sourceStartMs:100,sourceEndMs:8000}});
+    catalog.service.updateSetPlan({
+      setPlanId: plan.id,
+      setTrim: { entryId: plan.entries[0]!.id, sourceStartMs: 100, sourceEndMs: 8000 },
+    });
     expect(catalog.service.reportSetPlanQuality(plan.id).userAccepted).toBe(false);
     expect(catalog.service.listHourFeedback(done.id)[0]?.accepted).toBe(true);
   });
@@ -188,42 +198,81 @@ describe("render jobs", () => {
     expect(second.job.listenRootRelativePath).toBeNull();
   });
 
-  it("cancels a running job by aborting the child process", async () => {
-    const root = path.join(
-      os.tmpdir(),
-      `dnb-cancel-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    );
-    const library = path.join(root, "library");
-    const { mkdir } = await import("node:fs/promises");
-    await mkdir(library, { recursive: true });
-    const catalog = createCatalogRuntime(testConfig(root), undefined, {
-      processRunner: createFakeFfmpegRunner({ hangUntilAbort: true }),
-    });
-    cleanups.push(() => catalog.close());
-    await writeSineWav(path.join(library, "alpha.wav"), {
-      title: "Alpha",
-      artist: "A",
-      durationMs: 8000,
-    });
-    await writeSineWav(path.join(library, "bravo.wav"), {
-      title: "Bravo",
-      artist: "B",
-      durationMs: 8000,
-    });
-    await catalog.service.scanLibrary();
-    const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
-    const plan = saveTwoTrackPlan(
-      catalog,
-      tracks.find((track) => track.title === "Alpha")!.id,
-      tracks.find((track) => track.title === "Bravo")!.id,
-    );
-    const started = await catalog.service.startSetRender({ setPlanId: plan.id });
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    const cancelled = catalog.service.cancelRenderJob(started.job.id, true);
-    expect(cancelled.cancelled).toBe(true);
-    const done = await catalog.service.waitForRenderJob(started.job.id, 10_000);
-    expect(done.status).toBe("cancelled");
-  });
+  it.each(["local", "remote", "shutdown"])(
+    "cancels a running job through %s and settles before SQLite closes",
+    async (mode) => {
+      const root = path.join(
+        os.tmpdir(),
+        `dnb-cancel-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      );
+      const library = path.join(root, "library");
+      const { mkdir } = await import("node:fs/promises");
+      await mkdir(library, { recursive: true });
+      let aborted = false;
+      const fake = createFakeFfmpegRunner({ hangUntilAbort: true });
+      const catalog = createCatalogRuntime(testConfig(root), undefined, {
+        processRunner: {
+          run(request) {
+            request.abortSignal?.addEventListener(
+              "abort",
+              () => {
+                aborted = true;
+              },
+              { once: true },
+            );
+            return fake.run(request);
+          },
+        },
+      });
+      cleanups.push(() => catalog.close());
+      await writeSineWav(path.join(library, "alpha.wav"), {
+        title: "Alpha",
+        artist: "A",
+        durationMs: 8000,
+      });
+      await writeSineWav(path.join(library, "bravo.wav"), {
+        title: "Bravo",
+        artist: "B",
+        durationMs: 8000,
+      });
+      await catalog.service.scanLibrary();
+      const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
+      const plan = saveTwoTrackPlan(
+        catalog,
+        tracks.find((track) => track.title === "Alpha")!.id,
+        tracks.find((track) => track.title === "Bravo")!.id,
+      );
+      const started = await catalog.service.startSetRender({ setPlanId: plan.id });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      if (mode === "shutdown") {
+        await catalog.close();
+        expect(aborted).toBe(true);
+        expect(catalog.db.open).toBe(false);
+        const reader = createCatalogRuntime(testConfig(root), undefined, { passive: true });
+        try {
+          expect(reader.service.getRenderStatus(started.job.id).status).toBe("cancelled");
+        } finally {
+          await reader.close();
+        }
+        return;
+      }
+      if (mode === "remote") {
+        const remote = createCatalogRuntime(testConfig(root), undefined, { passive: true });
+        try {
+          remote.service.cancelRenderJob(started.job.id, true);
+          await expect.poll(() => aborted).toBe(true);
+          expect(catalog.service.getRenderStatus(started.job.id).status).toBe("cancelled");
+        } finally {
+          await remote.close();
+        }
+        return;
+      }
+      const cancelled = catalog.service.cancelRenderJob(started.job.id, true);
+      expect(cancelled.cancelled).toBe(true);
+      const done = await catalog.service.waitForRenderJob(started.job.id, 10_000);
+      expect(done.status).toBe("cancelled");
+    },
+  );
 
   it("fails start when FFmpeg is missing", async () => {
     const root = path.join(
@@ -340,11 +389,21 @@ describe("render jobs", () => {
     expect(manifest.tracks[1]?.alignmentPeriodMs).toBeCloseTo(barMs, 5);
     expect(manifest.automation?.some((event) => event.target === "outgoing_mid")).toBe(true);
     expect(manifest.rendererVersion).toBe(RENDERER_VERSION);
-    const rating = catalog.service.rateTransition({ renderJobId: done.id, transitionId: manifest.tracks[0]!.transitionId!, note: "Exact heard join" });
+    const rating = catalog.service.rateTransition({
+      renderJobId: done.id,
+      transitionId: manifest.tracks[0]!.transitionId!,
+      note: "Exact heard join",
+    });
     expect(rating.recipeFingerprint).toMatch(/^v2:[a-f0-9]{64}$/);
     expect(rating.outgoingTrackId).toBe(manifest.tracks[0]!.trackId);
     expect(rating.overall).toBe("not_assessed");
-    expect(() => catalog.service.rateTransition({ renderJobId: done.id, transitionId: manifest.tracks[0]!.transitionId!, outgoingTrackId: "wrong" })).toThrow("disagree");
+    expect(() =>
+      catalog.service.rateTransition({
+        renderJobId: done.id,
+        transitionId: manifest.tracks[0]!.transitionId!,
+        outgoingTrackId: "wrong",
+      }),
+    ).toThrow("disagree");
     expect(manifest.joinEvidence).toHaveLength(1);
     expect(manifest.joinEvidence?.[0]?.outgoingBeatsMs.length).toBeGreaterThan(0);
     const checked = await catalog.service.checkRender(done.id);
@@ -384,4 +443,310 @@ describe("render jobs", () => {
     expect(again.joins[0]?.storedGridResidualMs).toBe(checked.joins[0]?.storedGridResidualMs);
     expect(again.joins[0]?.evidenceSource).toBe("frozen-manifest");
   });
+
+  it("renders a queued preview from the frozen plan after trims change", async () => {
+    const root = path.join(os.tmpdir(), `dnb-freeze-${crypto.randomUUID()}`);
+    const library = path.join(root, "library");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(library, { recursive: true });
+    const fake = createFakeFfmpegRunner();
+    const hang = createFakeFfmpegRunner({ hangUntilAbort: true });
+    let blockFirst = true;
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      processRunner: {
+        run(request) {
+          if (blockFirst) {
+            return hang.run(request);
+          }
+          return fake.run(request);
+        },
+      },
+    });
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(library, "alpha.wav"), {
+      title: "Alpha",
+      artist: "A",
+      durationMs: 8000,
+    });
+    await writeSineWav(path.join(library, "bravo.wav"), {
+      title: "Bravo",
+      artist: "B",
+      durationMs: 8000,
+    });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
+    const plan = saveTwoTrackPlan(
+      catalog,
+      tracks.find((track) => track.title === "Alpha")!.id,
+      tracks.find((track) => track.title === "Bravo")!.id,
+    );
+    const originalStart = plan.entries[0]!.sourceStartMs;
+    const originalEnd = plan.entries[0]!.sourceEndMs;
+    const blocking = await catalog.service.startSetRender({ setPlanId: plan.id });
+    await expect
+      .poll(() => catalog.service.getRenderStatus(blocking.job.id).status)
+      .toBe("running");
+    const preview = await catalog.service.createTransitionPreview({
+      setPlanId: plan.id,
+      transitionId: plan.entries[0]!.transitionToNext!.id,
+      windowMs: 30_000,
+    });
+    expect(preview.job.status).toBe("queued");
+    catalog.service.updateSetPlan({
+      setPlanId: plan.id,
+      setTrim: { entryId: plan.entries[0]!.id, sourceStartMs: 400, sourceEndMs: 8000 },
+    });
+    blockFirst = false;
+    catalog.service.cancelRenderJob(blocking.job.id, true);
+    const done = await catalog.service.waitForRenderJob(preview.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
+    const manifest = catalog.service.getRenderManifest(done.id);
+    expect(manifest.tracks[0]?.sourceStartMs).toBe(originalStart);
+    expect(manifest.tracks[0]?.sourceEndMs).toBe(originalEnd);
+    expect(catalog.service.getSetPlan(plan.id).entries[0]?.sourceStartMs).toBe(400);
+  });
+
+  it("fails a full hour-length render when probed duration misses the plan", async () => {
+    const { catalog, plan } = await seededLibrary();
+    const longPlan: SetPlanV1 = {
+      ...plan,
+      entries: [
+        {
+          ...plan.entries[0]!,
+          sourceEndMs: 200_000,
+        },
+        {
+          ...plan.entries[1]!,
+          sourceEndMs: 200_000,
+          timelineStartMs: 199_000,
+        },
+      ],
+    };
+    const jobId = crypto.randomUUID();
+    catalog.renderJobs.insertQueued({
+      id: jobId,
+      kind: "full",
+      setPlanId: plan.id,
+      params: {
+        request: {
+          planContentHash: sha256Json(longPlan),
+          plan: longPlan,
+          evidence: {},
+        },
+      },
+    });
+    const done = await catalog.service.waitForRenderJob(jobId, 15_000);
+    expect(done.status).toBe("failed");
+    expect(done.errorMessage).toMatch(/tolerance 1000ms/);
+    expect(done.outputRootRelativePath).toMatch(/^renders\//);
+  });
+
+  it("fails a short full render when probed duration misses the plan", async () => {
+    const root = path.join(os.tmpdir(), `dnb-short-dur-${crypto.randomUUID()}`);
+    const library = path.join(root, "library");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      processRunner: createFakeFfmpegRunner({ probeDurationSec: 1 }),
+    });
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(library, "alpha.wav"), {
+      title: "Alpha",
+      artist: "A",
+      durationMs: 8000,
+    });
+    await writeSineWav(path.join(library, "bravo.wav"), {
+      title: "Bravo",
+      artist: "B",
+      durationMs: 8000,
+    });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
+    const plan = saveTwoTrackPlan(
+      catalog,
+      tracks.find((track) => track.title === "Alpha")!.id,
+      tracks.find((track) => track.title === "Bravo")!.id,
+    );
+    const started = await catalog.service.startSetRender({ setPlanId: plan.id });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    expect(done.status).toBe("failed");
+    expect(done.errorMessage).toMatch(/tolerance 1000ms/);
+    expect(done.outputRootRelativePath).toMatch(/^renders\//);
+  });
+
+  it("renders a queued full mix from the frozen plan after the live plan becomes unready", async () => {
+    const root = path.join(os.tmpdir(), `dnb-full-freeze-${crypto.randomUUID()}`);
+    const library = path.join(root, "library");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(library, { recursive: true });
+    const fake = createFakeFfmpegRunner({ probeDurationSec: 15 });
+    const hang = createFakeFfmpegRunner({ hangUntilAbort: true });
+    let blockFirst = true;
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      processRunner: {
+        run(request) {
+          if (blockFirst) {
+            return hang.run(request);
+          }
+          return fake.run(request);
+        },
+      },
+    });
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(library, "alpha.wav"), {
+      title: "Alpha",
+      artist: "A",
+      durationMs: 8000,
+    });
+    await writeSineWav(path.join(library, "bravo.wav"), {
+      title: "Bravo",
+      artist: "B",
+      durationMs: 8000,
+    });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
+    const plan = saveTwoTrackPlan(
+      catalog,
+      tracks.find((track) => track.title === "Alpha")!.id,
+      tracks.find((track) => track.title === "Bravo")!.id,
+    );
+    const originalStart = plan.entries[0]!.sourceStartMs;
+    const blocking = await catalog.service.startSetRender({ setPlanId: plan.id });
+    await expect
+      .poll(() => catalog.service.getRenderStatus(blocking.job.id).status)
+      .toBe("running");
+    const stored = catalog.setPlans.findById(plan.id)!;
+    catalog.setPlans.save(
+      {
+        ...stored.plan,
+        qualityPolicy: "strict",
+        targetDurationMs: 3_600_000,
+        entries: stored.plan.entries.map((entry, index) =>
+          index === 0 ? { ...entry, sourceStartMs: 400 } : entry,
+        ),
+      },
+      stored.seed,
+      stored.explanation,
+    );
+    expect(catalog.service.getSetPlan(plan.id).qualityPolicy).toBe("strict");
+    expect(catalog.service.getSetPlan(plan.id).entries[0]?.sourceStartMs).toBe(400);
+    expect(() => catalog.service.assertPlanReadyForRender(plan.id)).toThrow(/not ready/);
+    blockFirst = false;
+    catalog.service.cancelRenderJob(blocking.job.id, true);
+    const frozenJob = catalog.renderJobs.findById(blocking.job.id);
+    expect(frozenJob?.params.request?.plan.entries[0]?.sourceStartMs).toBe(originalStart);
+    const rerun = catalog.renderJobs.insertQueued({
+      id: crypto.randomUUID(),
+      kind: "full",
+      setPlanId: plan.id,
+      params: {
+        request: frozenJob!.params.request,
+      },
+    });
+    const done = await catalog.service.waitForRenderJob(rerun.id, 15_000);
+    expect(done.status).toBe("succeeded");
+    const manifest = catalog.service.getRenderManifest(done.id);
+    expect(manifest.tracks[0]?.sourceStartMs).toBe(originalStart);
+  });
+
+  it("keeps frozen evidence and settings after reanalysis and config change", async () => {
+    const { catalog, plan, alpha, root } = await seededLibrary();
+    stubAnalysis(catalog, alpha.id, { bpm: 174, beatTimesMs: [0, 345, 690] });
+    stubAnalysis(catalog, plan.entries[1]!.trackId, { bpm: 174, beatTimesMs: [0, 345, 690] });
+    const transitionId = plan.entries[0]!.transitionToNext!.id;
+    const first = await catalog.service.createTransitionPreview({
+      setPlanId: plan.id,
+      transitionId,
+      windowMs: 30_000,
+    });
+    const done = await catalog.service.waitForRenderJob(first.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
+    const firstKey = catalog.renderJobs.findById(done.id)?.cacheKey;
+    expect(firstKey).toBeTruthy();
+    const frozen = catalog.renderJobs.findById(done.id)?.params.request?.evidence[alpha.id];
+    expect(frozen && "present" in frozen && frozen.present).toBe(true);
+    expect(frozen && "bpm" in frozen ? frozen.bpm : null).toBe(174);
+    expect(catalog.renderJobs.findById(done.id)?.params.request?.settings?.loudnessTargetLufs).toBe(
+      -14,
+    );
+
+    const hit = await catalog.service.createTransitionPreview({
+      setPlanId: plan.id,
+      transitionId,
+      windowMs: 30_000,
+    });
+    expect(hit.job.status).toBe("succeeded");
+    expect(catalog.renderJobs.findById(hit.job.id)?.cacheKey).toBe(firstKey);
+
+    stubAnalysis(catalog, alpha.id, { bpm: 160, beatTimesMs: [80, 999] });
+    const afterAnalysis = await catalog.service.createTransitionPreview({
+      setPlanId: plan.id,
+      transitionId,
+      windowMs: 30_000,
+    });
+    expect(catalog.renderJobs.findById(afterAnalysis.job.id)?.cacheKey).not.toBe(firstKey);
+    const afterDone = await catalog.service.waitForRenderJob(afterAnalysis.job.id, 15_000);
+    expect(afterDone.status).toBe("succeeded");
+    expect(catalog.service.getRenderManifest(done.id).joinEvidence?.[0]?.outgoingBeatsMs).toEqual([
+      0, 345, 690,
+    ]);
+
+    const restarted = createCatalogRuntime(
+      { ...testConfig(root), loudnessTargetLufs: -18 },
+      undefined,
+      { useFakeFfmpeg: true, passive: true },
+    );
+    cleanups.push(() => restarted.close());
+    const afterSettings = await restarted.service.createTransitionPreview({
+      setPlanId: plan.id,
+      transitionId,
+      windowMs: 30_000,
+    });
+    expect(afterSettings.job.status).toBe("queued");
+    expect(restarted.renderJobs.findById(afterSettings.job.id)?.cacheKey).not.toBe(firstKey);
+    expect(
+      restarted.renderJobs.findById(afterSettings.job.id)?.params.request?.settings
+        ?.loudnessTargetLufs,
+    ).toBe(-18);
+  });
 });
+
+function stubAnalysis(
+  catalog: ReturnType<typeof createCatalogRuntime>,
+  trackId: string,
+  extras: { bpm: number; beatTimesMs: number[] },
+): void {
+  catalog.analyses.upsert({
+    trackId,
+    analyzerName: DSP_ANALYZER_NAME,
+    analyzerVersion: DSP_ANALYZER_VERSION,
+    bpm: extras.bpm,
+    bpmConfidence: 0.9,
+    bpmRaw: extras.bpm,
+    referenceBpm: null,
+    beatTimesMs: extras.beatTimesMs,
+    downbeatTimesMs: extras.beatTimesMs.slice(0, 1),
+    gridRejected: false,
+    gridRejectionReason: null,
+    gridSource: "analyzed",
+    musicalKey: "Fm",
+    keyConfidence: 0.7,
+    keyMode: "minor",
+    camelotKey: "4A",
+    keyCandidates: null,
+    tempoStability: 0.8,
+    downbeatConfidence: 0.8,
+    integratedLufs: null,
+    truePeakDb: null,
+    lowBandEnergy: null,
+    midBandEnergy: null,
+    highBandEnergy: null,
+    waveformSummary: null,
+    beatAnchorMs: null,
+    descriptors: null,
+    engineRuntimeMs: 1,
+    analyzedAt: new Date().toISOString(),
+    suggestedCues: [],
+    sections: [],
+  });
+}

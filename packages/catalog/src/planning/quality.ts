@@ -179,12 +179,25 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
       incomingSourceEndMs: incomingEntry.sourceEndMs,
       barCount: num(params.barCount),
       overlapMs: transition?.durationMs ?? 0,
-      ...(str(params.continuityEvidence) ? { continuity: {
-        evidence: str(params.continuityEvidence)!,
-        energyFloor: typeof params.continuityEnergyFloor === "number" ? params.continuityEnergyFloor : null,
-        valleyBars: typeof params.continuityValleyBars === "number" ? params.continuityValleyBars : null,
-        coexistenceBars: typeof params.continuityCoexistenceBars === "number" ? params.continuityCoexistenceBars : null,
-      } } : {}),
+      ...(str(params.continuityEvidence)
+        ? {
+            continuity: {
+              evidence: str(params.continuityEvidence)!,
+              energyFloor:
+                typeof params.continuityEnergyFloor === "number"
+                  ? params.continuityEnergyFloor
+                  : null,
+              valleyBars:
+                typeof params.continuityValleyBars === "number"
+                  ? params.continuityValleyBars
+                  : null,
+              coexistenceBars:
+                typeof params.continuityCoexistenceBars === "number"
+                  ? params.continuityCoexistenceBars
+                  : null,
+            },
+          }
+        : {}),
       phraseShape: str(params.phraseShape),
       sequentialHandoff: str(params.sequentialHandoff),
       intent: str(params.intent),

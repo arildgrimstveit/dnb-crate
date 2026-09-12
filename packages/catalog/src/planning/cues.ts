@@ -38,8 +38,7 @@ export function audioBounds(bundle: MixCueBundle): { audioStartMs: number; audio
   const end = bundle.analysis?.descriptors?.audioEndMs;
   return {
     audioStartMs: typeof start === "number" && start >= 0 ? Math.round(start) : 0,
-    audioEndMs:
-      typeof end === "number" && end > 0 ? Math.round(end) : bundle.track.durationMs,
+    audioEndMs: typeof end === "number" && end > 0 ? Math.round(end) : bundle.track.durationMs,
   };
 }
 
@@ -190,9 +189,13 @@ export function pickMixIn(bundle: MixCueBundle, options: MixInOptions = {}): Mix
   };
 }
 
-export function sectionEnergyAt(sections: TrackSection[] | null | undefined, ms: number): number | null {
-  const hit = (sections ?? []).find((section) => ms >= section.startMs && ms < section.endMs)
-    ?? (sections ?? []).find((section) => ms === section.endMs);
+export function sectionEnergyAt(
+  sections: TrackSection[] | null | undefined,
+  ms: number,
+): number | null {
+  const hit =
+    (sections ?? []).find((section) => ms >= section.startMs && ms < section.endMs) ??
+    (sections ?? []).find((section) => ms === section.endMs);
   return hit?.sectionEnergy ?? null;
 }
 
@@ -230,7 +233,9 @@ function firstEnergeticSection(
   bundle: MixCueBundle,
   type: "intro" | "outro" | "breakdown" | "drop",
 ): CuePoint | undefined {
-  const section = (bundle.analysis?.sections ?? []).find((item) => item.type === type && energetic(item));
+  const section = (bundle.analysis?.sections ?? []).find(
+    (item) => item.type === type && energetic(item),
+  );
   return section ? sectionToCue(bundle, section, type) : undefined;
 }
 
@@ -238,7 +243,9 @@ function lastEnergeticSection(
   bundle: MixCueBundle,
   type: "intro" | "outro" | "breakdown" | "drop",
 ): CuePoint | undefined {
-  const matches = (bundle.analysis?.sections ?? []).filter((item) => item.type === type && energetic(item));
+  const matches = (bundle.analysis?.sections ?? []).filter(
+    (item) => item.type === type && energetic(item),
+  );
   const section = matches.at(-1);
   return section ? sectionToCue(bundle, section, type) : undefined;
 }

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
-import { createCatalogRuntime } from "@dnb-crate/catalog";
+import { createCatalogRuntime, hasLiveWorker } from "@dnb-crate/catalog";
+import { cliWorkerNeed, NO_WORKER_MESSAGE } from "./worker-policy.ts";
 import {
   APP_NAME,
   APP_VERSION,
@@ -79,7 +80,10 @@ Commands:
   render:check --id UUID
   feedback:rate --json FILE
   feedback:list [--from UUID] [--to UUID] [--fingerprint TEXT]
-  analysis:select-evidence --track-id UUID [--rhythm ENGINE] [--key ENGINE] [--reason TEXT]
+  analysis:select-evidence --track-id UUID [--rhythm ENGINE] [--structure ENGINE] [--key ENGINE] [--reason TEXT]
+
+Job commands without --wait enqueue only and require a live MCP (or other) worker.
+Pass --wait, or run analysis:gate, to process jobs in this CLI process.
 
 ${APP_NAME} ${APP_VERSION}
 `;
@@ -94,8 +98,12 @@ async function main(): Promise<void> {
 
   const config = loadConfig();
   const logger = createLogger(config.logLevel);
-  const runtime = createCatalogRuntime(config, logger);
+  const workerNeed = cliWorkerNeed(command, args);
+  const runtime = createCatalogRuntime(config, logger, { passive: workerNeed !== "process" });
   try {
+    if (workerNeed === "enqueue" && !hasLiveWorker(runtime.db)) {
+      throw new Error(NO_WORKER_MESSAGE);
+    }
     switch (command) {
       case "db:migrate":
         printJson({ ok: true, databasePath: "[configured]" });
@@ -419,12 +427,26 @@ async function main(): Promise<void> {
         const outputChecksum = option(args, "--checksum");
         const quote = option(args, "--quote");
         const accepted = option(args, "--accepted");
-        if (!renderJobId || !outputChecksum || !quote || !["true", "false"].includes(accepted ?? "")) throw new Error("hour:feedback requires --id --checksum --quote --accepted true|false");
-        printJson({ok: true, data: runtime.service.recordHourFeedback({renderJobId, outputChecksum, quote, accepted: accepted === "true"})});
+        if (
+          !renderJobId ||
+          !outputChecksum ||
+          !quote ||
+          !["true", "false"].includes(accepted ?? "")
+        )
+          throw new Error("hour:feedback requires --id --checksum --quote --accepted true|false");
+        printJson({
+          ok: true,
+          data: runtime.service.recordHourFeedback({
+            renderJobId,
+            outputChecksum,
+            quote,
+            accepted: accepted === "true",
+          }),
+        });
         break;
       }
       case "hour:history": {
-        printJson({ok: true, data: runtime.service.listHourFeedback(option(args, "--id"))});
+        printJson({ ok: true, data: runtime.service.listHourFeedback(option(args, "--id")) });
         break;
       }
       case "plan:validate": {
@@ -515,7 +537,9 @@ async function main(): Promise<void> {
         if (!jsonPath) {
           throw new Error("feedback:rate requires --json");
         }
-        const parsed = rateTransitionInputSchema.safeParse(JSON.parse(readFileSync(jsonPath, "utf8")));
+        const parsed = rateTransitionInputSchema.safeParse(
+          JSON.parse(readFileSync(jsonPath, "utf8")),
+        );
         if (!parsed.success) {
           throw new Error(
             `feedback:rate --json is invalid: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`,
@@ -544,6 +568,7 @@ async function main(): Promise<void> {
         const parsed = selectTrackEvidenceInputSchema.safeParse({
           trackId,
           rhythmEngine: option(args, "--rhythm") ?? null,
+          structureEngine: option(args, "--structure") ?? null,
           keyEngine: option(args, "--key") ?? null,
           reason: option(args, "--reason"),
         });
@@ -570,7 +595,7 @@ async function main(): Promise<void> {
         process.exitCode = 1;
     }
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }
 

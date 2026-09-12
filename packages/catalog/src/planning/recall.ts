@@ -40,9 +40,12 @@ export function recallApprovedHandoff(
       chosen: {
         transition: {
           id: crypto.randomUUID(),
-          type: payload.type === "bass_swap" || payload.type === "crossfade" || payload.type === "double_drop"
-            ? payload.type
-            : "phrase_mix",
+          type:
+            payload.type === "bass_swap" ||
+            payload.type === "crossfade" ||
+            payload.type === "double_drop"
+              ? payload.type
+              : "phrase_mix",
           durationMs: payload.durationMs,
           outgoingCuePointId: null,
           incomingCuePointId: null,
@@ -70,14 +73,21 @@ export function recallApprovedHandoff(
           mixInBar: null,
           mixOutBar: null,
           barCount: payload.barCount,
-          exitKind: payload.exitKind === "quietTail" || payload.exitKind === "dropLanding" ? payload.exitKind : null,
+          exitKind:
+            payload.exitKind === "quietTail" || payload.exitKind === "dropLanding"
+              ? payload.exitKind
+              : null,
           phraseShape: payload.phraseShape,
           incomingDropMs: payload.incomingDropMs,
           dropAnchored: payload.exitKind === "dropLanding",
           alignmentOffsetMs:
-            typeof payload.parameters.downbeatOffsetMs === "number" ? payload.parameters.downbeatOffsetMs : 0,
+            typeof payload.parameters.downbeatOffsetMs === "number"
+              ? payload.parameters.downbeatOffsetMs
+              : 0,
           alignmentPeriodMs:
-            typeof payload.parameters.alignmentPeriodMs === "number" ? payload.parameters.alignmentPeriodMs : null,
+            typeof payload.parameters.alignmentPeriodMs === "number"
+              ? payload.parameters.alignmentPeriodMs
+              : null,
           alignmentMode:
             payload.parameters.alignmentMode === "bar" ||
             payload.parameters.alignmentMode === "beat" ||

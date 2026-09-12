@@ -352,11 +352,11 @@ function compileBandAfades(
   }
   if (
     usedPartial &&
-    !warnings.includes("FFmpeg afade lacks unity/silence; partial band levels collapsed to full fades.")
-  ) {
-    warnings.push(
+    !warnings.includes(
       "FFmpeg afade lacks unity/silence; partial band levels collapsed to full fades.",
-    );
+    )
+  ) {
+    warnings.push("FFmpeg afade lacks unity/silence; partial band levels collapsed to full fades.");
   }
   return parts.join(",");
 }
@@ -398,11 +398,7 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
   const byTarget = (target: AutomationEvent["target"]) =>
     events.filter((ev) => ev.target === target);
   const incomingDelay = delayMs > 0 ? `,adelay=${delayMs}|${delayMs}` : "";
-  const band = (
-    target: AutomationEvent["target"],
-    origin: number,
-    suffix: string,
-  ): string => {
+  const band = (target: AutomationEvent["target"], origin: number, suffix: string): string => {
     const fades = compileBandAfades(byTarget(target), origin, hasUnity, warnings);
     return fades.length > 0 ? `${fades}${suffix}` : suffix.replace(/^,/, "") || "anull";
   };
@@ -487,7 +483,10 @@ export function buildBassSwapFilter(options: FilterGraphOptions): string {
 export function buildMixFilter(options: FilterGraphOptions): string {
   const types =
     options.transitions ?? options.overlapSeconds.map(() => ({ type: "crossfade" as const }));
-  if (options.trims.length === 2 && (types[0]?.type === "phrase_mix" || types[0]?.type === "bass_swap")) {
+  if (
+    options.trims.length === 2 &&
+    (types[0]?.type === "phrase_mix" || types[0]?.type === "bass_swap")
+  ) {
     return buildBandMixFilter(options);
   }
   return buildAcrossfadeFilter(options);

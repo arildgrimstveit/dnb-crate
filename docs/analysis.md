@@ -6,13 +6,16 @@ Canonical BPM/key order: **manual > published > analyzed > tag**. A general libr
 
 ## Engines
 
-| Engine | Role |
-| --- | --- |
+| Engine          | Role                                                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `dnb-crate-dsp` | The only `analysis:run` / `start_track_analysis` engine. Onsets, tempogram, beat grid, downbeats, sections, descriptors. |
 
 KeyFinder is a script (`tools/scripts/fill-crate-keys-and-bpm.mts`, `promote-keyfinder.mts`), not an analysis engine. Older catalogs may still have `dnb-crate-envelope` rows or `gridSource: "sidecar"`; those are read so existing plans keep working, and they are not written again.
 
-Planning uses the selected rhythm row when `track_evidence_selection` is set; otherwise DSP. Rows are stored per `(track_id, analyzer_name)`.
+Planning, previews, rendering and reports resolve rhythm, structure and key independently from
+`track_evidence_selection`. Rhythm supplies BPM and the beat grid; structure supplies sections and
+cues; key supplies the analyzed key. A missing selection falls back to the rhythm row. Selecting an
+engine that has no stored row is rejected. Rows are stored per `(track_id, analyzer_name)`.
 
 Descriptors (`energy`, `danceability`, `acousticness`, `melodicness`, `valence`) are deterministic heuristics on a 0–1 scale, not a trained model.
 
@@ -43,10 +46,10 @@ pnpm cli analysis:get --track-id UUID
 pnpm cli analysis:report
 ```
 
-| Scope | Selects |
-| --- | --- |
-| `ids` | Explicit `trackIds` |
-| `unanalyzed` | Incomplete analysis, file present |
-| `stale` | Missing DSP row, old analyzer version, failed, or reference BPM drift |
-| `planningReady` | Tracks that already pass readiness |
-| `all` | Every non-missing file |
+| Scope           | Selects                                                               |
+| --------------- | --------------------------------------------------------------------- |
+| `ids`           | Explicit `trackIds`                                                   |
+| `unanalyzed`    | Incomplete analysis, file present                                     |
+| `stale`         | Missing DSP row, old analyzer version, failed, or reference BPM drift |
+| `planningReady` | Tracks that already pass readiness                                    |
+| `all`           | Every non-missing file                                                |

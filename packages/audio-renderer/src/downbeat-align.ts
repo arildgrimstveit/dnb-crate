@@ -48,8 +48,7 @@ export function downbeatAlignmentOffsetMs(input: {
         : null;
   const beatPeriod = targetBpm ? 60_000 / targetBpm : 345;
   const phraseMs = beatPeriod * 32;
-  const phraseMode =
-    input.outgoingPhraseOriginMs != null && input.incomingPhraseOriginMs != null;
+  const phraseMode = input.outgoingPhraseOriginMs != null && input.incomingPhraseOriginMs != null;
   const barMode =
     !phraseMode &&
     (input.outgoingDownbeatConfidence ?? 0) >= 0.5 &&
@@ -158,7 +157,8 @@ export function applyAlignmentOffset(input: {
   return {
     incomingStartMs: input.incomingStartMs,
     outgoingEndMs:
-      input.outgoingEndMs - outputToSourceMs(sourceToOutputMs(input.offsetMs, incomingRate), outgoingRate),
+      input.outgoingEndMs -
+      outputToSourceMs(sourceToOutputMs(input.offsetMs, incomingRate), outgoingRate),
     appliedOffsetMs: input.offsetMs,
     // Keep the output overlap fixed: changing it by the same amount cancels the phase correction.
     overlapMs: input.overlapMs,

@@ -10,7 +10,12 @@ import {
 import { reportSetPlanQuality, type TrackQualityEvidence } from "../src/planning/quality.ts";
 import { validateSetPlan } from "../src/planning/validate.ts";
 
-function track(id: string, title: string, camelot: string | null, extras: Partial<Track> = {}): Track {
+function track(
+  id: string,
+  title: string,
+  camelot: string | null,
+  extras: Partial<Track> = {},
+): Track {
   return {
     id,
     filePath: `${title}.wav`,
@@ -111,31 +116,93 @@ function twoTrackPlan(
 
 describe("plan quality report", () => {
   it("never clears derived constraint blockers with caller partial=false", () => {
-    const a = track("a", "A", "8A"), b = track("b", "B", "8A");
-    const plan = twoTrackPlan(a, b); plan.targetDurationMs = 218000;
-    plan.planningConstraints = {requiredTransitions: [{outgoingTrackId: b.id, incomingTrackId: a.id, strength: "required", reuse: "pair"}]};
-    const tracksById = new Map([[a.id,a],[b.id,b]]);
-    const q = reportSetPlanQuality({plan,tracksById,evidenceByTrackId:new Map([[a.id,evidence(a)],[b.id,evidence(b)]]),validation:validateSetPlan(plan,tracksById),partial:false});
-    expect(q.partial).toBe(true); expect(q.readyForAudition).toBe(false);
+    const a = track("a", "A", "8A"),
+      b = track("b", "B", "8A");
+    const plan = twoTrackPlan(a, b);
+    plan.targetDurationMs = 218000;
+    plan.planningConstraints = {
+      requiredTransitions: [
+        { outgoingTrackId: b.id, incomingTrackId: a.id, strength: "required", reuse: "pair" },
+      ],
+    };
+    const tracksById = new Map([
+      [a.id, a],
+      [b.id, b],
+    ]);
+    const q = reportSetPlanQuality({
+      plan,
+      tracksById,
+      evidenceByTrackId: new Map([
+        [a.id, evidence(a)],
+        [b.id, evidence(b)],
+      ]),
+      validation: validateSetPlan(plan, tracksById),
+      partial: false,
+    });
+    expect(q.partial).toBe(true);
+    expect(q.readyForAudition).toBe(false);
   });
 
   it("requires actual application of an exact recipe, even on a compatible pair", () => {
-    const a = track("a", "A", "8A"), b = track("b", "B", "8A");
-    const plan = twoTrackPlan(a,b); plan.targetDurationMs=218000;
-    plan.planningConstraints={requiredTransitions:[{outgoingTrackId:a.id,incomingTrackId:b.id,strength:"required",reuse:"recipe",recipeId:"missing"}]};
-    plan.entries[0]!.transitionToNext!.parameters.selectionReason="approved protected_reference exact";
-    const tracksById=new Map([[a.id,a],[b.id,b]]);
-    const q=reportSetPlanQuality({plan,tracksById,evidenceByTrackId:new Map([[a.id,evidence(a)],[b.id,evidence(b)]]),validation:validateSetPlan(plan,tracksById)});
-    expect(q.joins[0]!.recipeStatus).toBe("none"); expect(q.qualityChecksPassed).toBe(false); expect(q.readyForAudition).toBe(false);
+    const a = track("a", "A", "8A"),
+      b = track("b", "B", "8A");
+    const plan = twoTrackPlan(a, b);
+    plan.targetDurationMs = 218000;
+    plan.planningConstraints = {
+      requiredTransitions: [
+        {
+          outgoingTrackId: a.id,
+          incomingTrackId: b.id,
+          strength: "required",
+          reuse: "recipe",
+          recipeId: "missing",
+        },
+      ],
+    };
+    plan.entries[0]!.transitionToNext!.parameters.selectionReason =
+      "approved protected_reference exact";
+    const tracksById = new Map([
+      [a.id, a],
+      [b.id, b],
+    ]);
+    const q = reportSetPlanQuality({
+      plan,
+      tracksById,
+      evidenceByTrackId: new Map([
+        [a.id, evidence(a)],
+        [b.id, evidence(b)],
+      ]),
+      validation: validateSetPlan(plan, tracksById),
+    });
+    expect(q.joins[0]!.recipeStatus).toBe("none");
+    expect(q.qualityChecksPassed).toBe(false);
+    expect(q.readyForAudition).toBe(false);
   });
 
   it.each(["grid", "confidence", "spacing"])("blocks invalid %s in strict edited plans", (kind) => {
-    const a=track("a","A","8A"),b=track("b","B","8A",kind==="spacing"?{artist:"A"}:{});
-    const plan=twoTrackPlan(a,b); plan.targetDurationMs=218000;plan.qualityPolicy="strict";
-    const ea=evidence(a);if(kind==="grid")ea.gridOk=false;if(kind==="confidence")ea.keyConfidence=0;
-    const tracksById=new Map([[a.id,a],[b.id,b]]);
-    const q=reportSetPlanQuality({plan,tracksById,evidenceByTrackId:new Map([[a.id,ea],[b.id,evidence(b)]]),validation:validateSetPlan(plan,tracksById)});
-    expect(q.qualityChecksPassed).toBe(false); expect(q.readyForAudition).toBe(false);
+    const a = track("a", "A", "8A"),
+      b = track("b", "B", "8A", kind === "spacing" ? { artist: "A" } : {});
+    const plan = twoTrackPlan(a, b);
+    plan.targetDurationMs = 218000;
+    plan.qualityPolicy = "strict";
+    const ea = evidence(a);
+    if (kind === "grid") ea.gridOk = false;
+    if (kind === "confidence") ea.keyConfidence = 0;
+    const tracksById = new Map([
+      [a.id, a],
+      [b.id, b],
+    ]);
+    const q = reportSetPlanQuality({
+      plan,
+      tracksById,
+      evidenceByTrackId: new Map([
+        [a.id, ea],
+        [b.id, evidence(b)],
+      ]),
+      validation: validateSetPlan(plan, tracksById),
+    });
+    expect(q.qualityChecksPassed).toBe(false);
+    expect(q.readyForAudition).toBe(false);
   });
   it("treats an hour request like any other length (±5 min)", () => {
     const a = track("a", "A", "8A");

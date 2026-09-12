@@ -110,8 +110,7 @@ export type RecipeLiveIdentity = {
 };
 
 export type RecipeFeasibility =
-  | { ok: true; mode: "exact" | "common-gain-offset" | "applicable" }
-  | { ok: false; reason: string };
+  { ok: true; mode: "exact" | "common-gain-offset" | "applicable" } | { ok: false; reason: string };
 
 export const APPROVED_STATUS_RANK: Record<ApprovedRecipeStatus, number> = {
   protected_reference: 4,
@@ -150,23 +149,31 @@ export function reusableRecipeFromJoin(input: {
       ? parameters.phraseShape
       : "complementary";
   const intent: MixIntent =
-    parameters.intent === "sustain" || parameters.intent === "breather" ? parameters.intent : "lift";
+    parameters.intent === "sustain" || parameters.intent === "breather"
+      ? parameters.intent
+      : "lift";
   const sequentialHandoff: SequentialHandoff =
     parameters.sequentialHandoff === "early" || parameters.sequentialHandoff === "supported"
       ? parameters.sequentialHandoff
       : "legacy";
   const mixInMs = num(parameters.mixInMs) ?? input.incomingSourceStartMs;
-  const mixOutMs = num(parameters.mixOutMs) ?? input.outgoingSourceEndMs - input.transition.durationMs;
+  const mixOutMs =
+    num(parameters.mixOutMs) ?? input.outgoingSourceEndMs - input.transition.durationMs;
   const automation =
     input.automation ??
-    expandPreset(input.transition.type === "crossfade" ? "crossfade" : "phrase_mix", {
+    expandPreset(
+      input.transition.type === "crossfade" ? "crossfade" : "phrase_mix",
+      {
+        barCount,
+        phraseShape,
+        intent,
+        sequentialHandoff,
+        targetBpm: num(parameters.targetBpm) ?? null,
+        lowHandoverBar: num(parameters.lowHandoverBar) ?? undefined,
+      },
       barCount,
-      phraseShape,
-      intent,
-      sequentialHandoff,
-      targetBpm: num(parameters.targetBpm) ?? null,
-      lowHandoverBar: num(parameters.lowHandoverBar) ?? undefined,
-    }, barCount, input.transition.durationMs / barCount);
+      input.transition.durationMs / barCount,
+    );
   return {
     kind: "reusable-recipe",
     outgoingTrackId: input.outgoingTrackId,
@@ -304,7 +311,8 @@ export function recipeFeasibility(
     return { ok: false, reason: "ENGINE_CHANGED" };
   }
   if (
-    JSON.stringify(current.selectedEvidence ?? null) !== JSON.stringify(approved.selectedEvidence ?? null)
+    JSON.stringify(current.selectedEvidence ?? null) !==
+    JSON.stringify(approved.selectedEvidence ?? null)
   ) {
     return { ok: false, reason: "EVIDENCE_CHANGED" };
   }

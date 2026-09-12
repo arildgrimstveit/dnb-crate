@@ -105,8 +105,7 @@ export function repairSequence(input: {
   let frontier = first ? [first] : [];
   const ready = (state: State) => state.missing === 0 && state.distance === 0;
   const missingAtBase = input.units.filter(
-    (unit) =>
-      unit.some((id) => input.required.has(id)) && !unit.every((id) => base.includes(id)),
+    (unit) => unit.some((id) => input.required.has(id)) && !unit.every((id) => base.includes(id)),
   );
   let harmonicGap = false;
   if (

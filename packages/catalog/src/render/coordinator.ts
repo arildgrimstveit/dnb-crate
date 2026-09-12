@@ -75,6 +75,7 @@ import {
   evaluateDurationError,
   firstDropMs,
   freezeJoinEvidence,
+  fullRenderDurationFailure,
   joinCamelotDistance,
   measureLevelStepLu,
   paramNumber,
@@ -87,7 +88,16 @@ import { isPathInsideAnyRoot, isPathInsideRoot } from "../paths.ts";
 import { sectionEnergyAt } from "../planning/cues.ts";
 import { planDurationMs, plannedMixDurationMs, playableOutputMs } from "../planning/timeline.ts";
 import { validateSetPlan } from "../planning/validate.ts";
+import {
+  analysisForTimeline,
+  isFrozenSnapshot,
+  resolveFrozenEvidence,
+  resolveTrackEvidence,
+  snapshotTrackEvidence,
+  type FrozenRenderSettings,
+} from "../evidence.ts";
 import type { TrackRepository } from "../repository.ts";
+import type { FrozenRenderRequest } from "../render-job-repository.ts";
 import type { SetPlanRepository } from "../set-plan-repository.ts";
 import type { RenderJobRepository, StoredRenderJob } from "../render-job-repository.ts";
 import type { AnalysisRepository } from "../analysis-repository.ts";
@@ -211,9 +221,64 @@ function toPublicJob(job: StoredRenderJob): RenderJob {
   return rest;
 }
 
+function freezeRenderSettings(settings: RenderSettings): FrozenRenderSettings {
+  return {
+    sampleRateHz: settings.sampleRateHz,
+    edgeFadeMs: settings.edgeFadeMs,
+    previewWindowMs: settings.previewWindowMs,
+    loudnessTargetLufs: settings.loudnessTargetLufs,
+    truePeakCeilingDb: settings.truePeakCeilingDb,
+    rendererVersion: RENDERER_VERSION,
+    rubberbandAvailable: Boolean(settings.rubberbandCliPath),
+  };
+}
+
+function freezeRenderRequest(
+  plan: SetPlanV1,
+  analyses: AnalysisRepository,
+  tracks: { findById(id: string): { fileFingerprint: string | null } | null },
+  settings: RenderSettings,
+): FrozenRenderRequest {
+  const clone = structuredClone(plan);
+  const evidence: FrozenRenderRequest["evidence"] = {};
+  for (const entry of clone.entries) {
+    evidence[entry.trackId] = snapshotTrackEvidence(
+      analyses,
+      entry.trackId,
+      tracks.findById(entry.trackId)?.fileFingerprint ?? null,
+    );
+  }
+  return {
+    planContentHash: sha256Json(clone),
+    plan: clone,
+    evidence,
+    settings: freezeRenderSettings(settings),
+  };
+}
+
+function previewCacheIdentity(
+  request: FrozenRenderRequest,
+  extras: {
+    windowMs: number;
+    template: string;
+    barCount: number | null;
+    transitionId: string;
+  },
+): string {
+  return sha256Json({ kind: "preview" as const, request, ...extras });
+}
+
 export class RenderCoordinator {
+  canRun: () => boolean = () => true;
+  private readonly active = new Set<Promise<void>>();
   /** Revalidate queued full jobs against the actual plan before decoding sources. */
-  validateFullPlan?: (setPlanId: string, options?: { allowOverlongDuration?: boolean }) => void;
+  validateFullPlan?: (
+    plan: SetPlanV1,
+    options?: {
+      allowOverlongDuration?: boolean;
+      evidence?: FrozenRenderRequest["evidence"];
+    },
+  ) => void;
   private running = 0;
   private stopped = false;
   private binaries: FfmpegBinaries | null | undefined;
@@ -237,14 +302,18 @@ export class RenderCoordinator {
     return this.jobs.failRunningAsInterrupted();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopped = true;
     for (const controller of this.aborts.values()) {
       controller.abort();
     }
+    await Promise.all(this.active);
   }
 
   kick(): void {
+    for (const [id, controller] of this.aborts) {
+      if (this.jobs.findById(id)?.status === "cancelled") controller.abort();
+    }
     this.pump();
   }
 
@@ -299,7 +368,10 @@ export class RenderCoordinator {
     const tracksById = new Map(this.tracks.listAll().map((track) => [track.id, track]));
     const effectiveEnergyByTrackId = new Map<string, number>();
     for (const track of tracksById.values()) {
-      const energy = effectiveEnergy(track, this.analyses.findByTrackId(track.id)?.descriptors ?? null);
+      const energy = effectiveEnergy(
+        track,
+        this.analyses.findByTrackId(track.id)?.descriptors ?? null,
+      );
       if (energy != null) {
         effectiveEnergyByTrackId.set(track.id, energy);
       }
@@ -364,6 +436,7 @@ export class RenderCoordinator {
         allowLowConfidence: input.allowLowConfidence,
         allowExcessiveTempo: input.allowExcessiveTempo,
         allowOverlongDuration: input.allowOverlongDuration,
+        request: freezeRenderRequest(stored.plan, this.analyses, this.tracks, this.settings),
       },
     });
     this.kick();
@@ -415,33 +488,12 @@ export class RenderCoordinator {
       );
     }
     const windowMs = input.windowMs ?? this.settings.previewWindowMs;
-    const cacheKey = sha256Json({
-      rendererVersion: RENDERER_VERSION,
-      sampleRateHz: this.settings.sampleRateHz,
+    const request = freezeRenderRequest(stored.plan, this.analyses, this.tracks, this.settings);
+    const cacheKey = previewCacheIdentity(request, {
       windowMs,
       template: input.template ?? pair.outgoing.transitionToNext?.type ?? "crossfade",
       barCount: input.barCount ?? null,
       transitionId: input.transitionId,
-      transition: pair.outgoing.transitionToNext,
-      outgoing: {
-        trackId: pair.outgoing.trackId,
-        start: pair.outgoing.sourceStartMs,
-        end: pair.outgoing.sourceEndMs,
-        gain: pair.outgoing.gainDb,
-        rate: pair.outgoing.playbackRate,
-        overlap: pair.outgoing.transitionToNext?.durationMs,
-      },
-      incoming: {
-        trackId: pair.incoming.trackId,
-        start: pair.incoming.sourceStartMs,
-        end: pair.incoming.sourceEndMs,
-        gain: pair.incoming.gainDb,
-        rate: pair.incoming.playbackRate,
-      },
-      fingerprints: [
-        this.tracks.findById(pair.outgoing.trackId)?.fileFingerprint,
-        this.tracks.findById(pair.incoming.trackId)?.fileFingerprint,
-      ],
     });
     const cached = this.jobs.findSucceededByCacheKey(cacheKey);
     if (cached?.outputRootRelativePath) {
@@ -473,6 +525,7 @@ export class RenderCoordinator {
         template: input.template,
         barCount: input.barCount,
         allowLowConfidence: input.allowLowConfidence,
+        request,
       },
     });
     this.kick();
@@ -523,12 +576,7 @@ export class RenderCoordinator {
     const spans = parseSilenceSpans(`${silenceRun.stderr}\n${silenceRun.stdout}`);
     const durationMs = manifest.outputDurationMs;
     const interiorSilence = spans
-      .filter(
-        (span) =>
-          span.startMs > 500 &&
-          span.endMs !== null &&
-          span.endMs < durationMs - 500,
-      )
+      .filter((span) => span.startMs > 500 && span.endMs !== null && span.endMs < durationMs - 500)
       .map((span) => ({
         startMs: span.startMs,
         endMs: span.endMs as number,
@@ -550,7 +598,8 @@ export class RenderCoordinator {
       const outTrack = this.tracks.findById(outgoing.trackId);
       const inTrack = this.tracks.findById(incoming.trackId);
       const evidence = manifest.joinEvidence?.find(
-        (item) => item.outgoingTrackId === outgoing.trackId && item.incomingTrackId === incoming.trackId,
+        (item) =>
+          item.outgoingTrackId === outgoing.trackId && item.incomingTrackId === incoming.trackId,
       );
       const audioEnd = evidence?.outgoingAudioEndMs ?? null;
       const overlap = outgoing.overlapToNextMs ?? 0;
@@ -576,9 +625,7 @@ export class RenderCoordinator {
             manifest.rateRegionsVersion,
           );
       const overlapAtMs =
-        overlap > 0
-          ? Math.round(outgoing.timelineStartMs + outgoingPlayable - overlap)
-          : null;
+        overlap > 0 ? Math.round(outgoing.timelineStartMs + outgoingPlayable - overlap) : null;
       const outOverlapStart =
         outgoing.sourceEndMs - outputToSourceMs(overlap, outgoing.playbackRate);
       const storedGrid = storedGridFromEvidence(
@@ -665,12 +712,12 @@ export class RenderCoordinator {
     });
     const failures = [
       ...interiorSilence.map((span) => `interior silence ${span.startMs}-${span.endMs}`),
-      ...joins.filter((join) => join.windowInSilence).map((join) => `join ${join.order} window in silence`),
+      ...joins
+        .filter((join) => join.windowInSilence)
+        .map((join) => `join ${join.order} window in silence`),
       ...(residualFail ? ["stored-grid residual above 40 ms"] : []),
       ...(levelFail ? ["planned LUFS step above 3 LU"] : []),
-      ...(duration.status === "fail"
-        ? [`output/plan duration error ${duration.errorMs} ms`]
-        : []),
+      ...(duration.status === "fail" ? [`output/plan duration error ${duration.errorMs} ms`] : []),
     ];
     const warningList = [
       ...(duration.status === "warning"
@@ -737,7 +784,7 @@ export class RenderCoordinator {
   }
 
   private pump(): void {
-    if (this.stopped) {
+    if (this.stopped || !this.canRun()) {
       return;
     }
     while (this.running < this.settings.workerLimit && !this.stopped) {
@@ -746,15 +793,17 @@ export class RenderCoordinator {
         return;
       }
       this.running += 1;
-      void this.execute(claimed)
+      const task = this.execute(claimed)
         .catch((error: unknown) => {
           this.logger.error({ err: error, jobId: claimed.id }, "Render job crashed");
         })
         .finally(() => {
+          this.active.delete(task);
           this.running -= 1;
           this.aborts.delete(claimed.id);
           this.pump();
         });
+      this.active.add(task);
     }
   }
 
@@ -768,9 +817,13 @@ export class RenderCoordinator {
       }
       const binaries = requireFfmpeg(await this.detect());
       const stored = this.requirePlan(job.setPlanId);
+      const request = job.params.request;
+      const plan = request?.plan ?? stored.plan;
+      const frozenSettings = request?.settings;
       if (job.kind === "full") {
-        this.validateFullPlan?.(job.setPlanId, {
+        this.validateFullPlan?.(plan, {
           allowOverlongDuration: job.params.allowOverlongDuration,
+          evidence: request?.evidence,
         });
       }
       const tracksById = new Map(this.tracks.listAll().map((track) => [track.id, track]));
@@ -778,18 +831,21 @@ export class RenderCoordinator {
       let segments: PreparedSegment[];
       let overlaps: number[];
       let relPath: string;
-      let edgeFadeMs = job.params.edgeFadeMs ?? this.settings.edgeFadeMs;
+      let edgeFadeMs =
+        job.params.edgeFadeMs ?? frozenSettings?.edgeFadeMs ?? this.settings.edgeFadeMs;
+      const analysisOf = (trackId: string) => this.resolvedAnalysis(trackId, request);
 
       if (job.kind === "preview") {
         if (!job.transitionId) {
           throw new DomainError("INVALID_SET_PLAN", "Preview job is missing transitionId");
         }
-        const pair = findTransitionPair(stored.plan, job.transitionId);
+        const pair = findTransitionPair(plan, job.transitionId);
         if (!pair) {
           throw new DomainError("INVALID_SET_PLAN", "Preview transition is no longer on the plan");
         }
-        const windowMs = job.params.windowMs ?? this.settings.previewWindowMs;
-        const sliced = slicePreview(pair, windowMs, resolvePlanRateRegionsVersion(stored.plan).version);
+        const windowMs =
+          job.params.windowMs ?? frozenSettings?.previewWindowMs ?? this.settings.previewWindowMs;
+        const sliced = slicePreview(pair, windowMs, resolvePlanRateRegionsVersion(plan).version);
         const outgoingTrack = this.requireTrack(pair.outgoing.trackId, tracksById);
         const incomingTrack = this.requireTrack(pair.incoming.trackId, tracksById);
         const outgoingSeg = await this.hydrateSegment(
@@ -797,12 +853,16 @@ export class RenderCoordinator {
           outgoingTrack,
           sliced.outgoing,
           0,
+          request,
         );
         const incomingSeg = await this.hydrateSegment(
           pair.incoming,
           incomingTrack,
           sliced.incoming,
-          (sliced.outgoing.sourceEndMs - sliced.outgoing.sourceStartMs) / pair.outgoing.playbackRate - sliced.overlapMs,
+          (sliced.outgoing.sourceEndMs - sliced.outgoing.sourceStartMs) /
+            pair.outgoing.playbackRate -
+            sliced.overlapMs,
+          request,
         );
         outgoingSeg.overlapToNextMs = sliced.overlapMs;
         incomingSeg.overlapToNextMs = null;
@@ -818,7 +878,7 @@ export class RenderCoordinator {
         edgeFadeMs = 0;
       } else {
         const prepared: PreparedSegment[] = [];
-        for (const entry of stored.plan.entries) {
+        for (const entry of plan.entries) {
           const track = this.requireTrack(entry.trackId, tracksById);
           prepared.push(
             await this.hydrateSegment(
@@ -830,11 +890,12 @@ export class RenderCoordinator {
                 gainDb: entry.gainDb,
               },
               entry.timelineStartMs,
+              request,
             ),
           );
         }
         segments = prepared;
-        overlaps = stored.plan.entries
+        overlaps = plan.entries
           .slice(0, -1)
           .map((entry) => entry.transitionToNext?.durationMs ?? 0);
         relPath = path.join("renders", `${job.id}${DEFAULT_RENDER_OUTPUT_EXTENSION}`);
@@ -851,9 +912,7 @@ export class RenderCoordinator {
             : new DomainError("PLAYBACK_RATE_OUT_OF_RANGE", String(error));
         }
         if (segment.requestedTransitionType === "double_drop") {
-          warnings.push(
-            `double_drop on ${segment.title} is rendered as a bass_swap.`,
-          );
+          warnings.push(`double_drop on ${segment.title} is rendered as a bass_swap.`);
         }
       }
 
@@ -867,10 +926,9 @@ export class RenderCoordinator {
             : outgoing?.requestedTransitionType;
         let params = outgoing?.mixParams;
         if (type === "phrase_mix" && outgoing && incoming && overlap > 0) {
-          const outAnalysis = this.analyses.findByTrackId(outgoing.trackId);
-          const inAnalysis = this.analyses.findByTrackId(incoming.trackId);
-          const outMs =
-            outgoing.sourceEndMs - outputToSourceMs(overlap, outgoing.playbackRate);
+          const outAnalysis = analysisOf(outgoing.trackId);
+          const inAnalysis = analysisOf(incoming.trackId);
+          const outMs = outgoing.sourceEndMs - outputToSourceMs(overlap, outgoing.playbackRate);
           const shape = resolveRenderPhraseShape(
             params?.phraseShape,
             outgoing.exitKind,
@@ -901,11 +959,13 @@ export class RenderCoordinator {
           continue;
         }
         // Resolved plans own source windows. Re-analysis at render time must not move their events.
-        const recipe = stored.plan.entries.find((entry) => entry.id === outgoing.entryId)?.transitionToNext;
+        const recipe = plan.entries.find(
+          (entry) => entry.id === outgoing.entryId,
+        )?.transitionToNext;
         const outOverlapStart =
           outgoing.sourceEndMs - outputToSourceMs(overlap, outgoing.playbackRate);
-        const outAnalysis = this.analyses.findByTrackId(outgoing.trackId);
-        const inAnalysis = this.analyses.findByTrackId(incoming.trackId);
+        const outAnalysis = analysisOf(outgoing.trackId);
+        const inAnalysis = analysisOf(incoming.trackId);
         const outDrop = outAnalysis?.sections.find((section) => section.type === "drop");
         const inDrop = inAnalysis?.sections.find((section) => section.type === "drop");
         const phraseReady =
@@ -968,11 +1028,13 @@ export class RenderCoordinator {
         throw new DomainError("PATH_OUTSIDE_LIBRARY_ROOT", "Refusing to write outside outputRoot");
       }
       this.jobs.updateProgress(job.id, 0.02, "mixing");
-      const timing = resolvePlanRateRegionsVersion(stored.plan);
+      const timing = resolvePlanRateRegionsVersion(plan);
       if (timing.unknownVersions.length > 0) {
-        warnings.push(`Unknown rateRegionsVersion ${timing.unknownVersions.join(", ")} on plan ${stored.plan.id}`);
+        warnings.push(
+          `Unknown rateRegionsVersion ${timing.unknownVersions.join(", ")} on plan ${plan.id}`,
+        );
       }
-      let rateRegionsVersion = timing.version === 2 ? 2 as const : undefined;
+      let rateRegionsVersion = timing.version === 2 ? (2 as const) : undefined;
       if (rateRegionsVersion === 2 && !this.settings.rubberbandCliPath) {
         warnings.push("Join-only timing v2 needs Rubber Band R3; using overlap-only stretch.");
         rateRegionsVersion = undefined;
@@ -980,15 +1042,15 @@ export class RenderCoordinator {
       const mixTitle =
         job.kind === "preview" && segments.length >= 2
           ? `${trackCredit(segments[0]!.artist, segments[0]!.title)} → ${trackCredit(segments[1]!.artist, segments[1]!.title)}`
-          : stored.plan.name;
+          : plan.name;
       const mix = await renderMix(this.runner, binaries, {
         segments,
         overlapMs: overlaps,
         transitions: mixTypes,
         outputPath: absOut,
-        sampleRateHz: this.settings.sampleRateHz,
-        truePeakCeilingDb: this.settings.truePeakCeilingDb,
-        loudnessTargetLufs: this.settings.loudnessTargetLufs,
+        sampleRateHz: frozenSettings?.sampleRateHz ?? this.settings.sampleRateHz,
+        truePeakCeilingDb: frozenSettings?.truePeakCeilingDb ?? this.settings.truePeakCeilingDb,
+        loudnessTargetLufs: frozenSettings?.loudnessTargetLufs ?? this.settings.loudnessTargetLufs,
         edgeFadeMs,
         isolatePrefix: job.kind !== "preview",
         rubberbandCliPath: this.settings.rubberbandCliPath,
@@ -999,8 +1061,8 @@ export class RenderCoordinator {
         },
         outputMetadata: mixTagsFromTracklist({
           title: mixTitle,
-          album: stored.plan.name,
-          date: stored.plan.createdAt.slice(0, 4),
+          album: plan.name,
+          date: plan.createdAt.slice(0, 4),
           encodedBy: `dnb-crate ${RENDERER_VERSION}`,
           tracks: segments.map((segment) => ({
             artist: segment.artist,
@@ -1020,34 +1082,46 @@ export class RenderCoordinator {
         applicationVersion: APP_VERSION,
         renderJobId: job.id,
         setPlanId: job.setPlanId,
-        setPlanContentHash: sha256Json(stored.plan),
+        setPlanContentHash: request?.planContentHash ?? sha256Json(plan),
         kind: job.kind,
         outputFormat: DEFAULT_RENDER_OUTPUT_FORMAT,
-        outputSampleRateHz: mix.sampleRateHz || this.settings.sampleRateHz,
+        outputSampleRateHz:
+          mix.sampleRateHz || frozenSettings?.sampleRateHz || this.settings.sampleRateHz,
         outputChannels: mix.channels || DEFAULT_RENDER_CHANNELS,
         outputDurationMs: mix.durationMs,
         outputChecksumSha256: checksum,
         integratedLufs: mix.integratedLufs,
         truePeakDb: mix.truePeakDb,
-        loudnessTargetLufs: this.settings.loudnessTargetLufs,
-        truePeakCeilingDb: this.settings.truePeakCeilingDb,
+        loudnessTargetLufs: frozenSettings?.loudnessTargetLufs ?? this.settings.loudnessTargetLufs,
+        truePeakCeilingDb: frozenSettings?.truePeakCeilingDb ?? this.settings.truePeakCeilingDb,
         ffmpegVersion: binaries.ffmpegVersion,
         ffprobeVersion: binaries.ffprobeVersion,
         invocation: mix.invocation,
         tracks: segments.map((segment, index) => {
-          const params = job.kind === "preview" && (job.params.template != null || job.params.barCount != null) ? undefined : stored.plan.entries.find(entry => entry.id === segment.entryId)?.transitionToNext?.parameters;
-          return {...toManifestTrack(
-            segment,
-            mixTypes[index],
-            segments[index + 1],
-            this.tracks.findById(segment.trackId),
-            this.tracks.findById(segments[index + 1]?.trackId ?? ""),
-            this.analyses.findByTrackId(segment.trackId),
-            this.analyses.findByTrackId(segments[index + 1]?.trackId ?? ""),
-          ),
-          ...(typeof params?.appliedRecipeId === "string" ? {appliedRecipeId: params.appliedRecipeId} : {}),
-          ...(typeof params?.appliedRecipeFingerprint === "string" ? {appliedRecipeFingerprint: params.appliedRecipeFingerprint} : {}),
-          ...(typeof params?.recipeReuseMode === "string" ? {recipeReuseMode: params.recipeReuseMode} : {}),
+          const params =
+            job.kind === "preview" && (job.params.template != null || job.params.barCount != null)
+              ? undefined
+              : plan.entries.find((entry) => entry.id === segment.entryId)?.transitionToNext
+                  ?.parameters;
+          return {
+            ...toManifestTrack(
+              segment,
+              mixTypes[index],
+              segments[index + 1],
+              this.tracks.findById(segment.trackId),
+              this.tracks.findById(segments[index + 1]?.trackId ?? ""),
+              analysisOf(segment.trackId),
+              analysisOf(segments[index + 1]?.trackId ?? ""),
+            ),
+            ...(typeof params?.appliedRecipeId === "string"
+              ? { appliedRecipeId: params.appliedRecipeId }
+              : {}),
+            ...(typeof params?.appliedRecipeFingerprint === "string"
+              ? { appliedRecipeFingerprint: params.appliedRecipeFingerprint }
+              : {}),
+            ...(typeof params?.recipeReuseMode === "string"
+              ? { recipeReuseMode: params.recipeReuseMode }
+              : {}),
           };
         }),
         joinEvidence: segments.slice(0, -1).map((outgoing, index) => {
@@ -1078,30 +1152,28 @@ export class RenderCoordinator {
         createdAt: new Date().toISOString(),
       };
       if (job.kind === "full") {
-        const planned = planDurationMs(stored.plan.entries);
-        const delta = Math.abs(mix.durationMs - planned);
-        if (delta > 1000) {
-          warnings.push(
-            `Output duration ${mix.durationMs}ms differs from plan ${planned}ms by ${delta}ms (tolerance 1000ms).`,
-          );
+        const planned = planDurationMs(plan.entries);
+        const durationFailure = fullRenderDurationFailure(mix.durationMs, planned);
+        if (durationFailure) {
+          warnings.push(durationFailure);
           manifest.warnings = warnings;
+          this.jobs.markFailed(
+            job.id,
+            { code: "RENDER_FAILED", message: durationFailure, retryable: false },
+            { outputRelpath: posixRel, checksum, manifest, warnings },
+          );
+          return;
         }
         if (this.jobs.findById(job.id)?.status !== "cancelled") {
           this.jobs.updateProgress(job.id, 0.96, "listen-encode");
-          const listenRel = listenRenderRelPath(stored.plan.name, job.id);
+          const listenRel = listenRenderRelPath(plan.name, job.id);
           const listenAbs = path.resolve(this.config.outputRoot, listenRel);
           if (!isPathInsideRoot(listenAbs, path.resolve(this.config.outputRoot))) {
             warnings.push("Listen path escaped outputRoot; skipped the 16-bit copy.");
             manifest.warnings = warnings;
           } else {
             try {
-              await encodeListenFlac(
-                this.runner,
-                binaries,
-                absOut,
-                listenAbs,
-                controller.signal,
-              );
+              await encodeListenFlac(this.runner, binaries, absOut, listenAbs, controller.signal);
               manifest.listenRootRelativePath = listenRel.split(path.sep).join("/");
               manifest.listenBitDepth = LISTEN_RENDER_BIT_DEPTH;
             } catch (error) {
@@ -1164,12 +1236,22 @@ export class RenderCoordinator {
   private firstDropStartMsByTrackId(): Map<string, number> {
     const map = new Map<string, number>();
     for (const track of this.tracks.listAll()) {
-      const drop = this.analyses.findByTrackId(track.id)?.sections?.find((section) => section.type === "drop");
+      const drop = analysisForTimeline(
+        resolveTrackEvidence(this.analyses, track.id),
+      )?.sections?.find((section) => section.type === "drop");
       if (drop && Number.isFinite(drop.startMs)) {
         map.set(track.id, drop.startMs);
       }
     }
     return map;
+  }
+
+  private resolvedAnalysis(trackId: string, request?: FrozenRenderRequest) {
+    const frozen = request?.evidence[trackId];
+    if (isFrozenSnapshot(frozen) && !frozen.present) {
+      return null;
+    }
+    return analysisForTimeline(resolveFrozenEvidence(this.analyses, trackId, frozen));
   }
 
   private async assessReadiness(
@@ -1256,7 +1338,11 @@ export class RenderCoordinator {
         const entryIndex = plan.entries.indexOf(entry);
         const fromPrev =
           entryIndex > 0 ? (plan.entries[entryIndex - 1]!.transitionToNext?.durationMs ?? 0) : 0;
-        const playable = playableOutputMs(entry, fromPrev, resolvePlanRateRegionsVersion(plan).version);
+        const playable = playableOutputMs(
+          entry,
+          fromPrev,
+          resolvePlanRateRegionsVersion(plan).version,
+        );
         const audioEnd = this.analyses.findByTrackId(track.id)?.descriptors?.audioEndMs;
         if (typeof audioEnd === "number" && overlap > 0) {
           const overlapSource = outputToSourceMs(overlap, entry.playbackRate);
@@ -1328,6 +1414,7 @@ export class RenderCoordinator {
     track: Track,
     window: { sourceStartMs: number; sourceEndMs: number; gainDb: number },
     timelineStartMs: number,
+    request?: FrozenRenderRequest,
   ): Promise<PreparedSegment> {
     const resolved = path.resolve(track.filePath);
     const info = await stat(resolved);
@@ -1339,7 +1426,7 @@ export class RenderCoordinator {
         { details: { trackId: track.id } },
       );
     }
-    const analysis = this.analyses.findByTrackId(track.id);
+    const analysis = this.resolvedAnalysis(track.id, request);
     return {
       filePath: resolved,
       sourceStartMs: window.sourceStartMs,
@@ -1375,7 +1462,9 @@ export class RenderCoordinator {
       beatTimesMs: analysis?.beatTimesMs ?? [],
       camelotKey: track.camelotKey,
       audioEndMs:
-        typeof analysis?.descriptors?.audioEndMs === "number" ? analysis.descriptors.audioEndMs : null,
+        typeof analysis?.descriptors?.audioEndMs === "number"
+          ? analysis.descriptors.audioEndMs
+          : null,
       tailEnergy: sectionEnergyAt(analysis?.sections, window.sourceEndMs),
       headEnergy: sectionEnergyAt(analysis?.sections, window.sourceStartMs),
       recipeVersion:
@@ -1472,7 +1561,7 @@ export function slicePreview(
   const overlap = Math.max(1, pair.outgoing.transitionToNext?.durationMs ?? 0);
   const target = pair.outgoing.transitionToNext?.parameters.targetBpm;
   const bpm = typeof target === "number" && target > 0 ? target : 174;
-  const each = Math.max((windowMs + overlap) / 2, overlap + 32 * 60_000 / bpm);
+  const each = Math.max((windowMs + overlap) / 2, overlap + (32 * 60_000) / bpm);
   const outRate = pair.outgoing.playbackRate > 0 ? pair.outgoing.playbackRate : 1;
   const inRate = pair.incoming.playbackRate > 0 ? pair.incoming.playbackRate : 1;
   const overlapMs = overlap;
@@ -1498,7 +1587,8 @@ export function slicePreview(
     }
     return {
       outgoing: {
-        sourceStartMs: pair.outgoing.sourceStartMs + outputPositionToSourceMs(outRegions, outPlayable - outLen),
+        sourceStartMs:
+          pair.outgoing.sourceStartMs + outputPositionToSourceMs(outRegions, outPlayable - outLen),
         sourceEndMs: pair.outgoing.sourceEndMs,
         gainDb: pair.outgoing.gainDb,
       },
@@ -1580,7 +1670,10 @@ function toManifestTrack(
     incomingDropMs: incoming?.incomingDropMs ?? segment.incomingDropMs,
     outgoingLufs: outgoingAnalysis?.integratedLufs ?? null,
     incomingLufs: incomingAnalysis?.integratedLufs ?? null,
-    camelotDistance: joinCamelotDistance(outgoingTrack?.camelotKey ?? null, incomingTrack?.camelotKey ?? null),
+    camelotDistance: joinCamelotDistance(
+      outgoingTrack?.camelotKey ?? null,
+      incomingTrack?.camelotKey ?? null,
+    ),
   };
 }
 
@@ -1611,13 +1704,24 @@ function mixParamsFromEntry(entry: SetPlanEntry): Partial<MixPresetParams> | nul
     midDipDb: num("midDipDb"),
     mixInMs: num("mixInMs"),
     incomingDropMs: num("incomingDropMs"),
-    sequentialHandoff: raw.sequentialHandoff === "early" || raw.sequentialHandoff === "supported" ? raw.sequentialHandoff : "legacy",
+    sequentialHandoff:
+      raw.sequentialHandoff === "early" || raw.sequentialHandoff === "supported"
+        ? raw.sequentialHandoff
+        : "legacy",
     ...(raw.landingFadeBars === 2 || raw.landingFadeBars === 4 || raw.landingFadeBars === 8
-      ? { landingFadeBars: raw.landingFadeBars } : {}),
-    ...(raw.landingCarryBars === 2 || raw.landingCarryBars === 3.5 || raw.landingCarryBars === 4 || raw.landingCarryBars === 4.5
-      ? { landingCarryBars: raw.landingCarryBars } : {}),
-    ...(raw.landingIncomingFadeBars === 8 || raw.landingIncomingFadeBars === 16 || raw.landingIncomingFadeBars === 32
-      ? { landingIncomingFadeBars: raw.landingIncomingFadeBars } : {}),
+      ? { landingFadeBars: raw.landingFadeBars }
+      : {}),
+    ...(raw.landingCarryBars === 2 ||
+    raw.landingCarryBars === 3.5 ||
+    raw.landingCarryBars === 4 ||
+    raw.landingCarryBars === 4.5
+      ? { landingCarryBars: raw.landingCarryBars }
+      : {}),
+    ...(raw.landingIncomingFadeBars === 8 ||
+    raw.landingIncomingFadeBars === 16 ||
+    raw.landingIncomingFadeBars === 32
+      ? { landingIncomingFadeBars: raw.landingIncomingFadeBars }
+      : {}),
     phraseShape:
       raw.phraseShape === "sequential" ||
       raw.phraseShape === "complementary" ||
@@ -1661,7 +1765,8 @@ function collectAutomation(
       continue;
     }
     const fromPrev = i > 0 ? (segments[i - 1]!.overlapToNextMs ?? 0) : 0;
-    const start = outgoing.timelineStartMs + playableOutputMs(outgoing, fromPrev, rateRegionsVersion) - overlap;
+    const start =
+      outgoing.timelineStartMs + playableOutputMs(outgoing, fromPrev, rateRegionsVersion) - overlap;
     const spec = mixTypes[i]!;
     const bars = normalizePhraseBars(spec.barCount);
     const barMs = overlap / bars;

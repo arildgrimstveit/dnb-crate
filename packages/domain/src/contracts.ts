@@ -552,10 +552,15 @@ export const createSetPlanInputSchema = z.object({
     .describe("Minimum other tracks between the same artist. Default 1 (no back-to-back)."),
   harmonicImportance: z.number().min(0).max(1).optional(),
   explorationWeight: z.number().min(0).max(1).optional(),
-  variety: z.object({
-    referencePlanIds: z.array(z.string().uuid()).max(20),
-    strength: z.number().min(0).max(1).optional(),
-  }).optional().describe("Prefer fresh recordings and directed pairs relative to these explicit prior mixes. Soft cost; never bypasses quality or required tracks/pairs. Strength defaults to 0.7. Search drafts are not automatically listening history."),
+  variety: z
+    .object({
+      referencePlanIds: z.array(z.string().uuid()).max(20),
+      strength: z.number().min(0).max(1).optional(),
+    })
+    .optional()
+    .describe(
+      "Prefer fresh recordings and directed pairs relative to these explicit prior mixes. Soft cost; never bypasses quality or required tracks/pairs. Strength defaults to 0.7. Search drafts are not automatically listening history.",
+    ),
   startTrackId: trackIdSchema.optional(),
   endTrackId: trackIdSchema.optional(),
   seed: z.number().int().optional().describe("Reproducibility seed. Default 1."),
@@ -715,8 +720,14 @@ export const joinQualityReportSchema = z.object({
   incomingSourceEndMs: z.number().int(),
   barCount: z.number().int().nullable(),
   overlapMs: z.number().int(),
-  continuity: z.object({ evidence: z.string(), energyFloor: z.number().nullable(),
-    valleyBars: z.number().nullable(), coexistenceBars: z.number().nullable() }).optional(),
+  continuity: z
+    .object({
+      evidence: z.string(),
+      energyFloor: z.number().nullable(),
+      valleyBars: z.number().nullable(),
+      coexistenceBars: z.number().nullable(),
+    })
+    .optional(),
   phraseShape: z.string().nullable(),
   sequentialHandoff: z.string().nullable(),
   intent: z.string().nullable(),
@@ -827,10 +838,19 @@ export const validateSetPlanDataSchema = z.object({
 });
 
 export const planExplanationSchema = z.object({
-  openerSearch: z.array(z.object({ openerTrackId: z.string().nullable(), durationMs: z.number() })).optional(),
-  variety: z.object({ referencePlanIds: z.array(z.string()), strength: z.number(),
-    trackIds: z.array(z.string()), pairs: z.array(z.object({ outgoingTrackId: z.string(), incomingTrackId: z.string() })),
-    repeatedTracks: z.number().int(), repeatedPairs: z.number().int() }).optional(),
+  openerSearch: z
+    .array(z.object({ openerTrackId: z.string().nullable(), durationMs: z.number() }))
+    .optional(),
+  variety: z
+    .object({
+      referencePlanIds: z.array(z.string()),
+      strength: z.number(),
+      trackIds: z.array(z.string()),
+      pairs: z.array(z.object({ outgoingTrackId: z.string(), incomingTrackId: z.string() })),
+      repeatedTracks: z.number().int(),
+      repeatedPairs: z.number().int(),
+    })
+    .optional(),
   seed: z.number(),
   selected: z.array(
     z.object({

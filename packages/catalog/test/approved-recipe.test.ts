@@ -72,9 +72,33 @@ function gridTrack(id: string, title: string, fingerprint: string): TimelineTrac
       introLenMs: 20_000,
       outroLenMs: 30_000,
       sections: [
-        { type: "intro", startMs: 0, endMs: 20_000, startBar: 0, endBar: 16, confidence: 1, sectionEnergy: 0.2 },
-        { type: "drop", startMs: 20_000, endMs: 150_000, startBar: 16, endBar: 120, confidence: 1, sectionEnergy: 0.8 },
-        { type: "outro", startMs: 150_000, endMs: 180_000, startBar: 120, endBar: 144, confidence: 1, sectionEnergy: 0.2 },
+        {
+          type: "intro",
+          startMs: 0,
+          endMs: 20_000,
+          startBar: 0,
+          endBar: 16,
+          confidence: 1,
+          sectionEnergy: 0.2,
+        },
+        {
+          type: "drop",
+          startMs: 20_000,
+          endMs: 150_000,
+          startBar: 16,
+          endBar: 120,
+          confidence: 1,
+          sectionEnergy: 0.8,
+        },
+        {
+          type: "outro",
+          startMs: 150_000,
+          endMs: 180_000,
+          startBar: 120,
+          endBar: 144,
+          confidence: 1,
+          sectionEnergy: 0.2,
+        },
       ],
       downbeatTimesMs: Array.from({ length: 145 }, (_, i) => i * ((4 * 60_000) / 174)),
       downbeatConfidence: 1,
@@ -91,7 +115,7 @@ function gridTrack(id: string, title: string, fingerprint: string): TimelineTrac
 }
 
 describe("approved recipe registry", () => {
-  it("ignores repeated imports of the same payload and note", () => {
+  it("ignores repeated imports of the same payload and note", async () => {
     const root = path.join(
       os.tmpdir(),
       `dnb-recipes-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -121,9 +145,11 @@ describe("approved recipe registry", () => {
       };
       expect(catalog.service.importApprovedRecipe(row).inserted).toBe(true);
       expect(catalog.service.importApprovedRecipe(row).inserted).toBe(false);
-      expect(catalog.service.listApprovedRecipes(body.outgoingTrackId, body.incomingTrackId)).toHaveLength(1);
+      expect(
+        catalog.service.listApprovedRecipes(body.outgoingTrackId, body.incomingTrackId),
+      ).toHaveLength(1);
     } finally {
-      catalog.close();
+      await catalog.close();
     }
   });
 
@@ -169,9 +195,16 @@ describe("approved recipe registry", () => {
     const fresh = chooseTransition(outgoing, incoming, { recall: lookup, liveIdentity: live });
     expect(fresh.transition.parameters.appliedRecipeId).toBeUndefined();
     const requested = chooseTransition(outgoing, incoming, {
-      recall: { ...lookup, reuseForPair: () => "recipe" }, liveIdentity: live });
+      recall: { ...lookup, reuseForPair: () => "recipe" },
+      liveIdentity: live,
+    });
     expect(requested.transition.parameters.appliedRecipeId).toBe("1");
-    const stale = recallApprovedHandoff(outgoing, incoming, { ...live, outgoingSourceFingerprint: "other" }, lookup);
+    const stale = recallApprovedHandoff(
+      outgoing,
+      incoming,
+      { ...live, outgoingSourceFingerprint: "other" },
+      lookup,
+    );
     expect(stale?.fallback).toBe(true);
     expect(stale?.reason).toBe("SOURCE_FINGERPRINT_CHANGED");
   });

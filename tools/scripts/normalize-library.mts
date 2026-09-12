@@ -13,7 +13,6 @@
  *
  * Does not write audio tags. Does not print the library root.
  */
-import { createRequire } from "node:module";
 import {
   copyFileSync,
   existsSync,
@@ -30,8 +29,7 @@ import path from "node:path";
 import { openDatabase } from "../../packages/catalog/src/db.ts";
 import { loadConfig } from "../../packages/domain/src/index.ts";
 
-const require = createRequire(new URL("../../packages/catalog/src/db.ts", import.meta.url));
-const { parseFile } = require("music-metadata") as typeof import("music-metadata");
+import { readAudioTags as parseFile } from "../../packages/catalog/src/metadata.ts";
 
 const apply = process.argv.includes("--apply");
 const AUDIO_EXT = new Set([".wav", ".flac", ".mp3", ".m4a", ".aiff", ".aif"]);
@@ -162,7 +160,7 @@ function cleanAlbumArtist(value: string): string {
 function discFromRel(relPath: string): number | null {
   const parts = relPath.split("/").slice(0, -1);
   for (const part of parts) {
-    const plain = part.replace(/[\[\]]/g, "").trim();
+    const plain = part.replace(/[[\]]/g, "").trim();
     const named = /^(?:disc|cd)\s*0*(\d+)$/i.exec(plain);
     if (named) {
       return Number(named[1]);
@@ -324,9 +322,13 @@ for (const track of keepers) {
 const planned: PlannedFile[] = [];
 const releasePreview: Array<{ from: string; to: string; files: number; compilation: boolean }> = [];
 
-for (const [releaseKey, members] of [...releases.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+for (const [releaseKey, members] of [...releases.entries()].sort((a, b) =>
+  a[0].localeCompare(b[0]),
+)) {
   const top = members[0]!.rel.includes("/") ? topFolder(members[0]!.rel) : members[0]!.rel;
-  const albumValues = members.map((m) => m.tags.album ?? m.track.album).filter((v): v is string => Boolean(v));
+  const albumValues = members
+    .map((m) => m.tags.album ?? m.track.album)
+    .filter((v): v is string => Boolean(v));
   const albumRaw = mode(albumValues.map(cleanAlbumTitle));
   const folderYear = yearFromText(top);
   const tagYears = members.map((m) => m.tags.year).filter((v): v is number => v !== null);
@@ -356,7 +358,12 @@ for (const [releaseKey, members] of [...releases.entries()].sort((a, b) => a[0].
     releaseArtist = primaries[0]!;
   } else if (primaries.length > 1 && primaries.every((p) => /technimatic/i.test(p))) {
     releaseArtist = "Technimatic";
-  } else if (albumartists.includes("Various Artists") && hint && !hint.includes(",") && hint.length < 40) {
+  } else if (
+    albumartists.includes("Various Artists") &&
+    hint &&
+    !hint.includes(",") &&
+    hint.length < 40
+  ) {
     releaseArtist = hint;
   } else if (hint && !hint.includes(",") && hint.length < 40) {
     releaseArtist = hint;
@@ -370,11 +377,16 @@ for (const [releaseKey, members] of [...releases.entries()].sort((a, b) => a[0].
   const compilation =
     releaseArtist === "Various Artists" ||
     albumartists.includes("Various Artists") ||
-    (primaries.length >= 3 && !primaries.every((p) => p.toLowerCase().startsWith(releaseArtist.toLowerCase())));
+    (primaries.length >= 3 &&
+      !primaries.every((p) => p.toLowerCase().startsWith(releaseArtist.toLowerCase())));
 
   const discNos = members.map((m) => {
     const fromTag =
-      m.tags.diskNo && (m.tags.diskOf ?? 0) > 1 ? m.tags.diskNo : m.tags.diskNo && m.tags.diskNo > 1 ? m.tags.diskNo : null;
+      m.tags.diskNo && (m.tags.diskOf ?? 0) > 1
+        ? m.tags.diskNo
+        : m.tags.diskNo && m.tags.diskNo > 1
+          ? m.tags.diskNo
+          : null;
     return fromTag ?? discFromRel(m.rel);
   });
   const numericParents = new Set(
@@ -396,7 +408,8 @@ for (const [releaseKey, members] of [...releases.entries()].sort((a, b) => a[0].
     }
     return null;
   });
-  const multiDisc = discs.some((d) => d !== null && d > 0) && new Set(discs.filter((d) => d !== null)).size > 1;
+  const multiDisc =
+    discs.some((d) => d !== null && d > 0) && new Set(discs.filter((d) => d !== null)).size > 1;
 
   const artistSeg = sanitizeSegment(releaseArtist);
   const albumSeg = albumRaw ? sanitizeSegment(year ? `${albumRaw} (${year})` : albumRaw) : null;
@@ -410,7 +423,9 @@ for (const [releaseKey, members] of [...releases.entries()].sort((a, b) => a[0].
       (member.track.title && member.track.artist ? member.track.title : null) ??
       parsedName?.title ??
       titleFromStem(stem);
-    const trackArtist = displayArtist(member.tags.artist ?? member.track.artist ?? parsedName?.artist ?? releaseArtist);
+    const trackArtist = displayArtist(
+      member.tags.artist ?? member.track.artist ?? parsedName?.artist ?? releaseArtist,
+    );
     const trackNo =
       member.tags.trackNo ??
       (stem.match(/^(\d{1,3})\b/) ? Number(stem.match(/^(\d{1,3})\b/)![1]) : null);
@@ -519,9 +534,7 @@ copyFileSync(dbPath, backup);
 const live = openDatabase(dbPath);
 const rematchStmt = live.prepare("UPDATE set_plan_entries SET track_id = ? WHERE track_id = ?");
 const deleteTrackStmt = live.prepare("DELETE FROM tracks WHERE id = ?");
-const updatePathStmt = live.prepare(
-  "UPDATE tracks SET file_path = ?, updated_at = ? WHERE id = ?",
-);
+const updatePathStmt = live.prepare("UPDATE tracks SET file_path = ?, updated_at = ? WHERE id = ?");
 
 const txn = live.transaction(() => {
   for (const pair of rematch) {
@@ -591,7 +604,12 @@ for (const [oldTop, albumAbs] of albumDestByOldTop) {
   images.sort((a, b) => {
     const score = (file: string): number => {
       const base = path.basename(file).toLowerCase();
-      if (base === "folder.jpg" || base === "cover.jpg" || base === "folder.png" || base === "cover.png") {
+      if (
+        base === "folder.jpg" ||
+        base === "cover.jpg" ||
+        base === "folder.png" ||
+        base === "cover.png"
+      ) {
         return 0;
       }
       return 1;
@@ -616,7 +634,10 @@ for (const [oldTop, albumAbs] of albumDestByOldTop) {
       continue;
     }
     mkdirSync(scansDir, { recursive: true });
-    const dest = path.join(scansDir, sanitizeSegment(path.parse(image).name) + path.extname(image).toLowerCase());
+    const dest = path.join(
+      scansDir,
+      sanitizeSegment(path.parse(image).name) + path.extname(image).toLowerCase(),
+    );
     if (!existsSync(dest)) {
       renameSync(image, dest);
     } else {

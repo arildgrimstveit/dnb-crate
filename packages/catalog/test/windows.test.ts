@@ -36,7 +36,9 @@ function track(id: string, sections: TrackSection[], endBar: number): WindowTrac
       canonicalBpm: BPM,
       audioStartMs: 0,
       audioEndMs: Math.round(endBar * BAR_MS),
-      downbeatTimesMs: Array.from({ length: endBar * 4 + 1 }, (_, i) => Math.round((i * BAR_MS) / 4)),
+      downbeatTimesMs: Array.from({ length: endBar * 4 + 1 }, (_, i) =>
+        Math.round((i * BAR_MS) / 4),
+      ),
       downbeatConfidence: 1,
     },
   };
@@ -44,8 +46,16 @@ function track(id: string, sections: TrackSection[], endBar: number): WindowTrac
 
 describe("phrase windows", () => {
   it("skips a long quiet outro and intro while keeping the drop aligned", () => {
-    const outgoing = track("out", [section("drop", 16, 96, 0.9), section("outro", 96, 160, 0.08)], 160);
-    const incoming = track("in", [section("intro", 0, 80, 0.08), section("drop", 80, 160, 0.9)], 160);
+    const outgoing = track(
+      "out",
+      [section("drop", 16, 96, 0.9), section("outro", 96, 160, 0.08)],
+      160,
+    );
+    const incoming = track(
+      "in",
+      [section("intro", 0, 80, 0.08), section("drop", 80, 160, 0.9)],
+      160,
+    );
     const window = planPhraseWindow(outgoing, incoming);
     expect(window.mixOutMs + window.barCount * BAR_MS).toBeLessThanOrEqual(96 * BAR_MS + 2);
     expect(window.mixInMs).toBeGreaterThan(40 * BAR_MS);
@@ -89,7 +99,12 @@ describe("phrase windows", () => {
     const outgoing = track("out", [section("drop", 16, 144, 0.9)], 160);
     const incoming = track(
       "in",
-      [section("intro", 0, 8, 0.05), section("build", 8, 184, 0.22), section("drop", 184, 200, 0.38), section("bridge", 200, 220, 0.29)],
+      [
+        section("intro", 0, 8, 0.05),
+        section("build", 8, 184, 0.22),
+        section("drop", 184, 200, 0.38),
+        section("bridge", 200, 220, 0.29),
+      ],
       220,
     );
     const dj = planPhraseWindow(outgoing, incoming);
@@ -102,10 +117,19 @@ describe("phrase windows", () => {
   it("keeps a late-drop outgoing tail after a deep incoming cut", () => {
     const outgoing = track(
       "out",
-      [section("intro", 0, 8, 0.05), section("build", 8, 184, 0.22), section("drop", 184, 200, 0.38), section("bridge", 200, 220, 0.29)],
+      [
+        section("intro", 0, 8, 0.05),
+        section("build", 8, 184, 0.22),
+        section("drop", 184, 200, 0.38),
+        section("bridge", 200, 220, 0.29),
+      ],
       220,
     );
-    const incoming = track("in", [section("intro", 0, 64, 0.2), section("drop", 80, 160, 0.9)], 160);
+    const incoming = track(
+      "in",
+      [section("intro", 0, 64, 0.2), section("drop", 80, 160, 0.9)],
+      160,
+    );
     const start = 168 * BAR_MS;
     const dj = planPhraseWindow(outgoing, incoming, {
       outgoingSourceStartMs: start,
@@ -130,7 +154,11 @@ describe("phrase windows", () => {
   });
 
   it("skips a quiet tail when an earlier energetic exit exists", () => {
-    const outgoing = track("out", [section("drop", 16, 80, 0.9), section("outro", 80, 112, 0.1)], 112);
+    const outgoing = track(
+      "out",
+      [section("drop", 16, 80, 0.9), section("outro", 80, 112, 0.1)],
+      112,
+    );
     const incoming = track("in", [section("intro", 0, 8, 0.2), section("drop", 8, 64, 0.9)], 64);
     const dj = planPhraseWindow(outgoing, incoming);
     expect(dj.exitKind).toBe("dropLanding");
@@ -139,18 +167,36 @@ describe("phrase windows", () => {
   });
 
   it("respects manual source cues", () => {
-    const outgoing = track("out", [section("drop", 16, 96, 0.9), section("outro", 96, 160, 0.08)], 160);
-    const incoming = track("in", [section("intro", 0, 80, 0.08), section("drop", 80, 160, 0.9)], 160);
+    const outgoing = track(
+      "out",
+      [section("drop", 16, 96, 0.9), section("outro", 96, 160, 0.08)],
+      160,
+    );
+    const incoming = track(
+      "in",
+      [section("intro", 0, 80, 0.08), section("drop", 80, 160, 0.9)],
+      160,
+    );
     outgoing.analysis!.manualMixOutMs = Math.round(104 * BAR_MS);
     const window = planPhraseWindow(outgoing, incoming);
-    expect(window.mixOutMs).toBeCloseTo(outgoing.analysis!.manualMixOutMs!, 0);
+    expect(window.mixOutMs).toBeCloseTo(outgoing.analysis!.manualMixOutMs, 0);
   });
 
   it("chooses a feasible exit when the active exit leaves too little featured audio", () => {
-    const outgoing = track("out", [section("drop", 16, 96, 0.9), section("outro", 96, 160, 0.08)], 160);
-    const incoming = track("in", [section("intro", 0, 80, 0.4), section("drop", 80, 160, 0.9)], 160);
+    const outgoing = track(
+      "out",
+      [section("drop", 16, 96, 0.9), section("outro", 96, 160, 0.08)],
+      160,
+    );
+    const incoming = track(
+      "in",
+      [section("intro", 0, 80, 0.4), section("drop", 80, 160, 0.9)],
+      160,
+    );
     const window = planPhraseWindow(outgoing, incoming, {
-      outgoingSourceStartMs: 48 * BAR_MS, outgoingHeadEndMs: 64 * BAR_MS });
+      outgoingSourceStartMs: 48 * BAR_MS,
+      outgoingHeadEndMs: 64 * BAR_MS,
+    });
     expect(window.mixOutMs + window.barCount * BAR_MS - 48 * BAR_MS).toBeGreaterThanOrEqual(90_000);
     expect(window.mixOutMs).toBeGreaterThan(64 * BAR_MS);
   });
@@ -219,7 +265,11 @@ describe("phrase windows", () => {
   });
 
   it("uses B=8 when the incoming drop is at bar 8", () => {
-    const outgoing = track("out", [section("drop", 16, 48, 0.4), section("outro", 48, 64, 0.2)], 64);
+    const outgoing = track(
+      "out",
+      [section("drop", 16, 48, 0.4), section("outro", 48, 64, 0.2)],
+      64,
+    );
     const incoming = track("in", [section("intro", 0, 8, 0.2), section("drop", 8, 48, 0.85)], 48);
     const window = planPhraseWindow(outgoing, incoming);
     expect(window.barCount).toBe(8);
@@ -264,10 +314,7 @@ describe("phrase windows", () => {
     inAnalysis.downbeatTimesMs = (inAnalysis.downbeatTimesMs ?? []).map((time) => time + phase);
     const window = planPhraseWindow(outgoing, incoming);
     expect(window.barCount).toBeGreaterThanOrEqual(16);
-    expect(window.mixInMs).toBeCloseTo(
-      Math.round((48 - window.barCount) * BAR_MS) + phase,
-      0,
-    );
+    expect(window.mixInMs).toBeCloseTo(Math.round((48 - window.barCount) * BAR_MS) + phase, 0);
     expect(window.incomingDropMs).toBeCloseTo(window.mixInMs + window.barCount * BAR_MS, 0);
     // Solving from the actual drop already incorporates its phase; no second nudge is needed.
     expect(window.alignmentOffsetMs).toBeCloseTo(0, 0);

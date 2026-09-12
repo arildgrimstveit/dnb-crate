@@ -53,7 +53,13 @@ export type PhraseWindow = {
   alignmentOffsetMs: number;
   alignmentPeriodMs: number | null;
   alignmentMode: DownbeatAlignment["mode"] | null;
-  continuity?: { energyFloor: number; valleyBars: number; coexistenceBars: number; evidence: string; landingFadeBars?: 2 | 4 | 8 };
+  continuity?: {
+    energyFloor: number;
+    valleyBars: number;
+    coexistenceBars: number;
+    evidence: string;
+    landingFadeBars?: 2 | 4 | 8;
+  };
 };
 
 const PHRASE = 8;
@@ -161,19 +167,12 @@ function phraseBoundaries(origin: number, endBar: number): number[] {
   return bars;
 }
 
-function firstDownbeatAfter(
-  downbeats: number[],
-  audioStartMs: number,
-): number | null {
+function firstDownbeatAfter(downbeats: number[], audioStartMs: number): number | null {
   const hit = downbeats.find((time) => time > audioStartMs + 1);
   return hit ?? downbeats[0] ?? null;
 }
 
-function avoidSourceZero(
-  mixInMs: number,
-  downbeats: number[],
-  audioStartMs: number,
-): number {
+function avoidSourceZero(mixInMs: number, downbeats: number[], audioStartMs: number): number {
   if (mixInMs > audioStartMs + 1) {
     return mixInMs;
   }
@@ -221,7 +220,8 @@ function pickOutgoingExit(
   const manualOut = outgoing.analysis?.manualMixOutMs;
   if (manualOut != null && Number.isFinite(manualOut)) {
     const at = sectionAtMs(sections, manualOut);
-    const quiet = relEnergy(at, sections) <= QUIET && (at?.type === "outro" || at?.type === "breakdown");
+    const quiet =
+      relEnergy(at, sections) <= QUIET && (at?.type === "outro" || at?.type === "breakdown");
     return {
       mixOutMs: Math.round(manualOut),
       mixOutBar: null,
@@ -240,7 +240,8 @@ function pickOutgoingExit(
       cues: outgoing.cues ?? [],
     });
     const at = sectionAtMs(sections, fallback.ms);
-    const quiet = relEnergy(at, sections) <= QUIET && (at?.type === "outro" || at?.type === "breakdown");
+    const quiet =
+      relEnergy(at, sections) <= QUIET && (at?.type === "outro" || at?.type === "breakdown");
     return {
       mixOutMs: fallback.ms,
       mixOutBar: null,
@@ -350,7 +351,8 @@ export function bakeWindowAlignment(
     mixOutMs: Math.round(
       Math.max(
         0,
-        window.mixOutMs - outputToSourceMs(sourceToOutputMs(aligned.offsetMs, incomingRate), outgoingRate),
+        window.mixOutMs -
+          outputToSourceMs(sourceToOutputMs(aligned.offsetMs, incomingRate), outgoingRate),
       ),
     ),
     alignmentOffsetMs: aligned.offsetMs,
@@ -359,11 +361,7 @@ export function bakeWindowAlignment(
   };
 }
 
-function incomingHeadRelEnergy(
-  incoming: WindowTrack,
-  mixInMs: number,
-  bpm: number | null,
-): number {
+function incomingHeadRelEnergy(incoming: WindowTrack, mixInMs: number, bpm: number | null): number {
   const sections = incoming.analysis?.sections ?? [];
   const headMs = mixInMs + barMsFor(bpm) * PHRASE;
   const head = sectionAtMs(sections, mixInMs) ?? sectionAtMs(sections, (mixInMs + headMs) / 2);
@@ -385,7 +383,6 @@ function lateTailExit(
   const bpm = targetBpm ?? analysis?.canonicalBpm ?? outgoing.bpm;
   const audioStart = analysis?.audioStartMs ?? 0;
   const audioEnd = analysis?.audioEndMs ?? outgoing.durationMs;
-  const downbeats = analysis?.downbeatTimesMs ?? [];
   const overlap = barCount * barMsFor(bpm);
   const mixOutMs = Math.round(Math.max(drop?.endMs ?? drop?.startMs ?? 0, audioEnd - overlap));
   if (mixOutMs + overlap > audioEnd + 1) {
@@ -409,7 +406,10 @@ function lateTailExit(
 }
 
 /** End the overlap at a late active phrase boundary, before the quiet tail starts. */
-function activeExits(outgoing: WindowTrack, bars: PhraseBarCount): ReturnType<typeof pickOutgoingExit>[] {
+function activeExits(
+  outgoing: WindowTrack,
+  bars: PhraseBarCount,
+): ReturnType<typeof pickOutgoingExit>[] {
   if (outgoing.analysis?.manualMixOutMs != null) return [];
   const analysis = outgoing.analysis;
   const sections = analysis?.sections ?? [];
@@ -419,11 +419,15 @@ function activeExits(outgoing: WindowTrack, bars: PhraseBarCount): ReturnType<ty
   const downbeats = analysis?.downbeatTimesMs ?? [];
   const start = analysis?.audioStartMs ?? 0;
   // Two late alternatives retain the featured body; never reach back into earlier breakdowns.
-  return phraseBoundaries(drop.startBar, drop.endBar).reverse()
+  return phraseBoundaries(drop.startBar, drop.endBar)
+    .reverse()
     .filter((end) => end - bars >= drop.startBar!)
-    .slice(0, 2).map((end) => ({
+    .slice(0, 2)
+    .map((end) => ({
       mixOutMs: barToMs(end - bars, sections, bpm, downbeats, start),
-      mixOutBar: end - bars, exitKind: "dropLanding", phraseShape: "landing",
+      mixOutBar: end - bars,
+      exitKind: "dropLanding",
+      phraseShape: "landing",
     }));
 }
 
@@ -433,14 +437,26 @@ function relativeWindowBars(track: WindowTrack, startBar: number, count: number)
   const valid = raw?.filter((value) => Number.isFinite(value) && value >= 0).sort((a, b) => a - b);
   const reference = valid?.[Math.floor((valid.length - 1) * 0.9)] ?? 0;
   const sections = analysis?.sections ?? [];
-  return { rms: Array.from({ length: count }, (_, i) => {
-    const value = raw?.[startBar + i];
-    if (reference > 1e-6 && value != null && Number.isFinite(value) && value >= 0)
-      return Math.min(1.5, value / reference);
-    return Math.min(1.5, relEnergy(sectionAtBar(sections, startBar + i + 0.5,
-      analysis?.bpm ?? analysis?.canonicalBpm ?? track.bpm,
-      analysis?.downbeatTimesMs ?? [], analysis?.audioStartMs ?? 0), sections));
-  }) };
+  return {
+    rms: Array.from({ length: count }, (_, i) => {
+      const value = raw?.[startBar + i];
+      if (reference > 1e-6 && value != null && Number.isFinite(value) && value >= 0)
+        return Math.min(1.5, value / reference);
+      return Math.min(
+        1.5,
+        relEnergy(
+          sectionAtBar(
+            sections,
+            startBar + i + 0.5,
+            analysis?.bpm ?? analysis?.canonicalBpm ?? track.bpm,
+            analysis?.downbeatTimesMs ?? [],
+            analysis?.audioStartMs ?? 0,
+          ),
+          sections,
+        ),
+      );
+    }),
+  };
 }
 
 export function planPhraseWindow(
@@ -537,8 +553,12 @@ export function planPhraseWindow(
       exit: pickOutgoingExit(outgoing, barCount, outBpm),
     });
     for (const exit of activeExits(outgoing, barCount)) {
-      candidates.push({ mixInBar, barCount,
-        mixInMs: barToMs(mixInBar, inSections, inBpm, inDownbeats, inStart), exit });
+      candidates.push({
+        mixInBar,
+        barCount,
+        mixInMs: barToMs(mixInBar, inSections, inBpm, inDownbeats, inStart),
+        exit,
+      });
     }
   }
 
@@ -558,12 +578,16 @@ export function planPhraseWindow(
     lateDropMinPlayableMs(outgoing.durationMs, firstDropSection(outSections)?.startMs) ??
     MIN_PLAYABLE_DURATION_MS;
   const feasibleCandidates = candidates.filter((item) => {
-    const overlap = item.barCount * barMsFor(options.targetBpm ?? inBpm) * (options.outgoingRate ?? 1);
+    const overlap =
+      item.barCount * barMsFor(options.targetBpm ?? inBpm) * (options.outgoingRate ?? 1);
     const end = item.exit.mixOutMs + overlap;
-    const start = options.outgoingSourceStartMs ?? outAnalysis?.manualMixInMs ?? outAnalysis?.audioStartMs ?? 0;
-    return end <= (outAnalysis?.audioEndMs ?? outgoing.durationMs) + 1
-      && end - start >= Math.min(minFeatured, outgoing.durationMs)
-      && item.exit.mixOutMs > (options.outgoingHeadEndMs ?? start);
+    const start =
+      options.outgoingSourceStartMs ?? outAnalysis?.manualMixInMs ?? outAnalysis?.audioStartMs ?? 0;
+    return (
+      end <= (outAnalysis?.audioEndMs ?? outgoing.durationMs) + 1 &&
+      end - start >= Math.min(minFeatured, outgoing.durationMs) &&
+      item.exit.mixOutMs > (options.outgoingHeadEndMs ?? start)
+    );
   });
   let chosen =
     pickHandoffCandidate(
@@ -584,8 +608,10 @@ export function planPhraseWindow(
           mixOutBar: item.exit.mixOutBar,
           audioStartMs: inStart,
           incomingBars: relativeWindowBars(incoming, item.mixInBar, item.barCount),
-          outgoingBars: item.exit.mixOutBar == null ? null
-            : relativeWindowBars(outgoing, item.exit.mixOutBar, item.barCount),
+          outgoingBars:
+            item.exit.mixOutBar == null
+              ? null
+              : relativeWindowBars(outgoing, item.exit.mixOutBar, item.barCount),
         };
       }),
     ) ??
@@ -595,7 +621,10 @@ export function planPhraseWindow(
   if (!chosen) {
     const intro = inSections.find((section) => section.type === "intro");
     const mixInBar = intro?.startBar ?? 0;
-    const barCount = Math.min(largestPhraseNotAfter(dropBar), options.maxBars ?? 32) as PhraseBarCount;
+    const barCount = Math.min(
+      largestPhraseNotAfter(dropBar),
+      options.maxBars ?? 32,
+    ) as PhraseBarCount;
     chosen = {
       mixInBar,
       barCount,
@@ -640,18 +669,31 @@ export function planPhraseWindow(
       alignmentPeriodMs: null,
       alignmentMode: null,
       continuity: (() => {
-        const scored = scoreHandoff({ barCount: chosen.barCount, phraseShape,
-          exitKind: chosen.exit.exitKind, incomingHeadEnergy: headRel,
-          outgoingTailEnergy: relEnergy(sectionAtMs(outSections, chosen.exit.mixOutMs), outSections),
+        const scored = scoreHandoff({
+          barCount: chosen.barCount,
+          phraseShape,
+          exitKind: chosen.exit.exitKind,
+          incomingHeadEnergy: headRel,
+          outgoingTailEnergy: relEnergy(
+            sectionAtMs(outSections, chosen.exit.mixOutMs),
+            outSections,
+          ),
           incomingBars: relativeWindowBars(incoming, chosen.mixInBar, chosen.barCount),
-          outgoingBars: chosen.exit.mixOutBar == null ? null
-            : relativeWindowBars(outgoing, chosen.exit.mixOutBar, chosen.barCount),
+          outgoingBars:
+            chosen.exit.mixOutBar == null
+              ? null
+              : relativeWindowBars(outgoing, chosen.exit.mixOutBar, chosen.barCount),
         });
-        return { energyFloor: scored.energyFloor, valleyBars: scored.valleyBars ?? 0,
+        return {
+          energyFloor: scored.energyFloor,
+          valleyBars: scored.valleyBars ?? 0,
           landingFadeBars: scored.landingFadeBars,
           coexistenceBars: scored.coexistenceBars ?? 0,
-          evidence: inAnalysis?.bars?.rms.length && outAnalysis?.bars?.rms.length
-            ? "relative-bar-energy-proxy" : "section-energy-proxy" };
+          evidence:
+            inAnalysis?.bars?.rms.length && outAnalysis?.bars?.rms.length
+              ? "relative-bar-energy-proxy"
+              : "section-energy-proxy",
+        };
       })(),
     },
     { ...options, targetBpm: options.targetBpm ?? inBpm },

@@ -369,7 +369,8 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     "get_enrichment_status",
     {
       title: "Get enrichment status",
-      description: "Poll enrichment jobs. Pass enrichmentJobId for one job, or omit to list recent jobs.",
+      description:
+        "Poll enrichment jobs. Pass enrichmentJobId for one job, or omit to list recent jobs.",
       inputSchema: getEnrichmentStatusInputSchema,
       outputSchema: toolResultSchema(listEnrichmentJobsDataSchema),
       annotations: { readOnlyHint: true, idempotentHint: true },
@@ -539,7 +540,11 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     (input) => {
       try {
         const rated = service.rateTransition(input);
-        return toolSuccess({ id: rated.id, recipeFingerprint: rated.recipeFingerprint, createdAt: rated.createdAt });
+        return toolSuccess({
+          id: rated.id,
+          recipeFingerprint: rated.recipeFingerprint,
+          createdAt: rated.createdAt,
+        });
       } catch (error) {
         return toolFailure(error);
       }
@@ -568,7 +573,8 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     "get_transition_preferences",
     {
       title: "Get transition preferences",
-      description: "Summarize like/dislike counts and the deterministic planner bonus for a recipe or pair.",
+      description:
+        "Summarize like/dislike counts and the deterministic planner bonus for a recipe or pair.",
       inputSchema: getTransitionPreferencesInputSchema,
       outputSchema: toolResultSchema(getTransitionPreferencesDataSchema),
       annotations: { readOnlyHint: true, idempotentHint: true },
@@ -689,13 +695,37 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
 
   server.registerTool(
     "record_hour_feedback",
-    { title: "Record whole-hour feedback", description: "Record the user's explicit whole-hour verdict and original words against an exact full render/checksum. Never infer per-join ratings.", inputSchema: recordHourFeedbackSchema, annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true} },
-    (input) => { try { return toolSuccess(service.recordHourFeedback(input)); } catch (error) { return toolFailure(error); } },
+    {
+      title: "Record whole-hour feedback",
+      description:
+        "Record the user's explicit whole-hour verdict and original words against an exact full render/checksum. Never infer per-join ratings.",
+      inputSchema: recordHourFeedbackSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    (input) => {
+      try {
+        return toolSuccess(service.recordHourFeedback(input));
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
   );
   server.registerTool(
     "list_hour_feedback",
-    { title: "List whole-hour feedback", description: "Read artifact-specific whole-hour verdicts, newest first. Changed plans and new renders do not inherit these verdicts.", inputSchema: listHourFeedbackSchema, annotations: {readOnlyHint: true} },
-    ({renderJobId}) => { try { return toolSuccess({feedback: service.listHourFeedback(renderJobId)}); } catch (error) { return toolFailure(error); } },
+    {
+      title: "List whole-hour feedback",
+      description:
+        "Read artifact-specific whole-hour verdicts, newest first. Changed plans and new renders do not inherit these verdicts.",
+      inputSchema: listHourFeedbackSchema,
+      annotations: { readOnlyHint: true },
+    },
+    ({ renderJobId }) => {
+      try {
+        return toolSuccess({ feedback: service.listHourFeedback(renderJobId) });
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
   );
   server.registerTool(
     "list_approved_recipes",
@@ -709,19 +739,21 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     },
     ({ outgoingTrackId, incomingTrackId }) => {
       try {
-        const recipes = service.listApprovedRecipes(outgoingTrackId, incomingTrackId).map((row) => ({
-          id: row.id,
-          status: row.status,
-          outgoingTrackId: row.payload.outgoingTrackId,
-          incomingTrackId: row.payload.incomingTrackId,
-          outgoingTitle: row.outgoingTitle,
-          incomingTitle: row.incomingTitle,
-          note: row.note,
-          createdAt: row.createdAt,
-          type: row.payload.type,
-          barCount: row.payload.barCount,
-          phraseShape: row.payload.phraseShape,
-        }));
+        const recipes = service
+          .listApprovedRecipes(outgoingTrackId, incomingTrackId)
+          .map((row) => ({
+            id: row.id,
+            status: row.status,
+            outgoingTrackId: row.payload.outgoingTrackId,
+            incomingTrackId: row.payload.incomingTrackId,
+            outgoingTitle: row.outgoingTitle,
+            incomingTitle: row.incomingTitle,
+            note: row.note,
+            createdAt: row.createdAt,
+            type: row.payload.type,
+            barCount: row.payload.barCount,
+            phraseShape: row.payload.phraseShape,
+          }));
         return toolSuccess({ recipes });
       } catch (error) {
         return toolFailure(error);
@@ -778,7 +810,13 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
       outputSchema: toolResultSchema(renderJobSchema),
       annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false },
     },
-    async ({ setPlanId, edgeFadeMs, allowLowConfidence, allowExcessiveTempo, allowOverlongDuration }) => {
+    async ({
+      setPlanId,
+      edgeFadeMs,
+      allowLowConfidence,
+      allowExcessiveTempo,
+      allowOverlongDuration,
+    }) => {
       try {
         const started = await service.startSetRender({
           setPlanId,

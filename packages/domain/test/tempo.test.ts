@@ -61,7 +61,9 @@ describe("DnB tempo helpers", () => {
     expect(publishedReferenceCandidates(105)).toContain(175);
     expect(publishedReferenceCandidates(145)).toContain(174);
     expect(publishedReferenceCandidates(174)).toEqual([174]);
-    expect(publishedReferenceCandidates(150).some((value) => Math.abs(value - 174) < 1)).toBe(false);
+    expect(publishedReferenceCandidates(150).some((value) => Math.abs(value - 174) < 1)).toBe(
+      false,
+    );
   });
 
   it("computes 16-bar phrase length at 174 BPM", () => {
@@ -91,7 +93,9 @@ describe("DnB tempo helpers", () => {
       source - overlapSrc + overlap,
       5,
     );
-    expect(overlapOnlyPlayableMs({ sourceMs: source, rate: 1, overlapToNextMs: overlap })).toBe(source);
+    expect(overlapOnlyPlayableMs({ sourceMs: source, rate: 1, overlapToNextMs: overlap })).toBe(
+      source,
+    );
     expect(overlapOnlyPlayableMs({ sourceMs: source, rate })).toBeCloseTo(source / rate, 5);
     expect(overlapOnlyPlayableMs({ sourceMs: source, rate: 1.001, overlapToNextMs: 2_000 })).toBe(
       source,
@@ -138,17 +142,9 @@ describe("DnB tempo helpers", () => {
   });
 
   it("resolves a bpmHint only for rejected in-range raw estimates", () => {
-    expect(
-      resolveBpmHint({ gridRejected: true, bpmRaw: 174, bpmConfidence: 0.4 }).bpm,
-    ).toBe(174);
-    expect(
-      resolveBpmHint({ gridRejected: true, bpmRaw: 124, bpmConfidence: 0.9 }).bpm,
-    ).toBeNull();
-    expect(
-      resolveBpmHint({ gridRejected: true, bpmRaw: 174, bpmConfidence: 0.2 }).bpm,
-    ).toBeNull();
-    expect(
-      resolveBpmHint({ gridRejected: false, bpmRaw: 174, bpmConfidence: 0.9 }).bpm,
-    ).toBeNull();
+    expect(resolveBpmHint({ gridRejected: true, bpmRaw: 174, bpmConfidence: 0.4 }).bpm).toBe(174);
+    expect(resolveBpmHint({ gridRejected: true, bpmRaw: 124, bpmConfidence: 0.9 }).bpm).toBeNull();
+    expect(resolveBpmHint({ gridRejected: true, bpmRaw: 174, bpmConfidence: 0.2 }).bpm).toBeNull();
+    expect(resolveBpmHint({ gridRejected: false, bpmRaw: 174, bpmConfidence: 0.9 }).bpm).toBeNull();
   });
 });

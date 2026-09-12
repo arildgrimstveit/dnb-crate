@@ -84,7 +84,13 @@ const KEY_PADS: Record<string, number[]> = {
 
 /** Synthetic 4/4 DnB: kick on 1, snare on 2/4, hats on 8ths, optional pad + sub. */
 export function buildSyntheticDnbPcm(options: SyntheticDnbOptions = {}): PcmAudio & {
-  expected: { bpm: number; dropMs: number; drop2Ms: number | null; breakdownMs: number; outroMs: number };
+  expected: {
+    bpm: number;
+    dropMs: number;
+    drop2Ms: number | null;
+    breakdownMs: number;
+    outroMs: number;
+  };
 } {
   const bpm = options.bpm ?? 174;
   const sampleRateHz = options.sampleRateHz ?? 22_050;
@@ -102,20 +108,20 @@ export function buildSyntheticDnbPcm(options: SyntheticDnbOptions = {}): PcmAudi
   const dropMs = introBars * barMs;
   const breakdownMs = dropMs + dropBars * barMs;
   const drop2Ms = drop2Bars > 0 ? breakdownMs + breakdownBars * barMs : null;
-  const outroMs = (drop2Ms ?? breakdownMs) + (drop2Ms !== null ? drop2Bars * barMs : breakdownBars * barMs);
+  const outroMs =
+    (drop2Ms ?? breakdownMs) + (drop2Ms !== null ? drop2Bars * barMs : breakdownBars * barMs);
 
   const totalBeats = totalBars * 4;
   for (let beat = 0; beat < totalBeats; beat += 1) {
     const tMs = beat * beatMs;
     const start = Math.round((tMs / 1000) * sampleRateHz);
     const inDrop =
-      (tMs >= dropMs && tMs < breakdownMs) ||
-      (drop2Ms !== null && tMs >= drop2Ms && tMs < outroMs);
+      (tMs >= dropMs && tMs < breakdownMs) || (drop2Ms !== null && tMs >= drop2Ms && tMs < outroMs);
     const inOutro = outroBars > 0 && tMs >= outroMs;
     const kickGain = inDrop ? 0.95 : inOutro ? 0.25 : 0.45;
     const snareGain = inDrop ? 0.7 : 0.35;
     const phase = options.downbeatOffsetBeats ?? 0;
-    const pos = ((beat - phase) % 4 + 4) % 4;
+    const pos = (((beat - phase) % 4) + 4) % 4;
     const barIndex = Math.floor((beat - phase) / 4);
     const accentEvery = Math.max(1, options.barAccentEvery ?? 1);
     const accent = barIndex % accentEvery === 0 ? 1 : 0.55;
@@ -160,7 +166,13 @@ export function buildSyntheticDnbPcm(options: SyntheticDnbOptions = {}): PcmAudi
 
 /** Drum loop only — no pad, no sub bed. */
 export function buildDrumsOnlyDnbPcm(options: SyntheticDnbOptions = {}): PcmAudio & {
-  expected: { bpm: number; dropMs: number; drop2Ms: number | null; breakdownMs: number; outroMs: number };
+  expected: {
+    bpm: number;
+    dropMs: number;
+    drop2Ms: number | null;
+    breakdownMs: number;
+    outroMs: number;
+  };
 } {
   return buildSyntheticDnbPcm({
     ...options,
@@ -180,15 +192,14 @@ export function buildPadOnlyPcm(options: {
   const sampleRateHz = options.sampleRateHz ?? 22_050;
   const n = Math.round((sampleRateHz * durationMs) / 1000);
   const samples = new Float32Array(n);
-  const frequencies = options.key === "C" ? KEY_PADS.C! : (KEY_PADS[options.key] ?? KEY_PADS["F#m"]!);
+  const frequencies =
+    options.key === "C" ? KEY_PADS.C! : (KEY_PADS[options.key] ?? KEY_PADS["F#m"]!);
   addPad(samples, sampleRateHz, frequencies, 0, options.gain ?? 0.16);
   return { samples, sampleRateHz, durationMs, channels: 1, expected: { key: options.key } };
 }
 
 /** Synthetic DnB plus a sustained triad pad. Sub defaults below the chroma band (46 Hz F#1). */
-export function buildKeyedDnbPcm(
-  options: SyntheticDnbOptions & { key: string },
-): PcmAudio & {
+export function buildKeyedDnbPcm(options: SyntheticDnbOptions & { key: string }): PcmAudio & {
   expected: {
     bpm: number;
     dropMs: number;

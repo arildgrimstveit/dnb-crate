@@ -26,8 +26,7 @@ export function periodStats(times: number[]): PeriodStats | null {
     return null;
   }
   const mean = periods.reduce((sum, value) => sum + value, 0) / periods.length;
-  const variance =
-    periods.reduce((sum, value) => sum + (value - mean) ** 2, 0) / periods.length;
+  const variance = periods.reduce((sum, value) => sum + (value - mean) ** 2, 0) / periods.length;
   const first = periods[0]!;
   const last = periods[periods.length - 1]!;
   return {
@@ -50,8 +49,7 @@ export function downbeatPhaseAgreement(
   let agrees = 0;
   for (const time of right) {
     const nearest = left.reduce(
-      (best, candidate) =>
-        Math.abs(candidate - time) < Math.abs(best - time) ? candidate : best,
+      (best, candidate) => (Math.abs(candidate - time) < Math.abs(best - time) ? candidate : best),
       left[0]!,
     );
     if (Math.abs(nearest - time) <= period * toleranceRatio) {

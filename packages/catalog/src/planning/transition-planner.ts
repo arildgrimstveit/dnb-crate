@@ -108,8 +108,10 @@ function propose(
   const blockers: string[] = [];
   const outCanon = resolveCanonicalBpm(outgoing.track, outgoing.analysis);
   const inCanon = resolveCanonicalBpm(incoming.track, incoming.analysis);
-  const outGrid = outgoing.analysis && !outgoing.analysis.gridRejected ? outgoing.analysis.bpm : null;
-  const inGrid = incoming.analysis && !incoming.analysis.gridRejected ? incoming.analysis.bpm : null;
+  const outGrid =
+    outgoing.analysis && !outgoing.analysis.gridRejected ? outgoing.analysis.bpm : null;
+  const inGrid =
+    incoming.analysis && !incoming.analysis.gridRejected ? incoming.analysis.bpm : null;
   let outgoingRate = 1;
   let incomingRate = 1;
   const outSource = sourceBpmForRate(outGrid, outCanon.bpm);
@@ -136,7 +138,10 @@ function propose(
           dropAnchored: true,
           chainTargetBpm: targetBpm,
         });
-  if (shared && (shared.outgoingRate !== 1 || shared.incomingRate !== 1 || shared.targetBpm != null)) {
+  if (
+    shared &&
+    (shared.outgoingRate !== 1 || shared.incomingRate !== 1 || shared.targetBpm != null)
+  ) {
     outgoingRate = shared.outgoingRate;
     incomingRate = shared.incomingRate;
     if (shared.targetBpm != null) {
@@ -156,9 +161,7 @@ function propose(
         }));
   const resolvedBars = window?.barCount ?? barCount ?? DEFAULT_PHRASE_BARS;
   const durationMs =
-    type === "crossfade"
-      ? 30_000
-      : Math.round(phraseDurationMs(resolvedBars, targetBpm ?? 174));
+    type === "crossfade" ? 30_000 : Math.round(phraseDurationMs(resolvedBars, targetBpm ?? 174));
 
   const outBeats = outgoing.analysis?.beatTimesMs ?? [];
   const inBeats = incoming.analysis?.beatTimesMs ?? [];
@@ -178,11 +181,7 @@ function propose(
         ? snapMixMs(outCue.ms, outBeats)
         : outCue.ms;
   const inCueMs =
-    window != null
-      ? window.mixInMs
-      : inBeats.length > 0
-        ? snapMixMs(inCue.ms, inBeats)
-        : inCue.ms;
+    window != null ? window.mixInMs : inBeats.length > 0 ? snapMixMs(inCue.ms, inBeats) : inCue.ms;
   const firstDrop = outgoing.analysis?.sections?.find((section) => section.type === "drop");
   if (window == null && firstDrop && outCueMs < firstDrop.endMs) {
     outCueMs = firstDrop.endMs;
@@ -199,9 +198,7 @@ function propose(
   const incomingStart = Math.max(inAudio.audioStartMs, Math.round(inCueMs));
   const incomingPlayableEnd = Math.min(
     inAudio.audioEndMs,
-    Math.round(
-      incomingStart + Math.max(inSourceOverlap, inAudio.audioEndMs - incomingStart),
-    ),
+    Math.round(incomingStart + Math.max(inSourceOverlap, inAudio.audioEndMs - incomingStart)),
   );
 
   if (
@@ -269,11 +266,18 @@ function propose(
       type === "bass_swap"
         ? clampMixPresetParams({ crossoverHz: DEFAULT_BASS_CROSSOVER_HZ }, resolvedBars)
         : null,
-    automation: automationFor(type, durationMs, resolvedBars, type === "phrase_mix" && window ? {
-      phraseShape: window.phraseShape,
-      sequentialHandoff: "supported",
-      landingFadeBars: window.continuity?.landingFadeBars,
-    } : undefined),
+    automation: automationFor(
+      type,
+      durationMs,
+      resolvedBars,
+      type === "phrase_mix" && window
+        ? {
+            phraseShape: window.phraseShape,
+            sequentialHandoff: "supported",
+            landingFadeBars: window.continuity?.landingFadeBars,
+          }
+        : undefined,
+    ),
     score: Number(Math.max(0, score).toFixed(3)),
     confidence: Number(confidence.toFixed(3)),
     feasible: blockers.length === 0,

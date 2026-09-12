@@ -47,11 +47,11 @@ function predict(row: Row, bias: number, w: [number, number, number]): number {
 
 function fitLogistic(rows: Row[]): { bias: number; w: [number, number, number] } {
   let bias = -1.6;
-  let w: [number, number, number] = [1.0, 3.2, 1.2];
+  const w: [number, number, number] = [1.0, 3.2, 1.2];
   const lr = 0.15;
   for (let step = 0; step < 4000; step += 1) {
     let gB = 0;
-    const gW = [0, 0, 0];
+    const gW: [number, number, number] = [0, 0, 0];
     let mass = 0;
     for (const row of rows) {
       const x = [row.prominence, row.stability, row.tempoConf];
@@ -66,9 +66,9 @@ function fitLogistic(rows: Row[]): { bias: number; w: [number, number, number] }
     }
     const n = mass > 0 ? mass : 1;
     bias -= (lr * gB) / n;
-    w[0] -= (lr * gW[0]!) / n;
-    w[1] -= (lr * gW[1]!) / n;
-    w[2] -= (lr * gW[2]!) / n;
+    w[0] -= (lr * gW[0]) / n;
+    w[1] -= (lr * gW[1]) / n;
+    w[2] -= (lr * gW[2]) / n;
   }
   return { bias, w };
 }
@@ -90,7 +90,11 @@ function evidenceOf(
   };
 }
 
-function thresholdForZeroFalseAccept(rows: Row[], bias: number, w: [number, number, number]): number {
+function thresholdForZeroFalseAccept(
+  rows: Row[],
+  bias: number,
+  w: [number, number, number],
+): number {
   let maxFalse = 0;
   for (const row of rows) {
     if (row.label !== 0) {
@@ -127,7 +131,7 @@ function countAcceptedCorrect(
   return { acceptedCorrect, falseAccept };
 }
 
-function loadCrateRows(configPath: string | undefined): Row[] {
+async function loadCrateRows(configPath: string | undefined): Promise<Row[]> {
   const env = { ...process.env };
   if (configPath && configPath.trim().length > 0) {
     env.DNB_CRATE_CONFIG = configPath;
@@ -139,7 +143,7 @@ function loadCrateRows(configPath: string | undefined): Row[] {
     process.stdout.write("No crate config; fitting synthetics only.\n");
     return [];
   }
-  const runtime = createCatalogRuntime(config, undefined, { useFakeFfmpeg: true });
+  const runtime = createCatalogRuntime(config, undefined, { useFakeFfmpeg: true, passive: true });
   try {
     const rows: Row[] = [];
     let skipped = 0;
@@ -147,8 +151,9 @@ function loadCrateRows(configPath: string | undefined): Row[] {
       if (track.bpmSource !== "published" && track.bpmSource !== "manual") {
         continue;
       }
-      const stored = runtime.analyses.findByTrackId(track.id, "dnb-crate-dsp")
-        ?? runtime.analyses.findByTrackId(track.id);
+      const stored =
+        runtime.analyses.findByTrackId(track.id, "dnb-crate-dsp") ??
+        runtime.analyses.findByTrackId(track.id);
       if (!stored) {
         skipped += 1;
         continue;
@@ -181,7 +186,7 @@ function loadCrateRows(configPath: string | undefined): Row[] {
     );
     return rows;
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }
 
@@ -195,14 +200,18 @@ for (let i = 0; i < noise.length; i += 1) {
 }
 
 const synthetics: Row[] = [
-  evidenceOf("click-174", 1, buildClickTrackPcm({ bpm: 174, durationMs: 12_000, sampleRateHz: 22_050 })),
+  evidenceOf(
+    "click-174",
+    1,
+    buildClickTrackPcm({ bpm: 174, durationMs: 12_000, sampleRateHz: 22_050 }),
+  ),
   evidenceOf("dnb-174", 1, buildSyntheticDnbPcm({ bpm: 174 })),
   evidenceOf("sine", 0, { samples: sine, sampleRateHz: 22_050, durationMs: 4000, channels: 1 }),
   evidenceOf("noise", 0, { samples: noise, sampleRateHz: 22_050, durationMs: 4000, channels: 1 }),
 ];
 
 const args = process.argv.slice(2);
-const crateRows = loadCrateRows(option(args, "--config"));
+const crateRows = await loadCrateRows(option(args, "--config"));
 const rows = [...synthetics, ...crateRows];
 const fit = fitLogistic(rows);
 const suggestedMin = thresholdForZeroFalseAccept(rows, fit.bias, fit.w);
@@ -216,7 +225,12 @@ for (const row of rows) {
     `${row.name}\t${row.label}\t${row.prominence.toFixed(3)}\t${row.stability.toFixed(3)}\t${row.tempoConf.toFixed(3)}\t${row.weight}\t${row.inRange ?? ""}\n`,
   );
 }
-const fittedAtCurrentMin = countAcceptedCorrect(crateRows, fit.bias, fit.w, MIN_ANALYSIS_CONFIDENCE);
+const fittedAtCurrentMin = countAcceptedCorrect(
+  crateRows,
+  fit.bias,
+  fit.w,
+  MIN_ANALYSIS_CONFIDENCE,
+);
 process.stdout.write("\nCrate predictions (old weights / fitted weights):\n");
 for (const row of crateRows) {
   const oldP = predict(row, -1.6, oldW);
@@ -229,9 +243,9 @@ process.stdout.write(
   `\n// Fitted 2026-09-03 on synthetic click/DnB/sine/noise + crate published/manual (weight 2)\n`,
 );
 process.stdout.write(`const TEMPO_LOGISTIC_BIAS = ${fit.bias.toFixed(4)};\n`);
-process.stdout.write(`const TEMPO_LOGISTIC_W_PROMINENCE = ${fit.w[0]!.toFixed(4)};\n`);
-process.stdout.write(`const TEMPO_LOGISTIC_W_STABILITY = ${fit.w[1]!.toFixed(4)};\n`);
-process.stdout.write(`const TEMPO_LOGISTIC_W_TEMPO_CONF = ${fit.w[2]!.toFixed(4)};\n`);
+process.stdout.write(`const TEMPO_LOGISTIC_W_PROMINENCE = ${fit.w[0].toFixed(4)};\n`);
+process.stdout.write(`const TEMPO_LOGISTIC_W_STABILITY = ${fit.w[1].toFixed(4)};\n`);
+process.stdout.write(`const TEMPO_LOGISTIC_W_TEMPO_CONF = ${fit.w[2].toFixed(4)};\n`);
 process.stdout.write(
   `\nUnconstrained MIN (false-accept = 0, floor 0.5) = ${suggestedMin.toFixed(3)}\n`,
 );
@@ -244,7 +258,10 @@ process.stdout.write(
 process.stdout.write(
   `  fitted weights @ unconstrained MIN: ${next.acceptedCorrect} (false ${next.falseAccept})\n`,
 );
-if (next.acceptedCorrect < baseline.acceptedCorrect || fittedAtCurrentMin.acceptedCorrect < baseline.acceptedCorrect) {
+if (
+  next.acceptedCorrect < baseline.acceptedCorrect ||
+  fittedAtCurrentMin.acceptedCorrect < baseline.acceptedCorrect
+) {
   process.stdout.write(
     `Keep existing weights and MIN ${MIN_ANALYSIS_CONFIDENCE}: fitted curve drops accepted-correct.\n`,
   );

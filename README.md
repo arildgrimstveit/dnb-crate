@@ -23,19 +23,19 @@ Examples:
 
 Those words become structured fields:
 
-| You say | `create_set_plan` |
-| --- | --- |
-| “20 minutes” / “an hour” | `targetDurationMinutes` or `targetDurationMs` |
-| “liquid”, “soulful”, “rolling” | `preferredMoods` (also `heavy`, `dark`, `deep`, `neuro`, `uplifting`) |
-| “liquid funk” | `preferredSubgenres` |
-| named artists | `preferredArtists` |
-| start easy, peak late, then ease off | `requestedArc` — start energy, when it peaks, how it ends (1–10 vs mix position). Default: open at 3, peak at 9 three-quarters in, land at 6 |
-| Peak-style hour | energy/`danceability` floors + that arc + a subgenre if you have one. Not a mood named peak-time |
-| “start on X” / “close on Y” | `startTrackId` / `endTrackId` |
+| You say                                      | `create_set_plan`                                                                                                                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| “20 minutes” / “an hour”                     | `targetDurationMinutes` or `targetDurationMs`                                                                                                                                   |
+| “liquid”, “soulful”, “rolling”               | `preferredMoods` (also `heavy`, `dark`, `deep`, `neuro`, `uplifting`)                                                                                                           |
+| “liquid funk”                                | `preferredSubgenres`                                                                                                                                                            |
+| named artists                                | `preferredArtists`                                                                                                                                                              |
+| start easy, peak late, then ease off         | `requestedArc` — start energy, when it peaks, how it ends (1–10 vs mix position). Default: open at 3, peak at 9 three-quarters in, land at 6                                    |
+| Peak-style hour                              | energy/`danceability` floors + that arc + a subgenre if you have one. Not a mood named peak-time                                                                                |
+| “start on X” / “close on Y”                  | `startTrackId` / `endTrackId`                                                                                                                                                   |
 | “keep the pretty ones” / “keep it danceable” | `descriptors`: `melodicness` / `danceability` / `energy` / `valence` / `acousticness` / `subBass` / `brightness`. Absolute `min`/`max` 0–1, or crate-relative `minPct`/`maxPct` |
-| include/exclude genres | `genres.include` / `genres.exclude` |
-| “same mix again” | same brief + same `seed` (default 1) |
-| “try another one” / “a different take” | change `seed` |
+| include/exclude genres                       | `genres.include` / `genres.exclude`                                                                                                                                             |
+| “same mix again”                             | same brief + same `seed` (default 1)                                                                                                                                            |
+| “try another one” / “a different take”       | change `seed`                                                                                                                                                                   |
 
 A new mix will not reuse old pairings unless you ask. Tracks keep their own tempo and meet in the overlap; the planner skips unexplained risky keys and unexplained fades.
 
@@ -122,12 +122,12 @@ Tool contracts: `docs/tool-contracts.md`. Prompt: `build-dnb-set` (see **Ask for
 
 ## How it fits together
 
-| Part | Job |
-| --- | --- |
-| **Catalog** | Scan configured roots. Source files stay read-only. |
+| Part         | Job                                                                                                                                                             |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Catalog**  | Scan configured roots. Source files stay read-only.                                                                                                             |
 | **Analyzer** | `dnb-crate-dsp` measures BPM/grid, sections, and loudness. Advisory until confidence clears the floor. KeyFinder is an optional script, not an analysis engine. |
-| **Planner** | Same catalog + brief + seed → same mix. Picks order and joins; does not write audio. |
-| **Renderer** | Prints the plan: beatmatched overlaps, 3-band fades, −14 LUFS, 24-bit master + 16-bit listen FLAC. |
+| **Planner**  | Same catalog + brief + seed → same mix. Picks order and joins; does not write audio.                                                                            |
+| **Renderer** | Prints the plan: beatmatched overlaps, 3-band fades, −14 LUFS, 24-bit master + 16-bit listen FLAC.                                                              |
 
 Docs: [analysis](docs/analysis.md), [scoring](docs/scoring.md), [mixing](docs/mixing.md), [rendering](docs/rendering.md). Example briefs: `docs/examples/liquid-hour.example.brief.json`, `docs/examples/peak-hour.example.brief.json`.
 
@@ -152,3 +152,24 @@ Tests use tiny sine-wave fixtures. They never read a private library.
 - `apps/mcp-server` — thin MCP adapters
 
 Generated files go under `outputRoot`. Tools never accept arbitrary paths, SQL, or shell commands.
+
+## Worker lifecycle and scanning
+
+One local runtime owns background jobs for each catalog database. Other runtimes can submit jobs;
+the owner polls for them every 250 ms. Reporting CLI commands and maintenance reports use passive
+runtimes, so they never recover or claim jobs. Recovery runs only after ownership is acquired from
+an exited process or released by a closing runtime. This coordination is for processes on the same
+machine, consistent with the local SQLite catalog.
+
+CLI job commands (`analysis:run`, `enrich:run`, `render:start`, and previews) enqueue only unless
+you pass `--wait`. Enqueue-only exits immediately and requires a live worker such as `pnpm mcp`.
+`--wait` and `analysis:gate` start a worker in the CLI process and keep it until those jobs finish.
+Do not submit work and then shut down the only worker that claimed it.
+
+Programmatic callers must `await runtime.close()`. Shutdown stops claiming jobs, aborts active
+renders, and waits for current analysis/enrichment work and prefetched decodes before releasing
+ownership and closing SQLite. Remaining queued jobs can run in the next active runtime.
+
+Scanning follows each real directory once, including junctions and overlapping roots. If any path
+cannot be traversed, the scan still imports readable files but skips marking existing files missing.
+Resolve the reported access problems and rerun a complete scan to reconcile deletions.

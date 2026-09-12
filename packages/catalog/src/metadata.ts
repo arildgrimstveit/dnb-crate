@@ -2,6 +2,8 @@ import path from "node:path";
 
 import { parseFile } from "music-metadata";
 
+export { parseFile as readAudioTags } from "music-metadata";
+
 import { normalizeGenres, normalizeKey } from "@dnb-crate/domain";
 
 export type ExtractedAudioMetadata = {
@@ -105,14 +107,16 @@ export async function extractAudioMetadata(filePath: string): Promise<ExtractedA
         continue;
       }
       native[id] = native[id] ?? [];
-      native[id]!.push((tag as { value?: unknown }).value);
+      native[id].push((tag as { value?: unknown }).value);
     }
   }
 
   const common = parsed.common as unknown as Record<string, unknown>;
   const recordingMbid =
     firstString(common.musicbrainz_recordingid) ??
-    firstString(nativeValue(native, ["MUSICBRAINZ_TRACKID", "UFID:http://musicbrainz.org", "UFID"]));
+    firstString(
+      nativeValue(native, ["MUSICBRAINZ_TRACKID", "UFID:http://musicbrainz.org", "UFID"]),
+    );
   const isrc = firstString(common.isrc) ?? firstString(nativeValue(native, ["TSRC", "ISRC"]));
   const label =
     firstString(common.label) ?? firstString(nativeValue(native, ["LABEL", "PUBLISHER", "TPUB"]));

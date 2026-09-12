@@ -15,7 +15,13 @@ import {
 import { dominantSubPitchClass, estimateKeyFromChroma } from "./chroma.ts";
 import { computeDescriptorPack } from "./descriptors.ts";
 import { stftMagnitude } from "./fft.ts";
-import type { AnalyzeOptions, AnalyzerCue, AnalyzerResult, AudioAnalyzer, PcmAudio } from "./types.ts";
+import type {
+  AnalyzeOptions,
+  AnalyzerCue,
+  AnalyzerResult,
+  AudioAnalyzer,
+  PcmAudio,
+} from "./types.ts";
 import { emptyDescriptors } from "./types.ts";
 
 const NFFT = 2048;
@@ -63,12 +69,7 @@ function hzToBin(hz: number, sampleRateHz: number, nfft: number): number {
   return Math.max(1, Math.min(nfft / 2 - 1, Math.round((hz * nfft) / sampleRateHz)));
 }
 
-function bandFlux(
-  prev: number[],
-  next: number[],
-  fromBin: number,
-  toBin: number,
-): number {
+function bandFlux(prev: number[], next: number[], fromBin: number, toBin: number): number {
   let sum = 0;
   for (let k = fromBin; k < toBin; k += 1) {
     const a = Math.log1p(prev[k] ?? 0);
@@ -78,7 +79,11 @@ function bandFlux(
   return sum;
 }
 
-function onsetStrength(mag: number[][], sampleRateHz: number, nfft: number): {
+function onsetStrength(
+  mag: number[][],
+  sampleRateHz: number,
+  nfft: number,
+): {
   onset: number[];
   low: number[];
   mid: number[];
@@ -242,8 +247,13 @@ function peakBpm(
   for (let lag = minLag; lag <= maxLag; lag += 1) {
     scores.push(autocorr(onset, lag));
   }
-  const peaks: Array<{ lag: number; index: number; score: number; bpm: number; folded: number | null }> =
-    [];
+  const peaks: Array<{
+    lag: number;
+    index: number;
+    score: number;
+    bpm: number;
+    folded: number | null;
+  }> = [];
   for (let i = 1; i < scores.length - 1; i += 1) {
     const prev = scores[i - 1] ?? 0;
     const cur = scores[i] ?? 0;
@@ -308,8 +318,7 @@ function estimateTempo(
   const folded = locals
     .map((bpm) => normalizeDnbBpm(bpm, minBpm, maxBpm)?.bpm)
     .filter((bpm): bpm is number => bpm !== undefined);
-  const stability =
-    folded.length === 0 ? best.confidence : clamp(1 - mad(folded) / 5, 0, 1);
+  const stability = folded.length === 0 ? best.confidence : clamp(1 - mad(folded) / 5, 0, 1);
   const prominence = clamp(0.65 * best.confidence + 0.35 * stability, 0, 1);
   const fitted = fitTempoGrid(onset, hopMs, best.bpmRaw, minBpm, maxBpm);
   const fittedBpm = normalizeDnbBpm(fitted.bpm, minBpm, maxBpm)?.bpm ?? fitted.bpm;
@@ -361,7 +370,12 @@ function scoreReferenceTempo(
   };
 } {
   const { offsetMs, score: onGrid } = bestOffsetForBpm(onset, hopMs, referenceBpm);
-  const rivals = [referenceBpm * 1.07, referenceBpm / 1.07, referenceBpm * 1.12, referenceBpm / 1.12];
+  const rivals = [
+    referenceBpm * 1.07,
+    referenceBpm / 1.07,
+    referenceBpm * 1.12,
+    referenceBpm / 1.12,
+  ];
   let rivalBest = 0;
   for (const rival of rivals) {
     rivalBest = Math.max(rivalBest, scoreTempoGrid(onset, hopMs, rival, offsetMs));
@@ -424,7 +438,9 @@ function tryRatioFold(
     ...scoreReferenceTempo(onset, hopMs, candidate),
   }));
 
-  let nextBpm: number | null = gridRejected ? null : (normalizeDnbBpm(bpmRaw, minBpm, maxBpm)?.bpm ?? null);
+  let nextBpm: number | null = gridRejected
+    ? null
+    : (normalizeDnbBpm(bpmRaw, minBpm, maxBpm)?.bpm ?? null);
   let nextRaw = bpmRaw;
   let nextConfidence = bpmConfidence;
   let nextRejected = gridRejected;
@@ -612,15 +628,14 @@ function downbeatPhase(
   };
   const nearestBeat = (ms: number): number =>
     beats.reduce(
-      (best, time, index) =>
-        Math.abs(time - ms) < Math.abs(beats[best]! - ms) ? index : best,
+      (best, time, index) => (Math.abs(time - ms) < Math.abs(beats[best]! - ms) ? index : best),
       0,
     );
   const scorePhase = (phase: number, modulus: number): number => {
     let score = 0;
     for (let i = 0; i < beats.length; i += 1) {
       const t = beats[i]!;
-      const pos = ((i - phase) % modulus + modulus) % modulus;
+      const pos = (((i - phase) % modulus) + modulus) % modulus;
       const kickV = sampleAt(t, kick);
       const snareV = sampleAt(t, snare);
       if (pos === 0) {
@@ -638,7 +653,7 @@ function downbeatPhase(
       if (Math.abs((beats[index] ?? 0) - anchor) > 700) {
         continue;
       }
-      if (((index - phase) % modulus + modulus) % modulus === 0) {
+      if ((((index - phase) % modulus) + modulus) % modulus === 0) {
         score += Math.log(1 + beats.length) * (modulus === 8 ? 1.4 : 1);
       }
     }
@@ -652,9 +667,11 @@ function downbeatPhase(
   const chosen = eightPhases[best8Index] ?? best4;
   const sorted4 = [...scores4].sort((a, b) => b - a);
   const spread4 = stddev(scores4) || 1e-6;
-  const confidence = downbeatConfidenceFromMargin(((sorted4[0] ?? 0) - (sorted4[1] ?? 0)) / spread4);
+  const confidence = downbeatConfidenceFromMargin(
+    ((sorted4[0] ?? 0) - (sorted4[1] ?? 0)) / spread4,
+  );
   return {
-    downbeats: beats.filter((_, i) => ((i - chosen) % 4 + 4) % 4 === 0),
+    downbeats: beats.filter((_, i) => (((i - chosen) % 4) + 4) % 4 === 0),
     confidence,
   };
 }
@@ -749,9 +766,7 @@ function detectAudioBounds(
   }
   const audioStartMs = lead >= minFrames ? Math.round(lead * frameMs) : 0;
   const audioEndMs =
-    trail >= minFrames
-      ? Math.round((silent.length - trail) * frameMs)
-      : Math.round(durationMs);
+    trail >= minFrames ? Math.round((silent.length - trail) * frameMs) : Math.round(durationMs);
   return {
     audioStartMs,
     audioEndMs: Math.max(audioStartMs, Math.min(audioEndMs, Math.round(durationMs))),
@@ -1169,7 +1184,8 @@ export const dspAnalyzer: AudioAnalyzer = {
             !outOfRangePartnerBeats(tempoOnset, tempoHopMs, row.bpm, minBpm, maxBpm),
         )
         .sort((a, b) => b.confidence - a.confidence);
-      const bestLock = inRangeLocks[0] ?? scoredLocks.sort((a, b) => b.confidence - a.confidence)[0];
+      const bestLock =
+        inRangeLocks[0] ?? scoredLocks.sort((a, b) => b.confidence - a.confidence)[0];
       const refConf = Number((bestLock?.confidence ?? 0).toFixed(3));
       const lockBpm = bestLock?.bpm ?? primaryLock;
       if (
@@ -1212,13 +1228,7 @@ export const dspAnalyzer: AudioAnalyzer = {
     let downbeatConfidence: number | null = null;
     const dropHint = detectDropMs(subEnergy, hopMs, durationMs);
     if (bpm !== null && !gridRejected) {
-      beatTimesMs = trackBeats(
-        tempoOnset,
-        tempoHopMs,
-        bpm,
-        gridOffsetMs,
-        durationMs,
-      );
+      beatTimesMs = trackBeats(tempoOnset, tempoHopMs, bpm, gridOffsetMs, durationMs);
       const firstAnchors = [dropHint, options.beatAnchorMs].filter(
         (value): value is number => value != null,
       );
@@ -1242,11 +1252,7 @@ export const dspAnalyzer: AudioAnalyzer = {
     const highE = bandEnergyTime(pcm.samples, pcm.sampleRateHz, 4000, nyquist);
     const totalE = lowE + midE + highE + 1e-9;
     const wave = waveformSummary(pcm.samples);
-    const highEnergy = bandMagEnergy(
-      stft.mag,
-      hzToBin(4000, pcm.sampleRateHz, NFFT),
-      NFFT / 2,
-    );
+    const highEnergy = bandMagEnergy(stft.mag, hzToBin(4000, pcm.sampleRateHz, NFFT), NFFT / 2);
     const barMs = bpm ? (4 * 60_000) / bpm : 2000;
     const onsetMeanAll = mean(onset);
     const collectBars = (gridStart: number): BarFeatures[] => {
@@ -1296,13 +1302,18 @@ export const dspAnalyzer: AudioAnalyzer = {
     const intro = sections.find((s) => s.type === "intro");
     const dropIntensity =
       drop && intro ? clamp((drop.sectionEnergy - intro.sectionEnergy + 1) / 2, 0, 1) : 0.35;
-    const onsetDensity = onset.length === 0 ? 0 : onset.filter((v) => v > mean(onset)).length / onset.length;
+    const onsetDensity =
+      onset.length === 0 ? 0 : onset.filter((v) => v > mean(onset)).length / onset.length;
     const dynamicRange =
       peak > 0 ? Number((20 * Math.log10((peak + 1e-9) / (rmsAll + 1e-9))).toFixed(3)) : 0;
     const stftSub = mean(subEnergy);
     const stftHigh = mean(highEnergy);
     const stftMid = mean(
-      bandMagEnergy(stft.mag, hzToBin(120, pcm.sampleRateHz, NFFT), hzToBin(4000, pcm.sampleRateHz, NFFT)),
+      bandMagEnergy(
+        stft.mag,
+        hzToBin(120, pcm.sampleRateHz, NFFT),
+        hzToBin(4000, pcm.sampleRateHz, NFFT),
+      ),
     );
     const stftTotal = stftSub + stftMid + stftHigh + 1e-12;
     const pack = computeDescriptorPack({
@@ -1341,8 +1352,8 @@ export const dspAnalyzer: AudioAnalyzer = {
       keyMode: key.keyMode,
       camelotKey: key.camelotKey,
       keyRunnerUp: key.keyRunnerUp,
-      keyCandidates: [key.musicalKey, key.keyRunnerUp].filter(
-        (value): value is string => Boolean(value),
+      keyCandidates: [key.musicalKey, key.keyRunnerUp].filter((value): value is string =>
+        Boolean(value),
       ),
       tempoStability: estimated ? Number(estimated.stability.toFixed(3)) : null,
       downbeatConfidence,
@@ -1371,8 +1382,8 @@ export const dspAnalyzer: AudioAnalyzer = {
         midBandEnergy: Number((midE / totalE).toFixed(4)),
         highBandEnergy: Number((highE / totalE).toFixed(4)),
         chromaVector: key.chromaVector,
-        keyCandidates: [key.musicalKey, key.keyRunnerUp].filter(
-          (value): value is string => Boolean(value),
+        keyCandidates: [key.musicalKey, key.keyRunnerUp].filter((value): value is string =>
+          Boolean(value),
         ),
         tempoEvidence,
         audioStartMs: bounds.audioStartMs,
@@ -1389,7 +1400,12 @@ export const dspAnalyzer: AudioAnalyzer = {
   },
 };
 
-function bandEnergyTime(samples: Float32Array, sampleRateHz: number, loHz: number, hiHz: number): number {
+function bandEnergyTime(
+  samples: Float32Array,
+  sampleRateHz: number,
+  loHz: number,
+  hiHz: number,
+): number {
   const rcLo = loHz > 0 ? 1 / (2 * Math.PI * loHz) : 0;
   const rcHi = hiHz > 0 ? 1 / (2 * Math.PI * hiHz) : 0;
   const dt = 1 / sampleRateHz;

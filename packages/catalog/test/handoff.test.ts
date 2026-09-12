@@ -4,13 +4,22 @@ import { pickHandoffCandidate, scoreHandoff } from "../src/planning/handoff.ts";
 
 describe("handoff candidate scoring", () => {
   it("DJ scoring prefers an active outgoing window to a longer quiet overlap", () => {
-    const quiet = { barCount: 32 as const, exitKind: "quietTail" as const,
-      phraseShape: "complementary" as const, incomingHeadEnergy: 0.1, outgoingTailEnergy: 0.1 };
-    const active = { ...quiet, barCount: 16 as const, exitKind: "dropLanding" as const,
-      phraseShape: "landing" as const, outgoingTailEnergy: 1 };
+    const quiet = {
+      barCount: 32 as const,
+      exitKind: "quietTail" as const,
+      phraseShape: "complementary" as const,
+      incomingHeadEnergy: 0.1,
+      outgoingTailEnergy: 0.1,
+    };
+    const active = {
+      ...quiet,
+      barCount: 16 as const,
+      exitKind: "dropLanding" as const,
+      phraseShape: "landing" as const,
+      outgoingTailEnergy: 1,
+    };
     expect(pickHandoffCandidate([quiet, active])).toBe(active);
-    expect(scoreHandoff(active).valleyBars)
-      .toBeLessThan(scoreHandoff(quiet).valleyBars!);
+    expect(scoreHandoff(active).valleyBars).toBeLessThan(scoreHandoff(quiet).valleyBars!);
   });
 
   it("DJ scoring prefers a later cut to a 32-bar landing that starts in a quiet intro", () => {
@@ -34,8 +43,7 @@ describe("handoff candidate scoring", () => {
       incomingBars: { rms: Array.from({ length: 16 }, (_, i) => (i < 8 ? 0.22 : 0.85)) },
       outgoingBars: { rms: Array(16).fill(0.85) },
     };
-    expect(pickHandoffCandidate([quietThirtyTwo, laterSixteen]))
-      .toBe(laterSixteen);
+    expect(pickHandoffCandidate([quietThirtyTwo, laterSixteen])).toBe(laterSixteen);
   });
 
   it("DJ scoring prefers a 16/32-bar landing to an energetic 8-bar landing", () => {
@@ -67,8 +75,7 @@ describe("handoff candidate scoring", () => {
       incomingBars: { rms: Array.from({ length: 32 }, (_, i) => (i < 16 ? 0.45 : 0.85)) },
       outgoingBars: { rms: Array(32).fill(0.85) },
     };
-    expect(pickHandoffCandidate([eight, sixteen, thirtyTwo]))
-      .toBe(thirtyTwo);
+    expect(pickHandoffCandidate([eight, sixteen, thirtyTwo])).toBe(thirtyTwo);
     expect(pickHandoffCandidate([eight, sixteen])).toBe(sixteen);
   });
 
@@ -102,10 +109,8 @@ describe("handoff candidate scoring", () => {
       incomingBars: { rms: Array.from({ length: 16 }, (_, i) => (i < 8 ? 0.22 : 0.85)) },
       outgoingBars: { rms: Array(16).fill(0.85) },
     };
-    expect(pickHandoffCandidate([quietThirtyTwo, eight]))
-      .toBe(quietThirtyTwo);
-    expect(pickHandoffCandidate([quietThirtyTwo, eight, sixteen]))
-      .toBe(sixteen);
+    expect(pickHandoffCandidate([quietThirtyTwo, eight])).toBe(quietThirtyTwo);
+    expect(pickHandoffCandidate([quietThirtyTwo, eight, sixteen])).toBe(sixteen);
   });
 
   it("DJ scoring keeps a 32-bar landing that already has incoming energy", () => {
@@ -129,8 +134,7 @@ describe("handoff candidate scoring", () => {
       incomingBars: { rms: Array.from({ length: 16 }, (_, i) => (i < 8 ? 0.5 : 0.9)) },
       outgoingBars: { rms: Array(16).fill(0.85) },
     };
-    expect(pickHandoffCandidate([energeticThirtyTwo, laterSixteen]))
-      .toBe(energeticThirtyTwo);
+    expect(pickHandoffCandidate([energeticThirtyTwo, laterSixteen])).toBe(energeticThirtyTwo);
   });
 
   it("DJ scoring prefers a later energetic incoming cut to a file-start 32-bar intro", () => {
@@ -178,13 +182,20 @@ describe("handoff candidate scoring", () => {
   });
 
   it("DJ scoring detects an interior valley even with strong window averages", () => {
-    const base = { barCount: 16 as const, exitKind: "dropLanding" as const,
-      phraseShape: "landing" as const, incomingHeadEnergy: 0.8, outgoingTailEnergy: 0.8,
-      incomingBars: { rms: Array(16).fill(0.2) } };
+    const base = {
+      barCount: 16 as const,
+      exitKind: "dropLanding" as const,
+      phraseShape: "landing" as const,
+      incomingHeadEnergy: 0.8,
+      outgoingTailEnergy: 0.8,
+      incomingBars: { rms: Array(16).fill(0.2) },
+    };
     const strong = { ...base, outgoingBars: { rms: Array(16).fill(1) } };
-    const valley = { ...base, outgoingBars: { rms: Array.from({ length: 16 }, (_, i) => i > 4 && i < 12 ? 0.02 : 1) } };
-    expect(scoreHandoff(strong).score)
-      .toBeGreaterThan(scoreHandoff(valley).score);
+    const valley = {
+      ...base,
+      outgoingBars: { rms: Array.from({ length: 16 }, (_, i) => (i > 4 && i < 12 ? 0.02 : 1)) },
+    };
+    expect(scoreHandoff(strong).score).toBeGreaterThan(scoreHandoff(valley).score);
   });
   it("rejects an automatic 32-bar quietTail breather", () => {
     const long = scoreHandoff({

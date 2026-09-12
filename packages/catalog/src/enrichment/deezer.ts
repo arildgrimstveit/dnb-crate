@@ -22,7 +22,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function mapTrack(raw: unknown): DeezerTrack | null {
   const row = asRecord(raw);
-  if (row.id == null || typeof row.title !== "string") {
+  if ((typeof row.id !== "number" && typeof row.id !== "string") || typeof row.title !== "string") {
     return null;
   }
   const artist = asRecord(row.artist);

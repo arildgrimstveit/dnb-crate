@@ -199,22 +199,31 @@ describe("downbeat alignment", () => {
   });
 
   it("compares source phrase periods at unequal rates in output time", () => {
-    const phraseMs = 32 * 60_000 / 174;
+    const phraseMs = (32 * 60_000) / 174;
     const aligned = downbeatAlignmentOffsetMs({
-      outgoingDownbeatsMs: [0], incomingDownbeatsMs: [0],
+      outgoingDownbeatsMs: [0],
+      incomingDownbeatsMs: [0],
       outgoingOverlapStartMs: phraseMs * 10,
       incomingOverlapStartMs: phraseMs * 10 * 1.02,
-      outgoingRate: 1, incomingRate: 1.02, bpm: 174,
-      outgoingPhraseOriginMs: 0, incomingPhraseOriginMs: 0,
+      outgoingRate: 1,
+      incomingRate: 1.02,
+      bpm: 174,
+      outgoingPhraseOriginMs: 0,
+      incomingPhraseOriginMs: 0,
     });
     expect(aligned.offsetMs).toBe(0);
   });
 
   it("converts incoming-source correction before moving the outgoing source", () => {
     const applied = applyAlignmentOffset({
-      incomingStartMs: 0, incomingEndMs: 180_000,
-      outgoingEndMs: 150_000, offsetMs: -102, periodMs: 1379,
-      incomingRate: 1.02, outgoingRate: 0.98, overlapMs: 8000,
+      incomingStartMs: 0,
+      incomingEndMs: 180_000,
+      outgoingEndMs: 150_000,
+      offsetMs: -102,
+      periodMs: 1379,
+      incomingRate: 1.02,
+      outgoingRate: 0.98,
+      overlapMs: 8000,
     });
     expect(applied.outgoingEndMs).toBe(150_098);
     expect(applied.overlapMs).toBe(8000);

@@ -9,7 +9,12 @@ import {
   MIN_BASS_SWAP_RAMP_MS,
   type PhraseBarCount,
 } from "./constants.ts";
-import { clampBassSwapParams, type AutomationEvent, type BassSwapParams, type TrackSection } from "./analysis.ts";
+import {
+  clampBassSwapParams,
+  type AutomationEvent,
+  type BassSwapParams,
+  type TrackSection,
+} from "./analysis.ts";
 import type { TransitionType } from "./planning.ts";
 
 export type MixPresetType = "crossfade" | "phrase_mix" | "bass_swap";
@@ -43,12 +48,18 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-export function chooseMixIntent(input: {
-  phraseShape?: PhraseShape | null;
-  exitKind?: string | null;
-  requested?: MixIntent | null;
-} = {}): MixIntent {
-  if (input.requested === "sustain" || input.requested === "lift" || input.requested === "breather") {
+export function chooseMixIntent(
+  input: {
+    phraseShape?: PhraseShape | null;
+    exitKind?: string | null;
+    requested?: MixIntent | null;
+  } = {},
+): MixIntent {
+  if (
+    input.requested === "sustain" ||
+    input.requested === "lift" ||
+    input.requested === "breather"
+  ) {
     return input.requested;
   }
   if (input.phraseShape === "landing" || input.exitKind === "dropLanding") {
@@ -60,7 +71,10 @@ export function chooseMixIntent(input: {
   return "lift";
 }
 
-export function defaultLowHandoverBar(barCount: PhraseBarCount, intent: MixIntent = "lift"): number {
+export function defaultLowHandoverBar(
+  barCount: PhraseBarCount,
+  intent: MixIntent = "lift",
+): number {
   if (intent === "lift") {
     return barCount === 32 ? 16 : barCount === 8 ? 4 : 8;
   }
@@ -89,7 +103,10 @@ export function clampMixPresetParams(
       : "complementary";
   const intent = chooseMixIntent({
     phraseShape,
-    requested: input?.intent === "sustain" || input?.intent === "lift" || input?.intent === "breather" ? input.intent : null,
+    requested:
+      input?.intent === "sustain" || input?.intent === "lift" || input?.intent === "breather"
+        ? input.intent
+        : null,
   });
   const defaultHandover = defaultLowHandoverBar(barCount, intent);
   const handoverRaw = input?.lowHandoverBar ?? bass.lowHandoverBar ?? defaultHandover;
@@ -100,13 +117,29 @@ export function clampMixPresetParams(
       : defaultHandover;
   return {
     ...bass,
-    sequentialHandoff: input?.sequentialHandoff === "early" || input?.sequentialHandoff === "supported" ? input.sequentialHandoff : "legacy",
+    sequentialHandoff:
+      input?.sequentialHandoff === "early" || input?.sequentialHandoff === "supported"
+        ? input.sequentialHandoff
+        : "legacy",
     ...(input?.landingFadeBars === 2 || input?.landingFadeBars === 4 || input?.landingFadeBars === 8
-      ? { landingFadeBars: input.landingFadeBars } : {}),
-    ...(input?.landingCarryBars === 2 || input?.landingCarryBars === 3.5 || input?.landingCarryBars === 4 || input?.landingCarryBars === 4.5
-      ? { landingCarryBars: input.landingCarryBars } : {}),
-    ...(input?.landingIncomingFadeBars === 8 || input?.landingIncomingFadeBars === 16 || input?.landingIncomingFadeBars === 32
-      ? { landingIncomingFadeBars: Math.min(input.landingIncomingFadeBars, barCount) as PhraseBarCount } : {}),
+      ? { landingFadeBars: input.landingFadeBars }
+      : {}),
+    ...(input?.landingCarryBars === 2 ||
+    input?.landingCarryBars === 3.5 ||
+    input?.landingCarryBars === 4 ||
+    input?.landingCarryBars === 4.5
+      ? { landingCarryBars: input.landingCarryBars }
+      : {}),
+    ...(input?.landingIncomingFadeBars === 8 ||
+    input?.landingIncomingFadeBars === 16 ||
+    input?.landingIncomingFadeBars === 32
+      ? {
+          landingIncomingFadeBars: Math.min(
+            input.landingIncomingFadeBars,
+            barCount,
+          ) as PhraseBarCount,
+        }
+      : {}),
     barCount,
     targetBpm:
       input?.targetBpm != null && Number.isFinite(input.targetBpm) && input.targetBpm > 0
@@ -118,7 +151,11 @@ export function clampMixPresetParams(
       MAX_BASS_CROSSOVER_HZ,
     ),
     rampMs: Math.round(
-      clamp(input?.rampMs ?? bass.rampMs ?? DEFAULT_BASS_SWAP_RAMP_MS, MIN_BASS_SWAP_RAMP_MS, MAX_BASS_SWAP_RAMP_MS),
+      clamp(
+        input?.rampMs ?? bass.rampMs ?? DEFAULT_BASS_SWAP_RAMP_MS,
+        MIN_BASS_SWAP_RAMP_MS,
+        MAX_BASS_SWAP_RAMP_MS,
+      ),
     ),
     lowAttenuationDb: clamp(
       input?.lowAttenuationDb ?? bass.lowAttenuationDb ?? DEFAULT_BASS_LOW_ATTENUATION_DB,
@@ -241,8 +278,7 @@ function landingEvents(params: MixPresetParams, barMs: number): AutomationEvent[
   const dropAt = dropBar != null && dropBar > 0.5 ? Math.min(arrival, Math.max(0, dropBar)) : null;
   const midLead = end === 8 ? 2 : 4;
   const incomingFade =
-    params.landingIncomingFadeBars ??
-    (dropAt != null ? Math.max(1, dropAt - midLead) : arrival);
+    params.landingIncomingFadeBars ?? (dropAt != null ? Math.max(1, dropAt - midLead) : arrival);
   const incomingStart = params.landingIncomingFadeBars == null ? 0 : end - incomingFade;
   const lowLead = 2;
   const swapAt = dropAt != null ? Math.max(0, dropAt - Math.min(lowLead, dropAt)) : arrival - 1;
@@ -255,9 +291,24 @@ function landingEvents(params: MixPresetParams, barMs: number): AutomationEvent[
     event("incoming_mid", incomingStart, incomingFade, null, 0, barMs),
     event("incoming_high", incomingStart, incomingFade, null, 0, barMs),
     event("incoming_low", swapAt, lowFadeBars, null, 0, barMs, lowFadeMs),
-    event("outgoing_low", outgoingDumpAt, outgoingDumpBars, 0, params.lowAttenuationDb, barMs, outgoingDumpMs),
-    event("outgoing_low", arrival, carry ? 1 : 0, params.lowAttenuationDb, null, barMs,
-      carry ? barMs : Math.max(params.rampMs, 1)),
+    event(
+      "outgoing_low",
+      outgoingDumpAt,
+      outgoingDumpBars,
+      0,
+      params.lowAttenuationDb,
+      barMs,
+      outgoingDumpMs,
+    ),
+    event(
+      "outgoing_low",
+      arrival,
+      carry ? 1 : 0,
+      params.lowAttenuationDb,
+      null,
+      barMs,
+      carry ? barMs : Math.max(params.rampMs, 1),
+    ),
     event("outgoing_mid", midHighStart, midHighFade, 0, null, barMs),
     event("outgoing_high", midHighStart, midHighFade, 0, null, barMs),
   ];
@@ -276,7 +327,11 @@ function phraseEvents(params: MixPresetParams, barMs: number): AutomationEvent[]
   const hold = outgoingHoldBars(params.barCount, params.intent, params.phraseShape);
   const outgoingStart = params.phraseShape === "sequential" ? 0 : hold;
   const outgoingBars = params.phraseShape === "sequential" ? half : end - hold;
-  if (params.phraseShape === "sequential" && params.sequentialHandoff !== "legacy" && params.sequentialHandoff != null) {
+  if (
+    params.phraseShape === "sequential" &&
+    params.sequentialHandoff !== "legacy" &&
+    params.sequentialHandoff != null
+  ) {
     const blendBars = params.sequentialHandoff === "early" ? half : end;
     return [
       event("incoming_mid", 0, blendBars, null, 0, barMs),
@@ -285,7 +340,15 @@ function phraseEvents(params: MixPresetParams, barMs: number): AutomationEvent[]
       event("outgoing_high", 0, blendBars, 0, null, barMs),
       event("incoming_low", handover, 1, null, 0, barMs),
       event("outgoing_low", handover, 1, 0, params.lowAttenuationDb, barMs),
-      event("outgoing_low", end, 0, params.lowAttenuationDb, null, barMs, Math.max(params.rampMs, 1)),
+      event(
+        "outgoing_low",
+        end,
+        0,
+        params.lowAttenuationDb,
+        null,
+        barMs,
+        Math.max(params.rampMs, 1),
+      ),
     ];
   }
   return [
@@ -364,7 +427,9 @@ export function isMonotoneBand(events: AutomationEvent[]): boolean {
     byTarget.set(ev.target, list);
   }
   for (const list of byTarget.values()) {
-    const ordered = [...list].sort((a, b) => (a.atBar ?? 0) - (b.atBar ?? 0) || (a.atMs ?? 0) - (b.atMs ?? 0));
+    const ordered = [...list].sort(
+      (a, b) => (a.atBar ?? 0) - (b.atBar ?? 0) || (a.atMs ?? 0) - (b.atMs ?? 0),
+    );
     let direction = 0;
     for (const ev of ordered) {
       const delta = dbOrInf(ev.toDb) - dbOrInf(ev.fromDb);

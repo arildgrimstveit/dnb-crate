@@ -1,4 +1,9 @@
-import type { CuePointType, TrackSection, SonicDescriptors, MusicalKeyEstimate } from "@dnb-crate/domain";
+import type {
+  CuePointType,
+  TrackSection,
+  SonicDescriptors,
+  MusicalKeyEstimate,
+} from "@dnb-crate/domain";
 
 export type PcmAudio = {
   samples: Float32Array;

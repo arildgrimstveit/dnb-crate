@@ -35,7 +35,10 @@ export function formatMixTimestamp(ms: number): string {
 
 export function buildMixTracklist(chapters: MixChapterTag[]): string {
   return chapters
-    .map((chapter, index) => `${index + 1}. [${formatMixTimestamp(chapter.startMs)}] ${trackCredit(chapter.artist, chapter.title)}`)
+    .map(
+      (chapter, index) =>
+        `${index + 1}. [${formatMixTimestamp(chapter.startMs)}] ${trackCredit(chapter.artist, chapter.title)}`,
+    )
     .join("\n");
 }
 

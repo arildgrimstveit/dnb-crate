@@ -163,7 +163,8 @@ export function moodPresetScore(
     }
     total +=
       keys.reduce(
-        (sum, key) => sum + rangeSatisfaction(descriptorValue(key, track, descriptors), preset[key]),
+        (sum, key) =>
+          sum + rangeSatisfaction(descriptorValue(key, track, descriptors), preset[key]),
         0,
       ) / keys.length;
   }

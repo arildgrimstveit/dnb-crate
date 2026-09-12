@@ -139,6 +139,10 @@ function canWriteField(
 export class TrackRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
+  withTransaction<T>(fn: () => T): T {
+    return this.db.transaction(fn).immediate();
+  }
+
   findById(id: string): Track | null {
     const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(id) as
       TrackRow | undefined;
@@ -425,8 +429,7 @@ export class TrackRepository {
     let keySource = existing.keySource;
     if (patch.bpm !== undefined) {
       bpm = patch.bpm;
-      bpmSource =
-        patch.bpm === null ? null : (patch.bpmSource ?? "manual");
+      bpmSource = patch.bpm === null ? null : (patch.bpmSource ?? "manual");
     }
     if (patch.musicalKey !== undefined) {
       if (patch.musicalKey === null) {
@@ -448,10 +451,10 @@ export class TrackRepository {
     const timestamp = nowIso();
     const sources = { ...(existing.fieldSources ?? {}) };
     const album = patch.album === undefined ? existing.album : patch.album;
-    const label = patch.label === undefined ? existing.label ?? null : patch.label;
+    const label = patch.label === undefined ? (existing.label ?? null) : patch.label;
     const releaseDate =
-      patch.releaseDate === undefined ? existing.releaseDate ?? null : patch.releaseDate;
-    const isrc = patch.isrc === undefined ? existing.isrc ?? null : patch.isrc;
+      patch.releaseDate === undefined ? (existing.releaseDate ?? null) : patch.releaseDate;
+    const isrc = patch.isrc === undefined ? (existing.isrc ?? null) : patch.isrc;
     if (patch.album !== undefined) {
       sources.album = "manual";
     }
@@ -816,7 +819,10 @@ export class TrackRepository {
       subBass: null,
       brightness: null,
     };
-    if (!this.tableExists("track_analyses") || !this.hasColumn("track_analyses", "descriptors_json")) {
+    if (
+      !this.tableExists("track_analyses") ||
+      !this.hasColumn("track_analyses", "descriptors_json")
+    ) {
       return empty;
     }
     const rows = this.db
@@ -863,7 +869,9 @@ export class TrackRepository {
 
   private analysisCoverage(): LibraryStats["analysisCoverage"] {
     const statusRows = this.db
-      .prepare("SELECT analysis_status AS status, COUNT(*) AS n FROM tracks GROUP BY analysis_status")
+      .prepare(
+        "SELECT analysis_status AS status, COUNT(*) AS n FROM tracks GROUP BY analysis_status",
+      )
       .all() as { status: string; n: number }[];
     let analyzed = 0;
     let notAnalyzed = 0;
@@ -936,12 +944,18 @@ export class TrackRepository {
       }
     ).n;
     const moods = this.tableExists("track_moods")
-      ? (this.db.prepare("SELECT COUNT(DISTINCT track_id) AS n FROM track_moods").get() as { n: number })
-          .n
+      ? (
+          this.db.prepare("SELECT COUNT(DISTINCT track_id) AS n FROM track_moods").get() as {
+            n: number;
+          }
+        ).n
       : 0;
     const genres = this.tableExists("track_genres")
-      ? (this.db.prepare("SELECT COUNT(DISTINCT track_id) AS n FROM track_genres").get() as { n: number })
-          .n
+      ? (
+          this.db.prepare("SELECT COUNT(DISTINCT track_id) AS n FROM track_genres").get() as {
+            n: number;
+          }
+        ).n
       : 0;
     const countNonEmpty = (column: string): number => {
       if (!this.hasColumn("tracks", column)) {
@@ -1059,7 +1073,8 @@ export class TrackRepository {
       genres?: string[];
     },
   ): void {
-    const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(id) as TrackRow | undefined;
+    const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(id) as
+      TrackRow | undefined;
     if (!row) {
       return;
     }
@@ -1097,8 +1112,7 @@ export class TrackRepository {
 
   refreshRecordingIdentity(trackId: string): void {
     const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(trackId) as
-      | TrackRow
-      | undefined;
+      TrackRow | undefined;
     if (!row) {
       return;
     }
@@ -1138,8 +1152,7 @@ export class TrackRepository {
     },
   ): void {
     const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(trackId) as
-      | TrackRow
-      | undefined;
+      TrackRow | undefined;
     if (!row) {
       throw new DomainError("TRACK_NOT_FOUND", `No track with id ${trackId}`);
     }

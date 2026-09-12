@@ -64,9 +64,9 @@ export class EnrichmentRepository {
   }
 
   findByTrackId(trackId: string): StoredEnrichment | null {
-    const row = this.db.prepare("SELECT * FROM track_enrichment WHERE track_id = ?").get(trackId) as
-      | Record<string, unknown>
-      | undefined;
+    const row = this.db
+      .prepare("SELECT * FROM track_enrichment WHERE track_id = ?")
+      .get(trackId) as Record<string, unknown> | undefined;
     if (!row) {
       return null;
     }

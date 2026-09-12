@@ -47,7 +47,7 @@ describe("descriptor pack", () => {
     let state = 1;
     for (let i = 0; i < samples.length; i += 1) {
       state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-      const a = state / 0xffffffff * 2 - 1;
+      const a = (state / 0xffffffff) * 2 - 1;
       const b = ((i * 1103515245 + 12345) >>> 16) / 32768 - 1;
       samples[i] = (a + b) * 0.5;
     }
@@ -65,15 +65,17 @@ describe("descriptor pack", () => {
   it("gives keyed DnB higher melodicness than drums-only", () => {
     const keyed = dspAnalyzer.analyze(buildKeyedDnbPcm({ key: "F#m", subHz: 46.25 }));
     const drums = dspAnalyzer.analyze(buildDrumsOnlyDnbPcm({ bpm: 174 }));
-    expect((keyed.descriptors?.melodicness ?? 0) - (drums.descriptors?.melodicness ?? 0)).toBeGreaterThanOrEqual(
-      0.2,
-    );
+    expect(
+      (keyed.descriptors?.melodicness ?? 0) - (drums.descriptors?.melodicness ?? 0),
+    ).toBeGreaterThanOrEqual(0.2);
   });
 
   it("gives a C major pad higher valence than an F#m pad", () => {
     const major = dspAnalyzer.analyze(buildPadOnlyPcm({ key: "C" }));
     const minor = dspAnalyzer.analyze(buildPadOnlyPcm({ key: "F#m" }));
-    expect((major.descriptors?.valence ?? 0) - (minor.descriptors?.valence ?? 0)).toBeGreaterThanOrEqual(0.15);
+    expect(
+      (major.descriptors?.valence ?? 0) - (minor.descriptors?.valence ?? 0),
+    ).toBeGreaterThanOrEqual(0.15);
   });
 
   it("is deterministic on the same PCM", () => {

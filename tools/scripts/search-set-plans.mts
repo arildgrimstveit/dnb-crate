@@ -45,7 +45,8 @@ const runtime = createCatalogRuntime(
   undefined,
   { passive: true },
 );
-const attempts: any[] = [];
+type Attempt = { brief: string; seed: number; ready: boolean; error?: string; trackIds?: string[] };
+const attempts: Attempt[] = [];
 console.log(JSON.stringify({ root, mode: "plan-only", catalogSource, seeds, briefs }));
 try {
   const tracks = new Map(runtime.repository.listAll().map((t) => [t.id, t]));
@@ -60,7 +61,9 @@ try {
           ...brief,
           seed,
           name: `${brief.name} / evaluation seed ${seed}`,
-          ...(references.length ? { variety: { ...brief.variety, referencePlanIds: references.slice(-20) } } : {}),
+          ...(references.length
+            ? { variety: { ...brief.variety, referencePlanIds: references.slice(-20) } }
+            : {}),
         });
         const q = result.quality;
         const artifact = `plan-${briefIndex}-${seed}.json`;
@@ -90,10 +93,20 @@ try {
         };
         attempts.push(row);
         if (args.includes("--diversify") && row.ready) references.push(result.plan.id);
-        console.log(JSON.stringify({ ...row, trackIds: undefined, lineup: undefined,
-          continuity: undefined, variety: row.variety ? {
-            repeatedTracks: row.variety.repeatedTracks, repeatedPairs: row.variety.repeatedPairs,
-          } : undefined }));
+        console.log(
+          JSON.stringify({
+            ...row,
+            trackIds: undefined,
+            lineup: undefined,
+            continuity: undefined,
+            variety: row.variety
+              ? {
+                  repeatedTracks: row.variety.repeatedTracks,
+                  repeatedPairs: row.variety.repeatedPairs,
+                }
+              : undefined,
+          }),
+        );
         if (args.includes("--first-ready") && row.ready) break;
       } catch (error) {
         const row = {
@@ -114,21 +127,33 @@ try {
     const readyRows = rows.filter((a) => a.ready);
     const recording = (id: string) => tracks.get(id)?.recordingKey ?? id;
     const trackSets = readyRows.map((row) => new Set<string>((row.trackIds ?? []).map(recording)));
-    const pairSets = readyRows.map((row) => new Set<string>((row.trackIds ?? []).slice(1)
-      .map((id: string, i: number) => `${recording(row.trackIds[i])}->${recording(id)}`)));
-    const comparisons = readyRows.flatMap((row, i) => readyRows.slice(i + 1).map((other, offset) => {
-      const j = i + offset + 1;
-      const shared = [...trackSets[i]!].filter((id) => trackSets[j]!.has(id)).length;
-      return { seeds: [row.seed, other.seed], sharedRecordings: shared,
-        recordingJaccard: shared / Math.max(1, new Set([...trackSets[i]!, ...trackSets[j]!]).size),
-        sharedPairs: [...pairSets[i]!].filter((id) => pairSets[j]!.has(id)).length };
-    }));
+    const pairSets = readyRows.map(
+      (row) =>
+        new Set<string>(
+          (row.trackIds ?? [])
+            .slice(1)
+            .map((id: string, i: number) => `${recording(row.trackIds![i]!)}->${recording(id)}`),
+        ),
+    );
+    const comparisons = readyRows.flatMap((row, i) =>
+      readyRows.slice(i + 1).map((other, offset) => {
+        const j = i + offset + 1;
+        const shared = [...trackSets[i]!].filter((id) => trackSets[j]!.has(id)).length;
+        return {
+          seeds: [row.seed, other.seed],
+          sharedRecordings: shared,
+          recordingJaccard:
+            shared / Math.max(1, new Set([...trackSets[i]!, ...trackSets[j]!]).size),
+          sharedPairs: [...pairSets[i]!].filter((id) => pairSets[j]!.has(id)).length,
+        };
+      }),
+    );
     return {
       brief,
       attempts: rows.length,
       ready: rows.filter((a) => a.ready).length,
       errors: rows.filter((a) => a.error).length,
-      distinctLineups: new Set(rows.filter((a) => a.trackIds).map((a) => a.trackIds.join("|")))
+      distinctLineups: new Set(rows.filter((a) => a.trackIds).map((a) => a.trackIds!.join("|")))
         .size,
       uniqueTracks: new Set(rows.flatMap((a) => a.trackIds ?? [])).size,
       readyUniqueRecordings: new Set(trackSets.flatMap((set) => [...set])).size,
@@ -153,5 +178,5 @@ try {
   );
   console.log(JSON.stringify({ root, summaries }));
 } finally {
-  runtime.close();
+  await runtime.close();
 }

@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  clampMakeupDb,
-  resolveRubberbandCli,
-  rubberbandCliArgs,
-} from "../src/rubberband-cli.ts";
+import { clampMakeupDb, resolveRubberbandCli, rubberbandCliArgs } from "../src/rubberband-cli.ts";
 
 describe("rubberband CLI", () => {
   it("uses R3 fine and the FFmpeg tempo multiple", () => {

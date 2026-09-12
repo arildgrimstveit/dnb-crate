@@ -86,7 +86,7 @@ function pearson(left: number[], right: number[]): number {
   const rStd = stddev(right.slice(0, n)) || 1;
   let corr = 0;
   for (let i = 0; i < n; i += 1) {
-    corr += ((left[i] ?? 0) - lMean) / lStd * (((right[i] ?? 0) - rMean) / rStd);
+    corr += (((left[i] ?? 0) - lMean) / lStd) * (((right[i] ?? 0) - rMean) / rStd);
   }
   return corr;
 }
@@ -269,7 +269,7 @@ export function estimateKeyFromChroma(
     const chroma = new Array<number>(12).fill(0);
     for (const peak of peakFrames[t] ?? []) {
       const half = magAtBin(frame, (peak.hz * 0.5 * nfft) / sampleRateHz);
-      const third = magAtBin(frame, (peak.hz / 3 * nfft) / sampleRateHz);
+      const third = magAtBin(frame, ((peak.hz / 3) * nfft) / sampleRateHz);
       const contrib = Math.max(0, peak.power - 0.5 * half * half - 0.5 * third * third);
       if (contrib <= 0) {
         continue;
@@ -325,9 +325,7 @@ export function estimateKeyFromChroma(
   }));
   if (options.subRootPc != null) {
     for (const row of scored) {
-      const tonic = PITCH_NAMES.findIndex((name) =>
-        row.key === name || row.key === `${name}m`,
-      );
+      const tonic = PITCH_NAMES.findIndex((name) => row.key === name || row.key === `${name}m`);
       if (tonic === options.subRootPc) {
         row.raw += 0.06;
         row.rankScore += 0.06;

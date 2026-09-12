@@ -49,10 +49,7 @@ export function sourceBpmForRate(
   return null;
 }
 
-export function snapPlaybackRate(
-  rate: number,
-  epsilon = ATEMPO_SKIP_THRESHOLD,
-): number {
+export function snapPlaybackRate(rate: number, epsilon = ATEMPO_SKIP_THRESHOLD): number {
   return Math.abs(rate - 1) < epsilon ? 1 : rate;
 }
 

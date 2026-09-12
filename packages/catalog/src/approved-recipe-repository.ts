@@ -45,7 +45,9 @@ function mapRow(row: ApprovedRow): ApprovedRecipeRecord {
 export class ApprovedRecipeRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
-  insert(row: Omit<ApprovedRecipeRecord, "id" | "createdAt"> & { id?: string; createdAt?: string }): ApprovedRecipeRecord {
+  insert(
+    row: Omit<ApprovedRecipeRecord, "id" | "createdAt"> & { id?: string; createdAt?: string },
+  ): ApprovedRecipeRecord {
     const id = row.id ?? crypto.randomUUID();
     const createdAt = row.createdAt ?? new Date().toISOString();
     this.db
@@ -93,8 +95,7 @@ export class ApprovedRecipeRepository {
 
   findById(id: string): ApprovedRecipeRecord | null {
     const row = this.db.prepare("SELECT * FROM approved_recipes WHERE id = ?").get(id) as
-      | ApprovedRow
-      | undefined;
+      ApprovedRow | undefined;
     return row ? mapRow(row) : null;
   }
 
@@ -111,8 +112,10 @@ export class ApprovedRecipeRepository {
   }
 
   listAll(): ApprovedRecipeRecord[] {
-    return (this.db.prepare("SELECT * FROM approved_recipes ORDER BY created_at DESC, id DESC").all() as ApprovedRow[]).map(
-      mapRow,
-    );
+    return (
+      this.db
+        .prepare("SELECT * FROM approved_recipes ORDER BY created_at DESC, id DESC")
+        .all() as ApprovedRow[]
+    ).map(mapRow);
   }
 }

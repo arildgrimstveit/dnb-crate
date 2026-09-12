@@ -41,7 +41,10 @@ function buildSineWav(durationMs: number, frequencyHz: number, sampleRate = 48_0
   return riff;
 }
 
-function plannedV2(segments: Array<{ sourceMs: number; rate: number }>, overlaps: number[]): number {
+function plannedV2(
+  segments: Array<{ sourceMs: number; rate: number }>,
+  overlaps: number[],
+): number {
   let playable = 0;
   for (let i = 0; i < segments.length; i += 1) {
     const segment = segments[i]!;

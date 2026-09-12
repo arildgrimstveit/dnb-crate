@@ -18,11 +18,11 @@ Each entry gets `gainDb = clamp(medianLufs − trackLufs, −6, +3)`, then a fur
 
 ## Templates
 
-| Preset | What moves |
-| --- | --- |
+| Preset       | What moves                                                                                                                                                                                                                                                                                     |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `phrase_mix` | Complementary `lift` (default): incoming mid/high from bar 0; outgoing mid/high hold then fade; incoming low later in the window. Sequential: incoming mid/high start two bars before mid-phrase. Landing: incoming low opens two bars before the incoming drop when that drop is still ahead. |
-| `bass_swap` | Mid/high crossfade; lows swap at the handover bar. |
-| `crossfade` | Single equal-power `acrossfade` (`hsin`). |
+| `bass_swap`  | Mid/high crossfade; lows swap at the handover bar.                                                                                                                                                                                                                                             |
+| `crossfade`  | Single equal-power `acrossfade` (`hsin`).                                                                                                                                                                                                                                                      |
 
 Overlap is the planned phrase (8 / 16 / 32 bars at the pair tempo). Intermediate pairwise joins write float WAV. The master is 24-bit FLAC (`renders/{jobId}.flac`). After that, a dithered 16-bit listen FLAC is written as `renders/{plan-name}.flac`. Checksums, `render:check`, and hour feedback stay on the master. Previews stay in `cache/previews/` and do not get a listen copy. Re-rendering a plan with the same name overwrites that listen file.
 
@@ -34,7 +34,19 @@ Playback rate is `pairTargetBpm /` accepted grid BPM, bounded to ±3% unless `al
 
 Aligned templates fail closed when a required grid is missing, rejected, or below 0.6, unless `allowLowConfidence` is true.
 
-Output duration must match the plan within 1000 ms.
+Output duration must match the plan within 1000 ms. A full mix **fails the job** when that check
+misses; the 24-bit master is kept for diagnostics. Previews only warn. `render:check` still treats
+only mixes of five minutes or longer as a duration **fail** (shorter mixes warn). Listen-encode
+failure after a valid master is a warning, not a failed job.
+
+Queued full and preview jobs freeze the plan, selected evidence values (including absent rows),
+source fingerprints, and the effective render settings. Validation and decode use that snapshot, not
+the live plan. The preview cache key hashes the same frozen request. Editing the live plan, reanalysis,
+or a later worker config change does not change what an already-queued job renders.
+
+Named listen FLACs encode to a unique staging file per job, then publish under a lock so two workers
+cannot share one `.partial.flac`. The previous listen file is replaced only after the new encode is
+ready.
 
 ## Jobs
 

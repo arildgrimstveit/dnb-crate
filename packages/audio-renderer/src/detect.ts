@@ -23,8 +23,7 @@ export type FfmpegBinaries = {
 };
 
 const VERSION_RE = /version\s+(\S+)/i;
-const UNRECOGNIZED_FILTER_COMPLEX_SCRIPT =
-  /unrecognized option ['"]?filter_complex_script['"]?/i;
+const UNRECOGNIZED_FILTER_COMPLEX_SCRIPT = /unrecognized option ['"]?filter_complex_script['"]?/i;
 
 export function parseFilterComplexScriptSupport(text: string): boolean {
   return !UNRECOGNIZED_FILTER_COMPLEX_SCRIPT.test(text);

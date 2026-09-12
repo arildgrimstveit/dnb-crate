@@ -13,7 +13,7 @@
     "mcp": "tsx apps/mcp-server/src/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "pnpm -r --if-present typecheck",
+    "typecheck": "pnpm -r --if-present typecheck && tsc --noEmit -p tools/tsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

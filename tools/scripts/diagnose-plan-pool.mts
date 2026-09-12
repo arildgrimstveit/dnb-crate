@@ -154,7 +154,9 @@ try {
       "Descriptor percentiles and genre exclusions are unchanged. This is not a proof that no hour exists.",
   };
   await writeFile(path.join(root, "report.json"), JSON.stringify(report, null, 2));
-  console.log(JSON.stringify({ root, ...report, plan: { ...report.plan, prefix: report.plan.prefix } }));
+  console.log(
+    JSON.stringify({ root, ...report, plan: { ...report.plan, prefix: report.plan.prefix } }),
+  );
 } finally {
-  runtime.close();
+  await runtime.close();
 }

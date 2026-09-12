@@ -3,7 +3,7 @@ import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
 import { loadConfig } from "../../packages/domain/src/index.ts";
 
 const config = loadConfig();
-const runtime = createCatalogRuntime(config);
+const runtime = createCatalogRuntime(config, undefined, { passive: true });
 const promoted: Array<{ title: string; key: string; camelot: string | null }> = [];
 const skipped: Array<{ title: string; reason: string }> = [];
 
@@ -30,5 +30,11 @@ for (const track of runtime.repository.listAll()) {
   promoted.push({ title: track.title, key: row.musicalKey, camelot: row.camelotKey });
 }
 
-runtime.close();
-console.log(JSON.stringify({ promoted: promoted.length, skipped: skipped.length, promoted, skipped }, null, 2));
+await runtime.close();
+console.log(
+  JSON.stringify(
+    { promotedCount: promoted.length, skippedCount: skipped.length, promoted, skipped },
+    null,
+    2,
+  ),
+);

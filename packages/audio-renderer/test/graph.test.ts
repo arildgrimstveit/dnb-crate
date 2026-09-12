@@ -22,8 +22,13 @@ describe("filter graph", () => {
   it("retains small tempo corrections across long phrases", () => {
     const rate = 174 / 174.3;
     const filter = buildAcrossfadeFilter({
-      trims: [{ startSec: 0, endSec: 90, gainDb: 0, playbackRate: rate }, { startSec: 0, endSec: 90, gainDb: 0 }],
-      overlapSeconds: [44.138], limiterAmplitude: 0.89, sampleRateHz: 48_000,
+      trims: [
+        { startSec: 0, endSec: 90, gainDb: 0, playbackRate: rate },
+        { startSec: 0, endSec: 90, gainDb: 0 },
+      ],
+      overlapSeconds: [44.138],
+      limiterAmplitude: 0.89,
+      sampleRateHz: 48_000,
     });
     expect(filter).toContain(`atempo=${rate.toFixed(6)}`);
   });

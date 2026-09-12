@@ -39,8 +39,17 @@ import {
 } from "@dnb-crate/domain";
 
 import { constrainMixOut, pickMixIn, pickMixOut, sectionEnergyAt } from "./cues.ts";
-import { applySequentialDefaults, recallApprovedHandoff, type RecipeRecallLookup } from "./recall.ts";
-import { firstDropSection, lateDropMinPlayableMs, planPhraseWindow, type PhraseWindow } from "./windows.ts";
+import {
+  applySequentialDefaults,
+  recallApprovedHandoff,
+  type RecipeRecallLookup,
+} from "./recall.ts";
+import {
+  firstDropSection,
+  lateDropMinPlayableMs,
+  planPhraseWindow,
+  type PhraseWindow,
+} from "./windows.ts";
 
 export type TimelineAnalysis = {
   gridOk: boolean;
@@ -106,9 +115,10 @@ export type ChosenTransition = {
   window?: PhraseWindow;
 };
 
-export function defaultPlayableWindow(
-  track: TimelineTrack,
-): { sourceStartMs: number; sourceEndMs: number } {
+export function defaultPlayableWindow(track: TimelineTrack): {
+  sourceStartMs: number;
+  sourceEndMs: number;
+} {
   return musicalWindow(track, 0, 1, true);
 }
 
@@ -134,7 +144,8 @@ export function playableOutputMs(
   const fromPrev = Math.max(0, fromPrevMs);
   if (rateRegionsVersion === 2) {
     try {
-      return resolveRateRegions(playableMs(entry), entry.playbackRate, fromPrev, toNext).at(-1)!.outputEndMs;
+      return resolveRateRegions(playableMs(entry), entry.playbackRate, fromPrev, toNext).at(-1)!
+        .outputEndMs;
     } catch {
       // Short files cannot host a native body under join-only timing; use overlap-only duration.
     }
@@ -162,9 +173,7 @@ export function plannedMixDurationMs(
   }
   let playable = 0;
   let overlapSum = 0;
-  const regions =
-    rateRegionsVersion ??
-    resolvePlanRateRegionsVersion({ entries }).version;
+  const regions = rateRegionsVersion ?? resolvePlanRateRegionsVersion({ entries }).version;
   for (let i = 0; i < entries.length; i += 1) {
     const entry = entries[i]!;
     const toNext =
@@ -282,7 +291,11 @@ export function chooseTransition(
     incomingRate,
     outgoingDurationMs: outgoing.durationMs,
     incomingDurationMs: incoming.durationMs,
-    engine: { rendererVersion: RENDERER_VERSION, tempoEngine: "rubberband-r3", stretchScope: "overlap" },
+    engine: {
+      rendererVersion: RENDERER_VERSION,
+      tempoEngine: "rubberband-r3",
+      stretchScope: "overlap",
+    },
     selectedEvidence: null,
   };
   const requireRecipe = options.recall?.reuseForPair?.(outgoing.id, incoming.id) === "recipe";
@@ -308,10 +321,8 @@ export function chooseTransition(
       outgoingHeadEndMs: options.outgoingHeadEndMs,
       ...(forcedBars ? { maxBars: forcedBars } : {}),
     });
-  const leftConfidence =
-    outgoing.analysis?.keyConfidence ?? (outgoing.camelotKey ? 1 : 0);
-  const rightConfidence =
-    incoming.analysis?.keyConfidence ?? (incoming.camelotKey ? 1 : 0);
+  const leftConfidence = outgoing.analysis?.keyConfidence ?? (outgoing.camelotKey ? 1 : 0);
+  const rightConfidence = incoming.analysis?.keyConfidence ?? (incoming.camelotKey ? 1 : 0);
   const keyClash = isConfidentKeyClash({
     leftKey: outgoing.camelotKey ?? null,
     rightKey: incoming.camelotKey ?? null,
@@ -347,7 +358,7 @@ export function chooseTransition(
     ? `adapted: RECIPE_INFEASIBLE${recalled?.reason ? `; ${recalled.reason}` : ""}`
     : recalled && !recalled.fallback
       ? recalled.reason
-      : policyHandoff.reason ?? recalled?.reason;
+      : (policyHandoff.reason ?? recalled?.reason);
   return {
     transition: {
       id: crypto.randomUUID(),
@@ -382,14 +393,18 @@ export function chooseTransition(
         ...(keyClash ? { keyClash: true, keyClashWarning: "KEY_CLASH" } : {}),
         ...(policyHandoff.rateRegionsVersion === 2 ? { rateRegionsVersion: 2 } : {}),
         ...(selectionReason ? { selectionReason } : {}),
-        ...(resolvedWindow.continuity ? {
-          continuityEvidence: resolvedWindow.continuity.evidence,
-          continuityEnergyFloor: resolvedWindow.continuity.energyFloor,
-          continuityValleyBars: resolvedWindow.continuity.valleyBars,
-          continuityCoexistenceBars: resolvedWindow.continuity.coexistenceBars,
-          windowPolicy: DJ_HANDOFF_POLICY,
-          ...(resolvedWindow.continuity.landingFadeBars ? { landingFadeBars: resolvedWindow.continuity.landingFadeBars } : {}),
-        } : {}),
+        ...(resolvedWindow.continuity
+          ? {
+              continuityEvidence: resolvedWindow.continuity.evidence,
+              continuityEnergyFloor: resolvedWindow.continuity.energyFloor,
+              continuityValleyBars: resolvedWindow.continuity.valleyBars,
+              continuityCoexistenceBars: resolvedWindow.continuity.coexistenceBars,
+              windowPolicy: DJ_HANDOFF_POLICY,
+              ...(resolvedWindow.continuity.landingFadeBars
+                ? { landingFadeBars: resolvedWindow.continuity.landingFadeBars }
+                : {}),
+            }
+          : {}),
         ...(recalled?.fallback ? { approvalFallbackReason: recalled.reason } : {}),
       },
     },
@@ -431,7 +446,11 @@ export function musicalWindow(
     sourceEndMs = Math.min(track.durationMs, Math.max(sourceStartMs + 1, audioEnd));
   }
   const playable = sourceEndMs - sourceStartMs;
-  if (!overrides?.preserveWindow && playable < MIN_PLAYABLE_DURATION_MS && track.durationMs >= MIN_PLAYABLE_DURATION_MS) {
+  if (
+    !overrides?.preserveWindow &&
+    playable < MIN_PLAYABLE_DURATION_MS &&
+    track.durationMs >= MIN_PLAYABLE_DURATION_MS
+  ) {
     if (overrides?.mixInMs == null) {
       sourceStartMs = Math.max(audioStart, sourceEndMs - MIN_PLAYABLE_DURATION_MS);
     } else {
@@ -457,7 +476,9 @@ export function musicalWindow(
 }
 
 export function medianLufs(values: Array<number | null | undefined>): number | null {
-  const finite = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const finite = values.filter(
+    (value): value is number => typeof value === "number" && Number.isFinite(value),
+  );
   if (finite.length === 0) {
     return null;
   }
@@ -480,7 +501,10 @@ export function levelMatchGainDb(
   if (trackLufs == null || !Number.isFinite(trackLufs)) {
     return { gainDb: 0, warning: "missing-lufs" };
   }
-  let gainDb = Math.min(LEVEL_MATCH_GAIN_MAX_DB, Math.max(LEVEL_MATCH_GAIN_MIN_DB, referenceLufs - trackLufs));
+  let gainDb = Math.min(
+    LEVEL_MATCH_GAIN_MAX_DB,
+    Math.max(LEVEL_MATCH_GAIN_MIN_DB, referenceLufs - trackLufs),
+  );
   let warning: string | null = null;
   if (truePeakDb != null && Number.isFinite(truePeakDb)) {
     const maxGain = Math.min(LEVEL_MATCH_GAIN_MAX_DB, 0 - truePeakDb);
@@ -535,30 +559,31 @@ export function buildEntries(
     }
     const outGrid = gridBpm(track);
     const locked = firstAlignedApplied || (rates[index] ?? 1) !== 1;
-    const outgoingEffective =
-      locked && outGrid != null ? outGrid * (rates[index] ?? 1) : undefined;
+    const outgoingEffective = locked && outGrid != null ? outGrid * (rates[index] ?? 1) : undefined;
     const plannedStart =
       prior && "sourceStartMs" in prior && prior.sourceStartMs != null
         ? prior.sourceStartMs
-        : (track.analysis?.manualMixInMs
-          ?? pairWindows[index - 1]?.mixInMs
-          ?? track.analysis?.mixInMs
-          ?? track.analysis?.audioStartMs
-          ?? 0);
+        : (track.analysis?.manualMixInMs ??
+          pairWindows[index - 1]?.mixInMs ??
+          track.analysis?.mixInMs ??
+          track.analysis?.audioStartMs ??
+          0);
     const result = chooseTransition(track, next, {
       outgoingSourceStartMs: plannedStart,
-      outgoingHeadEndMs: plannedStart
-        + (chosen[index - 1]?.transition.durationMs ?? 0) * (rates[index] ?? 1),
+      outgoingHeadEndMs:
+        plannedStart + (chosen[index - 1]?.transition.durationMs ?? 0) * (rates[index] ?? 1),
       outgoingEffectiveBpm: outgoingEffective,
       dropAnchored: options.dropAnchored,
       chainTargetBpm: options.targetBpm,
       recall: options.recall,
     });
-    const alignedWindow = result.window ?? planPhraseWindow(track, next, {
-      dropAnchored: false,
-      outgoingRate: rates[index],
-      incomingRate: rates[index + 1],
-    });
+    const alignedWindow =
+      result.window ??
+      planPhraseWindow(track, next, {
+        dropAnchored: false,
+        outgoingRate: rates[index],
+        incomingRate: rates[index + 1],
+      });
     pairWindows[index] = alignedWindow;
     result.transition.parameters = {
       ...result.transition.parameters,
@@ -570,7 +595,8 @@ export function buildEntries(
         : {}),
       ...(alignedWindow.alignmentMode ? { alignmentMode: alignedWindow.alignmentMode } : {}),
     };
-    const aligned = result.transition.type === "phrase_mix" || result.transition.type === "bass_swap";
+    const aligned =
+      result.transition.type === "phrase_mix" || result.transition.type === "bass_swap";
     if (aligned) {
       if (!firstAlignedApplied && !existing?.get(track.id)?.playbackRate) {
         rates[index] = result.outgoingRate;
@@ -587,14 +613,13 @@ export function buildEntries(
     const isLast = index === tracks.length - 1;
     const prior = existing?.get(track.id);
     const picked = chosen[index];
-    const transition = isLast
-      ? null
-      : (prior?.transitionToNext ?? picked?.transition ?? null);
+    const transition = isLast ? null : (prior?.transitionToNext ?? picked?.transition ?? null);
     const overlap = isLast ? 0 : overlapFor(transition) || overlapMs;
     const rate =
       prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : (rates[index] ?? 1);
     return musicalWindow(track, overlap, rate, isLast, {
-      mixInMs: prior?.sourceStartMs ?? track.analysis?.manualMixInMs ?? pairWindows[index - 1]?.mixInMs,
+      mixInMs:
+        prior?.sourceStartMs ?? track.analysis?.manualMixInMs ?? pairWindows[index - 1]?.mixInMs,
       mixOutMs: track.analysis?.manualMixOutMs ?? pairWindows[index]?.mixOutMs,
       preserveWindow: true,
     });
@@ -631,8 +656,16 @@ export function buildEntries(
             parameters: {
               ...baseTransition.parameters,
               recipeVersion: 1,
-              mixOutMs: sourceEndMs - outputToSourceMs(baseTransition.durationMs, prior?.playbackRate ?? rates[index] ?? 1),
-              mixInMs: existing?.get(tracks[index + 1]!.id)?.sourceStartMs ?? nextWindow?.sourceStartMs ?? window.mixInMs,
+              mixOutMs:
+                sourceEndMs -
+                outputToSourceMs(
+                  baseTransition.durationMs,
+                  prior?.playbackRate ?? rates[index] ?? 1,
+                ),
+              mixInMs:
+                existing?.get(tracks[index + 1]!.id)?.sourceStartMs ??
+                nextWindow?.sourceStartMs ??
+                window.mixInMs,
             },
           };
     const playbackRate =
@@ -689,7 +722,8 @@ export function planDurationMs(
   return plannedMixDurationMs(
     entries,
     "overlap",
-    resolvePlanRateRegionsVersion({ rateRegionsVersion: plan?.rateRegionsVersion, entries }).version,
+    resolvePlanRateRegionsVersion({ rateRegionsVersion: plan?.rateRegionsVersion, entries })
+      .version,
   );
 }
 
@@ -771,11 +805,11 @@ export function analysisToTimeline(
     sectionEnergy: section.sectionEnergy ?? 0.5,
   }));
   const lastEnd = sections.at(-1)?.endMs;
-  const duration =
-    durationMs ?? analysis.descriptors?.audioEndMs ?? lastEnd ?? 0;
+  const duration = durationMs ?? analysis.descriptors?.audioEndMs ?? lastEnd ?? 0;
   const intro = sections.find((section) => section.type === "intro");
-  const outro = sections.find((section) => section.type === "outro" && section.sectionEnergy >= 0.05)
-    ?? sections.find((section) => section.type === "outro");
+  const outro =
+    sections.find((section) => section.type === "outro" && section.sectionEnergy >= 0.05) ??
+    sections.find((section) => section.type === "outro");
   const bundle = {
     track: { id: analysis.trackId ?? "unknown", durationMs: duration },
     analysis: {
@@ -792,8 +826,10 @@ export function analysisToTimeline(
   const hint = resolveBpmHint(analysis);
   return {
     gridOk: !analysis.gridRejected && (analysis.bpmConfidence ?? 0) >= MIN_ANALYSIS_CONFIDENCE,
-    manualMixInMs: cues.find((cue) => cue.source === "manual" && cue.type === "intro_start")?.positionMs ?? null,
-    manualMixOutMs: cues.find((cue) => cue.source === "manual" && cue.type === "outro_start")?.positionMs ?? null,
+    manualMixInMs:
+      cues.find((cue) => cue.source === "manual" && cue.type === "intro_start")?.positionMs ?? null,
+    manualMixOutMs:
+      cues.find((cue) => cue.source === "manual" && cue.type === "outro_start")?.positionMs ?? null,
     bpm: analysis.bpm,
     canonicalBpm: canonicalBpm ?? analysis.bpm,
     bpmHint: hint.bpm,
@@ -813,8 +849,7 @@ export function analysisToTimeline(
     mixOutMs: mixOut.ms,
     headEnergy: sectionEnergyAt(sections, mixIn.ms),
     tailEnergy: sectionEnergyAt(sections, mixOut.ms),
-    integratedLufs:
-      analysis.integratedLufs ?? analysis.descriptors?.integratedLufs ?? null,
+    integratedLufs: analysis.integratedLufs ?? analysis.descriptors?.integratedLufs ?? null,
     truePeakDb: analysis.truePeakDb ?? null,
     keyConfidence: analysis.keyConfidence ?? null,
     bars: analysis.descriptors?.bars ?? null,

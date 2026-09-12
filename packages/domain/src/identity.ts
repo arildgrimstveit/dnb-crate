@@ -8,8 +8,8 @@ export function normalizePersonName(value: string): string {
 
 export function stripFeaturing(title: string): string {
   return title
-    .replace(/\s*[\(\[]\s*(feat\.?|ft\.?|featuring)\b[^\)\]]*[\)\]]/gi, "")
-    .replace(/\s+[\(\[]\s*(feat\.?|ft\.?|featuring)\b[^\)\]]*[\)\]]/gi, "")
+    .replace(/\s*[([]\s*(feat\.?|ft\.?|featuring)\b[^)\]]*[)\]]/gi, "")
+    .replace(/\s+[([]\s*(feat\.?|ft\.?|featuring)\b[^)\]]*[)\]]/gi, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -23,7 +23,7 @@ export function remixTokens(title: string): Set<string> {
   for (const match of matches) {
     tokens.add(match.toLowerCase());
   }
-  const named = lower.match(/[\(\[]([^)\]]+)[\)\]]/g) ?? [];
+  const named = lower.match(/[([]([^)\]]+)[)\]]/g) ?? [];
   for (const group of named) {
     const inner = group.slice(1, -1).trim().toLowerCase();
     if (REMIX_TOKEN.test(inner)) {

@@ -4,6 +4,7 @@ import type {
   RenderJobStatus,
   RenderManifestV1,
   RenderOutputFormat,
+  SetPlanV1,
 } from "@dnb-crate/domain";
 import {
   DEFAULT_RENDER_OUTPUT_FORMAT,
@@ -12,6 +13,7 @@ import {
 } from "@dnb-crate/domain";
 
 import type { SqliteDatabase } from "./db.ts";
+import type { FrozenEvidenceRef, FrozenRenderSettings, FrozenTrackEvidence } from "./evidence.ts";
 import { decodeCursor, encodeCursor } from "./pagination.ts";
 
 type JobRow = {
@@ -37,6 +39,13 @@ type JobRow = {
   completed_at: string | null;
 };
 
+export type FrozenRenderRequest = {
+  planContentHash: string;
+  plan: SetPlanV1;
+  evidence: Record<string, FrozenTrackEvidence | FrozenEvidenceRef>;
+  settings?: FrozenRenderSettings;
+};
+
 export type RenderJobParams = {
   windowMs?: number;
   edgeFadeMs?: number;
@@ -45,6 +54,7 @@ export type RenderJobParams = {
   allowLowConfidence?: boolean;
   allowExcessiveTempo?: boolean;
   allowOverlongDuration?: boolean;
+  request?: FrozenRenderRequest;
 };
 
 export type StoredRenderJob = RenderJob & {
@@ -251,15 +261,35 @@ export class RenderJobRepository {
   markFailed(
     id: string,
     error: { code: string; message: string; retryable: boolean },
+    extras?: {
+      outputRelpath?: string;
+      checksum?: string;
+      manifest?: RenderManifestV1;
+      warnings?: string[];
+    },
   ): StoredRenderJob {
     this.db
       .prepare(
         `UPDATE render_jobs SET
           status = 'failed', error_code = ?, error_message = ?, retryable = ?,
-          progress_message = 'failed', completed_at = ?
+          progress_message = 'failed', completed_at = ?,
+          output_relpath = COALESCE(?, output_relpath),
+          output_checksum = COALESCE(?, output_checksum),
+          manifest_json = COALESCE(?, manifest_json),
+          warnings_json = COALESCE(?, warnings_json)
          WHERE id = ? AND status IN ('queued', 'running')`,
       )
-      .run(error.code, error.message, error.retryable ? 1 : 0, nowIso(), id);
+      .run(
+        error.code,
+        error.message,
+        error.retryable ? 1 : 0,
+        nowIso(),
+        extras?.outputRelpath ?? null,
+        extras?.checksum ?? null,
+        extras?.manifest ? JSON.stringify(extras.manifest) : null,
+        extras?.warnings ? JSON.stringify(extras.warnings) : null,
+        id,
+      );
     return this.require(id);
   }
 

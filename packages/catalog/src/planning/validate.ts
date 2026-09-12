@@ -136,7 +136,8 @@ export function validateSetPlan(
         trackId: track.id,
       });
     }
-    const artist = track.artistCanonical ?? (track.artist ? normalizePersonName(track.artist) : null);
+    const artist =
+      track.artistCanonical ?? (track.artist ? normalizePersonName(track.artist) : null);
     if (
       spacing > 0 &&
       artist !== null &&

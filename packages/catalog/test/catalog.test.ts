@@ -31,11 +31,11 @@ async function makeWorkspace(): Promise<{ root: string; library: string; config:
   return { root: unique, library, config: testConfig(unique) };
 }
 
-const cleanups: Array<() => void> = [];
+const cleanups: Array<() => void | Promise<void>> = [];
 
-afterEach(() => {
+afterEach(async () => {
   while (cleanups.length > 0) {
-    cleanups.pop()?.();
+    await cleanups.pop()?.();
   }
 });
 

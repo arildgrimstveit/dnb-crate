@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import { dspAnalyzer } from "../src/dsp-analyzer.ts";
 import { resolveBpmHint } from "@dnb-crate/domain";
 
-import { buildChordPcm, buildKeyedDnbPcm, buildOffbeatHatPcm, buildSyntheticDnbPcm } from "../src/synthetic-dnb.ts";
+import {
+  buildChordPcm,
+  buildKeyedDnbPcm,
+  buildOffbeatHatPcm,
+  buildSyntheticDnbPcm,
+} from "../src/synthetic-dnb.ts";
 import { buildClickTrackPcm } from "../src/click-track.ts";
 
 function median(values: number[]): number {
@@ -16,8 +21,7 @@ function noisyClicks(gain: number) {
   const full = buildClickTrackPcm({ bpm: 174, durationMs: 12_000, sampleRateHz: 22_050 });
   const samples = new Float32Array(full.samples);
   for (let i = 0; i < samples.length; i += 1) {
-    samples[i] =
-      (samples[i] ?? 0) + ((((i * 1_103_515_245 + 12_345) >>> 16) / 32_768) - 0.5) * gain;
+    samples[i] = (samples[i] ?? 0) + (((i * 1_103_515_245 + 12_345) >>> 16) / 32_768 - 0.5) * gain;
   }
   return { ...full, samples };
 }
@@ -78,7 +82,9 @@ describe("dnb-crate-dsp", () => {
     expect(result.sections.filter((section) => section.type === "drop").length).toBe(2);
     expect(result.suggestedCues.filter((cue) => cue.type === "drop")).toHaveLength(1);
     const firstDrop = result.sections.find((section) => section.type === "drop");
-    expect(Math.abs((firstDrop?.startMs ?? 0) - pcm.expected.dropMs)).toBeLessThan((4 * 60_000) / 174);
+    expect(Math.abs((firstDrop?.startMs ?? 0) - pcm.expected.dropMs)).toBeLessThan(
+      (4 * 60_000) / 174,
+    );
   });
 
   it("ends on a drop with no outro cue when the track never leaves the drop", () => {
@@ -317,7 +323,10 @@ describe("dnb-crate-dsp", () => {
     expect(result.bpm).toBeNull();
     expect(result.bpmRaw).not.toBeNull();
     const raw = result.bpmRaw ?? 0;
-    const near124 = Math.abs(raw - 124) < 8 || Math.abs(raw * (2 / 3) - 124) < 8 || Math.abs(raw * (3 / 2) - 124) < 8;
+    const near124 =
+      Math.abs(raw - 124) < 8 ||
+      Math.abs(raw * (2 / 3) - 124) < 8 ||
+      Math.abs(raw * (3 / 2) - 124) < 8;
     expect(near124).toBe(true);
     expect(result.bpm === 186 || Math.abs((result.bpm ?? 0) - 186) < 1).toBe(false);
   });
@@ -334,8 +343,7 @@ describe("dnb-crate-dsp", () => {
     const full = buildClickTrackPcm({ bpm: 174, durationMs: 12_000, sampleRateHz: 22_050 });
     const samples = new Float32Array(full.samples);
     for (let i = 0; i < samples.length; i += 1) {
-      samples[i] =
-        (samples[i] ?? 0) + ((((i * 1_103_515_245 + 12_345) >>> 16) / 32_768) - 0.5) * 1.3;
+      samples[i] = (samples[i] ?? 0) + (((i * 1_103_515_245 + 12_345) >>> 16) / 32_768 - 0.5) * 1.3;
     }
     const rejected = dspAnalyzer.analyze({ ...full, samples });
     expect(rejected.gridRejected).toBe(true);

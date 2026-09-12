@@ -13,7 +13,17 @@ import {
 } from "@dnb-crate/domain";
 import { relaxDescriptorFilters } from "../src/planning/planner.ts";
 import { validateSetPlan } from "../src/planning/validate.ts";
-import { analysisToTimeline, buildEntries, chooseTransition, levelMatchGainDb, musicalWindow, planDurationMs, playableOutputMs, type TimelineAnalysis, type TimelineTrack } from "../src/planning/timeline.ts";
+import {
+  analysisToTimeline,
+  buildEntries,
+  chooseTransition,
+  levelMatchGainDb,
+  musicalWindow,
+  planDurationMs,
+  playableOutputMs,
+  type TimelineAnalysis,
+  type TimelineTrack,
+} from "../src/planning/timeline.ts";
 import { planTransition } from "../src/planning/transition-planner.ts";
 import type { SetPlanV1, Track, TrackSection } from "@dnb-crate/domain";
 
@@ -27,10 +37,10 @@ function testConfig(root: string): AppConfig {
   };
 }
 
-const cleanups: Array<() => void> = [];
-afterEach(() => {
+const cleanups: Array<() => void | Promise<void>> = [];
+afterEach(async () => {
   while (cleanups.length > 0) {
-    cleanups.pop()?.();
+    await cleanups.pop()?.();
   }
 });
 
@@ -44,16 +54,14 @@ function runtime() {
   return created;
 }
 
-function createPlan(
-  catalog: ReturnType<typeof runtime>,
-  input: CreateSetPlanInput,
-) {
+function createPlan(catalog: ReturnType<typeof runtime>, input: CreateSetPlanInput) {
   return catalog.service.createSetPlan({ ...input, qualityPolicy: input.qualityPolicy ?? "off" });
 }
 
 function seedTrack(
   catalog: ReturnType<typeof runtime>,
   spec: {
+    id?: string;
     title: string;
     artist: string;
     bpm?: number | null;
@@ -65,7 +73,7 @@ function seedTrack(
     durationMs?: number;
   },
 ): string {
-  const id = crypto.randomUUID();
+  const id = spec.id ?? crypto.randomUUID();
   const key = spec.camelot.endsWith("A") ? "xmin" : "X";
   catalog.repository.upsertFromScan({
     id,
@@ -174,22 +182,36 @@ function stubDescriptors(
 describe("set planning", () => {
   it("diversifies against explicit mixes, persists the history and keeps hard requests", () => {
     const catalog = runtime();
-    for (let i = 0; i < 12; i += 1) seedTrack(catalog, {
-      title: `Variety ${i}`, artist: `Artist ${i}`, bpm: 174, camelot: "8A", energy: 5,
-    });
+    for (let i = 0; i < 12; i += 1)
+      seedTrack(catalog, {
+        title: `Variety ${i}`,
+        artist: `Artist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+      });
     const brief = { name: "Variety", targetDurationMs: 270_000, seed: 12, explorationWeight: 0 };
     const first = createPlan(catalog, brief);
     const nextBrief = { ...brief, variety: { referencePlanIds: [first.plan.id], strength: 1 } };
     const next = createPlan(catalog, nextBrief);
     const repeat = createPlan(catalog, nextBrief);
-    expect(next.plan.entries.map((entry) => entry.trackId)).toEqual(repeat.plan.entries.map((entry) => entry.trackId));
+    expect(next.plan.entries.map((entry) => entry.trackId)).toEqual(
+      repeat.plan.entries.map((entry) => entry.trackId),
+    );
     expect(next.explanation.variety?.repeatedTracks).toBe(0);
-    expect(catalog.setPlans.findById(next.plan.id)?.explanation.variety).toEqual(next.explanation.variety);
+    expect(catalog.setPlans.findById(next.plan.id)?.explanation.variety).toEqual(
+      next.explanation.variety,
+    );
     expect(catalog.setPlans.findById(next.plan.id)?.plan.handoffPolicy).toBe("dj-continuity-v1");
-    const required = createPlan(catalog, { ...nextBrief, startTrackId: first.plan.entries[0]!.trackId });
+    const required = createPlan(catalog, {
+      ...nextBrief,
+      startTrackId: first.plan.entries[0]!.trackId,
+    });
     expect(required.plan.entries[0]?.trackId).toBe(first.plan.entries[0]!.trackId);
     expect(required.explanation.variety?.repeatedTracks).toBeGreaterThan(0);
-    expect(() => createPlan(catalog, { ...brief, variety: { referencePlanIds: [crypto.randomUUID()] } })).toThrow();
+    expect(() =>
+      createPlan(catalog, { ...brief, variety: { referencePlanIds: [crypto.randomUUID()] } }),
+    ).toThrow();
   });
   it("builds a deterministic plan that honors start, end, and seed", () => {
     const catalog = runtime();
@@ -404,8 +426,20 @@ describe("set planning", () => {
 
   it("keeps a non-zero manual gain across clone --replan", () => {
     const catalog = runtime();
-    const a = seedTrack(catalog, { title: "Loud", artist: "A", bpm: 174, camelot: "11A", energy: 6 });
-    const b = seedTrack(catalog, { title: "Quiet", artist: "B", bpm: 174, camelot: "12A", energy: 6 });
+    const a = seedTrack(catalog, {
+      title: "Loud",
+      artist: "A",
+      bpm: 174,
+      camelot: "11A",
+      energy: 6,
+    });
+    const b = seedTrack(catalog, {
+      title: "Quiet",
+      artist: "B",
+      bpm: 174,
+      camelot: "12A",
+      energy: 6,
+    });
     stubDescriptors(catalog, a, { energy: 0.7 }, { bpm: 174 });
     stubDescriptors(catalog, b, { energy: 0.7 }, { bpm: 174 });
     catalog.analyses.upsert({
@@ -681,7 +715,9 @@ describe("planner tempo matching", () => {
       ],
     });
     expect(chooseTransition(outgoing, incoming).transition.type).toBe("phrase_mix");
-    expect(chooseTransition(outgoing, incoming).transition.parameters.reason).toBe("continuity-window");
+    expect(chooseTransition(outgoing, incoming).transition.parameters.reason).toBe(
+      "continuity-window",
+    );
   });
 
   it("picks phrase_mix for a quiet intro even when both tracks are energy 9", () => {
@@ -792,7 +828,10 @@ describe("planner tempo matching", () => {
     expect(entries[0]?.gainDb).toBe(-3);
     expect(entries[0]?.transitionToNext?.parameters.levelMatchWarning).toBe("true-peak-headroom");
     expect(levelMatchGainDb(-16, -12, 3)).toEqual({ gainDb: -3, warning: "true-peak-headroom" });
-    expect(levelMatchGainDb(-16, -12, 0.8)).toEqual({ gainDb: -0.8, warning: "true-peak-headroom" });
+    expect(levelMatchGainDb(-16, -12, 0.8)).toEqual({
+      gainDb: -0.8,
+      warning: "true-peak-headroom",
+    });
     expect(levelMatchGainDb(-13, -12, -2)).toEqual({ gainDb: 1, warning: null });
   });
 
@@ -917,10 +956,7 @@ describe("planner tempo matching", () => {
       mixOutMs: 200_000,
       introStartMs: 16_000,
       introLenMs: 16_000,
-      sections: [
-        section("intro", 16_000, 32_000, 0.3),
-        section("drop", 32_000, 200_000, 0.9),
-      ],
+      sections: [section("intro", 16_000, 32_000, 0.3), section("drop", 32_000, 200_000, 0.9)],
     });
     incoming.durationMs = 240_000;
     const entries = buildEntries([outgoing, incoming]);
@@ -976,7 +1012,9 @@ describe("planner tempo matching", () => {
           section("build", 16, 48, 0.25),
           section("drop", 48, 80, 0.9),
         ],
-        downbeatTimesMs: Array.from({ length: endBar * 4 + 1 }, (_, i) => Math.round((i * bar) / 4)),
+        downbeatTimesMs: Array.from({ length: endBar * 4 + 1 }, (_, i) =>
+          Math.round((i * bar) / 4),
+        ),
         downbeatConfidence: 1,
         audioStartMs: 0,
         audioEndMs: Math.round(endBar * bar),
@@ -1175,7 +1213,10 @@ describe("planner tempo matching", () => {
     ];
     const entries = buildEntries([outgoing, incoming]);
     expect(entries[1]!.sourceStartMs).toBeGreaterThan(40_000);
-    expect(entries[1]!.sourceStartMs).toBeCloseTo(entries[0]!.transitionToNext!.parameters.mixInMs as number, 0);
+    expect(entries[1]!.sourceStartMs).toBeCloseTo(
+      entries[0]!.transitionToNext!.parameters.mixInMs as number,
+      0,
+    );
   });
 
   it("preserves an explicit complementary shape on rebuild", () => {
@@ -1409,9 +1450,33 @@ describe("analyzed cue provenance", () => {
         analyzedAt: new Date().toISOString(),
         suggestedCues: [],
         sections: [
-          { type: "intro" as const, startMs: 0, endMs: 20_000, startBar: 0, endBar: 8, confidence: 0.6, sectionEnergy: 0.4 },
-          { type: "drop" as const, startMs: 20_000, endMs: 80_000, startBar: 8, endBar: 32, confidence: 0.8, sectionEnergy: 0.9 },
-          { type: "outro" as const, startMs: 140_000, endMs: 180_000, startBar: 56, endBar: 72, confidence: 0.62, sectionEnergy: 0.3 },
+          {
+            type: "intro" as const,
+            startMs: 0,
+            endMs: 20_000,
+            startBar: 0,
+            endBar: 8,
+            confidence: 0.6,
+            sectionEnergy: 0.4,
+          },
+          {
+            type: "drop" as const,
+            startMs: 20_000,
+            endMs: 80_000,
+            startBar: 8,
+            endBar: 32,
+            confidence: 0.8,
+            sectionEnergy: 0.9,
+          },
+          {
+            type: "outro" as const,
+            startMs: 140_000,
+            endMs: 180_000,
+            startBar: 56,
+            endBar: 72,
+            confidence: 0.62,
+            sectionEnergy: 0.3,
+          },
         ],
       },
       cues: [
@@ -1435,8 +1500,24 @@ describe("analyzed cue provenance", () => {
         ...outgoing.analysis,
         trackId: "in",
         sections: [
-          { type: "intro" as const, startMs: 0, endMs: 16_000, startBar: 0, endBar: 8, confidence: 0.55, sectionEnergy: 0.3 },
-          { type: "drop" as const, startMs: 16_000, endMs: 80_000, startBar: 8, endBar: 32, confidence: 0.8, sectionEnergy: 0.9 },
+          {
+            type: "intro" as const,
+            startMs: 0,
+            endMs: 16_000,
+            startBar: 0,
+            endBar: 8,
+            confidence: 0.55,
+            sectionEnergy: 0.3,
+          },
+          {
+            type: "drop" as const,
+            startMs: 16_000,
+            endMs: 80_000,
+            startBar: 8,
+            endBar: 32,
+            confidence: 0.8,
+            sectionEnergy: 0.9,
+          },
         ],
       },
       cues: [
@@ -1584,9 +1665,9 @@ describe("applyTransition and silence windows", () => {
     expect(updated.plan.entries[0]!.sourceStartMs).toBe(outgoingStart);
     expect(updated.plan.entries[0]!.sourceEndMs).toBe(proposal.outgoingSourceEndMs);
     expect(updated.plan.entries[1]!.sourceEndMs).toBe(middleEnd);
-    expect(updated.plan.entries[0]!.sourceEndMs - updated.plan.entries[0]!.sourceStartMs).toBeGreaterThanOrEqual(
-      90_000,
-    );
+    expect(
+      updated.plan.entries[0]!.sourceEndMs - updated.plan.entries[0]!.sourceStartMs,
+    ).toBeGreaterThanOrEqual(90_000);
   });
 
   it("warns WINDOW_IN_SILENCE when the source end sits in digital silence", () => {
@@ -1653,8 +1734,20 @@ describe("applyTransition and silence windows", () => {
 describe("descriptor filters and mood presets", () => {
   it("hard-filters the pool by descriptor energy", () => {
     const catalog = runtime();
-    const low = seedTrack(catalog, { title: "Low", artist: "A", bpm: 174, camelot: "8A", energy: 5 });
-    const high = seedTrack(catalog, { title: "High", artist: "B", bpm: 174, camelot: "9A", energy: 5 });
+    const low = seedTrack(catalog, {
+      title: "Low",
+      artist: "A",
+      bpm: 174,
+      camelot: "8A",
+      energy: 5,
+    });
+    const high = seedTrack(catalog, {
+      title: "High",
+      artist: "B",
+      bpm: 174,
+      camelot: "9A",
+      energy: 5,
+    });
     stubDescriptors(catalog, low, { energy: 0.4 });
     stubDescriptors(catalog, high, { energy: 0.85 });
     const created = createPlan(catalog, {
@@ -1666,9 +1759,9 @@ describe("descriptor filters and mood presets", () => {
     const ids = created.plan.entries.map((entry) => entry.trackId);
     expect(ids).toContain(high);
     expect(ids).not.toContain(low);
-    expect(created.explanation.rejected.some((row) => row.reason === "DESCRIPTOR_OUT_OF_RANGE")).toBe(
-      true,
-    );
+    expect(
+      created.explanation.rejected.some((row) => row.reason === "DESCRIPTOR_OUT_OF_RANGE"),
+    ).toBe(true);
   });
 
   it("scores mood presets when manual moods are empty and ignores them when set", () => {
@@ -1745,8 +1838,20 @@ describe("descriptor filters and mood presets", () => {
 
   it("never co-selects the same recording_key", () => {
     const catalog = runtime();
-    const a = seedTrack(catalog, { title: "Copy A", artist: "A", bpm: 174, camelot: "8A", energy: 6 });
-    const b = seedTrack(catalog, { title: "Copy B", artist: "A", bpm: 174, camelot: "8A", energy: 6 });
+    const a = seedTrack(catalog, {
+      title: "Copy A",
+      artist: "A",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
+    const b = seedTrack(catalog, {
+      title: "Copy B",
+      artist: "A",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
     catalog.db
       .prepare("UPDATE tracks SET recording_key = ? WHERE id IN (?, ?)")
       .run("mbid:same-recording", a, b);
@@ -1821,7 +1926,13 @@ describe("descriptor filters and mood presets", () => {
 
   it("lets bpmHint satisfy BPM filters and keeps the join as crossfade", () => {
     const catalog = runtime();
-    const grid = seedTrack(catalog, { title: "Grid", artist: "A", bpm: 174, camelot: "8A", energy: 6 });
+    const grid = seedTrack(catalog, {
+      title: "Grid",
+      artist: "A",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
     const hint = seedTrack(catalog, {
       title: "Hint",
       artist: "B",
@@ -1829,12 +1940,17 @@ describe("descriptor filters and mood presets", () => {
       camelot: "9A",
       energy: 6,
     });
-    stubDescriptors(catalog, hint, { energy: 0.6 }, {
-      gridRejected: true,
-      bpm: null,
-      bpmRaw: 174,
-      bpmConfidence: 0.55,
-    });
+    stubDescriptors(
+      catalog,
+      hint,
+      { energy: 0.6 },
+      {
+        gridRejected: true,
+        bpm: null,
+        bpmRaw: 174,
+        bpmConfidence: 0.55,
+      },
+    );
     const created = createPlan(catalog, {
       name: "Hint pool",
       targetDurationMs: 300_000,
@@ -1853,9 +1969,30 @@ describe("descriptor filters and mood presets", () => {
 
   it("prefers the closer LUFS neighbour when the rest is equal", () => {
     const catalog = runtime();
-    const start = seedTrack(catalog, { title: "Src", artist: "A", bpm: 174, camelot: "8A", energy: 6 });
-    const close = seedTrack(catalog, { title: "Close", artist: "B", bpm: 174, camelot: "8A", energy: 6 });
-    const far = seedTrack(catalog, { title: "Far", artist: "C", bpm: 174, camelot: "8A", energy: 6 });
+    const start = seedTrack(catalog, {
+      id: "11111111-1111-4111-8111-111111111111",
+      title: "Src",
+      artist: "A",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
+    const close = seedTrack(catalog, {
+      id: "22222222-2222-4222-8222-222222222222",
+      title: "Close",
+      artist: "B",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
+    const far = seedTrack(catalog, {
+      id: "33333333-3333-4333-8333-333333333333",
+      title: "Far",
+      artist: "C",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
     stubDescriptors(catalog, start, { energy: 0.7 }, { integratedLufs: -8 });
     stubDescriptors(catalog, close, { energy: 0.7 }, { integratedLufs: -7 });
     stubDescriptors(catalog, far, { energy: 0.7 }, { integratedLufs: -13 });
@@ -1864,12 +2001,143 @@ describe("descriptor filters and mood presets", () => {
       targetDurationMs: 300_000,
       startTrackId: start,
       seed: 1,
+      explorationWeight: 0,
     });
     const second = created.plan.entries[1]?.trackId;
     expect(second).toBe(close);
-    expect(created.explanation.selected.some((row) => row.score.components.joinLevel !== 0 || row.trackId === close)).toBe(
-      true,
+    expect(
+      created.explanation.selected.some(
+        (row) => row.score.components.joinLevel !== 0 || row.trackId === close,
+      ),
+    ).toBe(true);
+  });
+
+  it("ranks and plans from the selected structure engine", () => {
+    const catalog = runtime();
+    const start = seedTrack(catalog, {
+      id: "44444444-4444-4444-8444-444444444444",
+      title: "Src",
+      artist: "A",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
+    const other = seedTrack(catalog, {
+      id: "55555555-5555-4555-8555-555555555555",
+      title: "Other",
+      artist: "C",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
+    const match = seedTrack(catalog, {
+      id: "66666666-6666-4666-8666-666666666666",
+      title: "Match",
+      artist: "B",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
+    const section = (
+      type: TrackSection["type"],
+      startMs: number,
+      endMs: number,
+      startBar = 0,
+      endBar = 0,
+    ): TrackSection => ({
+      type,
+      startMs,
+      endMs,
+      startBar,
+      endBar,
+      confidence: 0.8,
+      sectionEnergy: 0.4,
+    });
+    const upsert = (trackId: string, engine: string, sections: TrackSection[]) => {
+      catalog.analyses.upsert({
+        trackId,
+        analyzerName: engine,
+        analyzerVersion: "3.0.0",
+        bpm: 174,
+        bpmConfidence: 0.8,
+        bpmRaw: 174,
+        referenceBpm: null,
+        beatTimesMs: [],
+        downbeatTimesMs: [],
+        gridRejected: false,
+        gridRejectionReason: null,
+        gridSource: "analyzed",
+        musicalKey: "xmin",
+        keyConfidence: 0.8,
+        keyMode: "minor",
+        camelotKey: "8A",
+        tempoStability: null,
+        downbeatConfidence: null,
+        integratedLufs: null,
+        truePeakDb: null,
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        waveformSummary: null,
+        beatAnchorMs: null,
+        descriptors: testSonicDescriptors({ energy: 0.6 }),
+        engineRuntimeMs: 1,
+        analyzedAt: new Date().toISOString(),
+        suggestedCues: [],
+        sections,
+      });
+    };
+    upsert(start, DSP_ANALYZER_NAME, [
+      section("intro", 0, 2_000),
+      section("drop", 40_000, 60_000),
+      section("outro", 146_000, 148_000),
+    ]);
+    upsert(start, "legacy-structure", [
+      section("intro", 0, 4_000),
+      section("drop", 80_000, 100_000),
+      section("outro", 146_000, 150_000),
+    ]);
+    upsert(match, DSP_ANALYZER_NAME, [
+      section("intro", 0, 8_000, 0, 16),
+      section("drop", 4_000, 20_000, 8, 40),
+    ]);
+    upsert(match, "legacy-structure", [
+      section("intro", 0, 4_000, 0, 8),
+      section("drop", 8_000, 24_000, 16, 48),
+    ]);
+    upsert(other, DSP_ANALYZER_NAME, [
+      section("intro", 0, 8_000, 0, 16),
+      section("drop", 4_000, 20_000, 8, 40),
+    ]);
+    catalog.service.selectTrackEvidence({
+      trackId: start,
+      rhythmEngine: DSP_ANALYZER_NAME,
+      structureEngine: "legacy-structure",
+      reason: "test",
+    });
+    catalog.service.selectTrackEvidence({
+      trackId: match,
+      rhythmEngine: DSP_ANALYZER_NAME,
+      structureEngine: "legacy-structure",
+      reason: "test",
+    });
+    const ranked = catalog.service.findCompatibleTracks({ sourceTrackId: start });
+    expect(ranked.candidates[0]?.track.id).toBe(match);
+    expect(ranked.candidates[0]?.score.components.structure).toBeGreaterThan(
+      ranked.candidates.find((row) => row.track.id === other)?.score.components.structure ?? 0,
     );
+    expect(
+      catalog.service.getTrackAnalysis(match).sections.find((row) => row.type === "drop")?.startMs,
+    ).toBe(8_000);
+    expect(
+      catalog.service.getTrackAnalysis(start).sections.find((row) => row.type === "outro"),
+    ).toMatchObject({ startMs: 146_000, endMs: 150_000 });
+    const planned = catalog.service.planTransition({
+      outgoingTrackId: start,
+      incomingTrackId: match,
+    });
+    expect(planned.proposals.length).toBeGreaterThan(0);
+    expect(catalog.service.getTrackAnalysis(start).bpm).toBe(174);
   });
 
   it("does not write an analyzed key below the confidence gate", () => {
@@ -1910,8 +2178,20 @@ describe("descriptor filters and mood presets", () => {
 
   it("reports harmonicCoverage for keyed joins", () => {
     const catalog = runtime();
-    const start = seedTrack(catalog, { title: "A", artist: "X", bpm: 174, camelot: "8A", energy: 6 });
-    const next = seedTrack(catalog, { title: "B", artist: "Y", bpm: 174, camelot: "8A", energy: 6 });
+    const start = seedTrack(catalog, {
+      title: "A",
+      artist: "X",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
+    const next = seedTrack(catalog, {
+      title: "B",
+      artist: "Y",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
     stubDescriptors(catalog, start, { energy: 0.7 });
     stubDescriptors(catalog, next, { energy: 0.7 });
     const created = createPlan(catalog, {
@@ -1974,7 +2254,9 @@ describe("descriptor filters and mood presets", () => {
       requiredTrackIds: [liked],
       seed: 1,
     });
-    expect(fresh.explanation.selected.every((entry) => entry.score.components.feedback <= 0)).toBe(true);
+    expect(fresh.explanation.selected.every((entry) => entry.score.components.feedback <= 0)).toBe(
+      true,
+    );
   });
 
   it("drops a non-required tail when the hour overshoots and refuses an overshoot extra", () => {
@@ -1996,7 +2278,8 @@ describe("descriptor filters and mood presets", () => {
       seed: 1,
     });
     const oversizeMs = oversize.plan.entries.reduce(
-      (max, entry) => Math.max(max, entry.timelineStartMs + (entry.sourceEndMs - entry.sourceStartMs)),
+      (max, entry) =>
+        Math.max(max, entry.timelineStartMs + (entry.sourceEndMs - entry.sourceStartMs)),
       0,
     );
     expect(oversizeMs).toBeLessThanOrEqual(650_000 + 90_000);
@@ -2048,7 +2331,10 @@ describe("descriptor filters and mood presets", () => {
       readFileSync(path.join(process.cwd(), "docs/examples/peak-hour.example.brief.json"), "utf8"),
     ) as CreateSetPlanInput;
     const liquidBrief = JSON.parse(
-      readFileSync(path.join(process.cwd(), "docs/examples/liquid-hour.example.brief.json"), "utf8"),
+      readFileSync(
+        path.join(process.cwd(), "docs/examples/liquid-hour.example.brief.json"),
+        "utf8",
+      ),
     ) as CreateSetPlanInput;
     const catalog = runtime();
     for (let i = 0; i < 48; i += 1) {
@@ -2078,13 +2364,12 @@ describe("descriptor filters and mood presets", () => {
       liquidB.plan.entries.map((entry) => entry.trackId),
     );
     expect(peakA.explanation.selected[0]?.buckets).toMatchObject({
-      moodFit: expect.any(Number),
-      joinQuality: expect.any(Number),
-      keyCoverage: expect.any(Number),
-      timeFit: expect.any(Number),
-      lookahead: expect.any(Number),
-      feedback: expect.any(Number),
+      moodFit: expect.any(Number) as unknown,
+      joinQuality: expect.any(Number) as unknown,
+      keyCoverage: expect.any(Number) as unknown,
+      timeFit: expect.any(Number) as unknown,
+      lookahead: expect.any(Number) as unknown,
+      feedback: expect.any(Number) as unknown,
     });
   });
 });
-

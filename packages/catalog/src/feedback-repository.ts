@@ -105,9 +105,8 @@ export class FeedbackRepository {
   }
 
   findById(id: string): TransitionFeedback | null {
-    const row = this.db
-      .prepare("SELECT * FROM transition_feedback WHERE id = ?")
-      .get(id) as FeedbackRow | undefined;
+    const row = this.db.prepare("SELECT * FROM transition_feedback WHERE id = ?").get(id) as
+      FeedbackRow | undefined;
     return row ? mapRow(row) : null;
   }
 
@@ -209,7 +208,12 @@ export class FeedbackRepository {
       map.set(key, current);
     };
     for (const row of rows) {
-      bump(byFingerprint, row.recipeFingerprint, { recipeFingerprint: row.recipeFingerprint, pairKey: null }, row);
+      bump(
+        byFingerprint,
+        row.recipeFingerprint,
+        { recipeFingerprint: row.recipeFingerprint, pairKey: null },
+        row,
+      );
       if (row.outgoingTrackId && row.incomingTrackId) {
         const key = pairKey(row.outgoingTrackId, row.incomingTrackId);
         bump(byPair, key, { recipeFingerprint: null, pairKey: key }, row);

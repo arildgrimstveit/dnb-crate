@@ -1,6 +1,10 @@
 import * as z from "zod/v4";
 
-import { ANALYSIS_ENGINE_IDS, ANALYSIS_JOB_LIST_LIMIT_MAX, MAX_TEMPO_DEVIATION } from "./constants.ts";
+import {
+  ANALYSIS_ENGINE_IDS,
+  ANALYSIS_JOB_LIST_LIMIT_MAX,
+  MAX_TEMPO_DEVIATION,
+} from "./constants.ts";
 import { cuePointTypeSchema, trackIdSchema } from "./contracts.ts";
 
 export const analysisEngineIdSchema = z.enum(ANALYSIS_ENGINE_IDS);

@@ -23,6 +23,13 @@ import { CatalogService } from "./service.ts";
 import { RenderJobRepository } from "./render-job-repository.ts";
 import { RenderCoordinator } from "./render/coordinator.ts";
 import { SetPlanRepository } from "./set-plan-repository.ts";
+import { WorkerOwner } from "./worker-owner.ts";
+export { hasLiveWorker, WorkerOwner } from "./worker-owner.ts";
+export {
+  analysisForTimeline,
+  resolveTrackEvidence,
+  type ResolvedTrackEvidence,
+} from "./evidence.ts";
 
 export type CatalogRuntimeOptions = {
   /** Do not recover or start background jobs for planning/reporting commands. */
@@ -50,7 +57,7 @@ export function createCatalogRuntime(
   setPlans: SetPlanRepository;
   analyses: AnalysisRepository;
   analysisJobs: AnalysisJobRepository;
-  close: () => void;
+  close: () => Promise<void>;
 } {
   const db = openDatabase(config.databasePath);
   const repository = new TrackRepository(db);
@@ -60,7 +67,9 @@ export function createCatalogRuntime(
   const analysisJobs = new AnalysisJobRepository(db);
   const runner =
     options.processRunner ??
-    (options.useFakeFfmpeg ? createFakeFfmpegRunner() : createNodeProcessRunner());
+    (options.useFakeFfmpeg
+      ? createFakeFfmpegRunner({ probeDurationSec: 15 })
+      : createNodeProcessRunner());
   const renders = new RenderCoordinator(
     config,
     repository,
@@ -96,14 +105,13 @@ export function createCatalogRuntime(
       intervals: options.enrichmentIntervals,
     },
   );
-  if (!options.passive) {
-  renders.recoverInterrupted();
-  analysis.recoverInterrupted();
-  enrichment.recoverInterrupted();
-  renders.kick();
-  analysis.kick();
-  enrichment.kick();
-  }
+  const owner = new WorkerOwner(db);
+  let ownsWorker = false;
+  let closing: Promise<void> | undefined;
+  const canRun = () => ownsWorker && !closing;
+  renders.canRun = canRun;
+  analysis.canRun = canRun;
+  enrichment.canRun = canRun;
   const feedback = new FeedbackRepository(db);
   const recipes = new ApprovedRecipeRepository(db);
   const service = new CatalogService(
@@ -119,8 +127,32 @@ export function createCatalogRuntime(
     logger,
     new HourFeedbackRepository(db),
   );
-  renders.validateFullPlan = (setPlanId, options) =>
-    service.assertPlanReadyForRender(setPlanId, options);
+  renders.validateFullPlan = (plan, options) => service.assertPlanReadyForRender(plan, options);
+  const pump = () => {
+    if (!ownsWorker) {
+      if (!owner.acquire()) return;
+      ownsWorker = true;
+      renders.recoverInterrupted();
+      analysis.recoverInterrupted();
+      enrichment.recoverInterrupted();
+    }
+    renders.kick();
+    analysis.kick();
+    enrichment.kick();
+  };
+  // Pick up work submitted by another CLI/MCP runtime, and take over after an owner exits.
+  let timer: ReturnType<typeof setInterval> | undefined;
+  if (!options.passive) {
+    pump();
+    timer = setInterval(() => {
+      try {
+        pump();
+      } catch (error) {
+        logger.error({ err: error }, "Worker polling failed");
+      }
+    }, 250);
+    timer.unref();
+  }
   return {
     db,
     repository,
@@ -130,10 +162,14 @@ export function createCatalogRuntime(
     analyses,
     analysisJobs,
     close: () => {
-      renders.stop();
-      analysis.stop();
-      enrichment.stop();
-      db.close();
+      if (closing) return closing;
+      clearInterval(timer);
+      closing = Promise.all([renders.stop(), analysis.stop(), enrichment.stop()]).then(() => {
+        owner.release();
+        ownsWorker = false;
+        db.close();
+      });
+      return closing;
     },
   };
 }
@@ -142,14 +178,13 @@ export { openDatabase } from "./db.ts";
 export { runMigrations } from "./migrate.ts";
 export { TrackRepository } from "./repository.ts";
 export { CatalogService } from "./service.ts";
+export type CatalogRuntime = ReturnType<typeof createCatalogRuntime>;
 export type { RenderCheckResult, RenderCheckJoin } from "./render/coordinator.ts";
-export {
-  diagnoseOverlapAudio,
-  diagnoseRenderedMix,
-} from "./render/audio-diagnostics.ts";
+export { diagnoseOverlapAudio, diagnoseRenderedMix } from "./render/audio-diagnostics.ts";
 export {
   evaluateDurationError,
   freezeJoinEvidence,
+  fullRenderDurationFailure,
   storedGridFromEvidence,
   storedGridResidualMs,
 } from "./render/check-metrics.ts";
@@ -168,7 +203,11 @@ export { isPathInsideRoot, isPathInsideAnyRoot, relativeToRoots } from "./paths.
 export { fingerprintFile } from "./fingerprint.ts";
 export { extractAudioMetadata } from "./metadata.ts";
 export { EnrichmentCoordinator } from "./enrichment/coordinator.ts";
-export { createFakeHttpClient, createFetchHttpClient, redactUrl } from "./enrichment/http-client.ts";
+export {
+  createFakeHttpClient,
+  createFetchHttpClient,
+  redactUrl,
+} from "./enrichment/http-client.ts";
 export { RateLimiter } from "./enrichment/rate-limiter.ts";
 export { pickBestMatch, scoreMatch } from "./enrichment/matcher.ts";
 export { buildSineWav, writeSineWav, type WavFixtureOptions } from "./wav-fixture.ts";

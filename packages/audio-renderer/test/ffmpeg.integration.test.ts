@@ -264,15 +264,7 @@ describe("FFmpeg integration", () => {
     expect(Math.abs(result.durationMs - 7000)).toBeLessThan(250);
     const probe = await runner.run({
       executable: binaries.ffprobePath,
-      args: [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-print_format",
-        "json",
-        "-show_streams",
-        out,
-      ],
+      args: ["-hide_banner", "-loglevel", "error", "-print_format", "json", "-show_streams", out],
     });
     const parsed = JSON.parse(probe.stdout) as {
       streams?: Array<{
@@ -402,15 +394,7 @@ describe("FFmpeg integration", () => {
     expect(result.invocation).not.toMatch(/FirstTrackOnly|LeakMe/);
     const probe = await runner.run({
       executable: binaries.ffprobePath,
-      args: [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-print_format",
-        "json",
-        "-show_format",
-        out,
-      ],
+      args: ["-hide_banner", "-loglevel", "error", "-print_format", "json", "-show_format", out],
     });
     const parsed = JSON.parse(probe.stdout) as {
       format?: { tags?: Record<string, string> };

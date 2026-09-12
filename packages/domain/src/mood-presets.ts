@@ -75,8 +75,14 @@ export type DescriptorFilters = {
 export const MOOD_PRESETS: Record<string, DescriptorFilters> = {
   uplifting: { valence: { min: 0.6 }, danceability: { min: 0.6 } },
   dark: { valence: { max: 0.4 }, brightness: { max: 0.1 } },
-  liquid: { melodicness: { min: 0.55, minPct: 80 }, energy: { min: 0.35, max: 0.7, minPct: 20, maxPct: 70 } },
-  soulful: { melodicness: { min: 0.55, minPct: 80 }, energy: { min: 0.35, max: 0.7, minPct: 20, maxPct: 70 } },
+  liquid: {
+    melodicness: { min: 0.55, minPct: 80 },
+    energy: { min: 0.35, max: 0.7, minPct: 20, maxPct: 70 },
+  },
+  soulful: {
+    melodicness: { min: 0.55, minPct: 80 },
+    energy: { min: 0.35, max: 0.7, minPct: 20, maxPct: 70 },
+  },
   "peak-time": { energy: { min: 0.7, minPct: 70 }, subBass: { min: 0.5, minPct: 50 } },
   heavy: { energy: { min: 0.7, minPct: 70 }, subBass: { min: 0.5, minPct: 50 } },
   rolling: { danceability: { min: 0.6 }, brightness: { max: 0.12 } },

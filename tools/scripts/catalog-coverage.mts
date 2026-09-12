@@ -3,7 +3,7 @@ import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
 import { loadConfig } from "../../packages/domain/src/index.ts";
 import { percentileToValue } from "../../packages/domain/src/mood-presets.ts";
 
-const runtime = createCatalogRuntime(loadConfig());
+const runtime = createCatalogRuntime(loadConfig(), undefined, { passive: true });
 const stats = runtime.service.getLibraryStats();
 const ready = runtime.service.getPlanningReadiness();
 const report = runtime.service.getAnalysisReport();
@@ -33,21 +33,10 @@ const acceptedGrid = tracks.filter((track) => {
   const analysis = runtime.analyses.findByTrackId(track.id);
   return analysis != null && analysis.gridRejected === false;
 }).length;
-const alignedReady = ready.tracks.filter((row) => row.ready).length;
-
-const energyP70 = stats.descriptorPercentiles.energy;
-const melodicP60 = stats.descriptorPercentiles.melodicness;
 let peakEnergyHits = 0;
 let liquidMelodicHits = 0;
 let peakReady = 0;
 let liquidReady = 0;
-for (const track of tracks) {
-  const desc = runtime.analyses.findByTrackId(track.id)?.descriptors;
-  const plan = ready.tracks.find((row) => row.trackId === track.id);
-  if (energyP70 && desc?.energy != null && desc.energy >= energyP70.p10) {
-    /* placeholder */
-  }
-}
 
 function pctAt(values: number[], pct: number): number | null {
   if (values.length === 0) return null;
@@ -139,7 +128,10 @@ console.log(
         const liqM = percentileToValue(60, stats.descriptorPercentiles.melodicness);
         const liqEmin = percentileToValue(15, stats.descriptorPercentiles.energy);
         const liqEmax = percentileToValue(80, stats.descriptorPercentiles.energy);
-        const bump = (s: { n: number; keyed: number; bpm: number; gridOk: number; keyedGrid: number }, track: (typeof tracks)[number]) => {
+        const bump = (
+          s: { n: number; keyed: number; bpm: number; gridOk: number; keyedGrid: number },
+          track: (typeof tracks)[number],
+        ) => {
           const analysis = runtime.analyses.findByTrackId(track.id);
           s.n += 1;
           if (track.camelotKey) s.keyed += 1;
@@ -151,7 +143,14 @@ console.log(
         const liquid = { n: 0, keyed: 0, bpm: 0, gridOk: 0, keyedGrid: 0 };
         for (const track of tracks) {
           const d = runtime.analyses.findByTrackId(track.id)?.descriptors;
-          if (d?.energy != null && peakE != null && d.energy >= peakE && d.danceability != null && peakD != null && d.danceability >= peakD) {
+          if (
+            d?.energy != null &&
+            peakE != null &&
+            d.energy >= peakE &&
+            d.danceability != null &&
+            peakD != null &&
+            d.danceability >= peakD
+          ) {
             bump(peak, track);
           }
           if (
@@ -174,4 +173,4 @@ console.log(
     2,
   ),
 );
-runtime.close();
+await runtime.close();

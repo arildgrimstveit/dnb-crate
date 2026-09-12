@@ -137,9 +137,15 @@ export class SetPlanRepository {
         entries: entries.map(mapEntry),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
-        rateRegionsVersion: row.rate_regions_version === 2 || row.rate_regions_version === 1 ? row.rate_regions_version : undefined,
+        rateRegionsVersion:
+          row.rate_regions_version === 2 || row.rate_regions_version === 1
+            ? row.rate_regions_version
+            : undefined,
         handoffPolicy: "dj-continuity-v1",
-        qualityPolicy: row.quality_policy === "strict" || row.quality_policy === "off" ? row.quality_policy : undefined,
+        qualityPolicy:
+          row.quality_policy === "strict" || row.quality_policy === "off"
+            ? row.quality_policy
+            : undefined,
         planningConstraints: row.planning_constraints_json
           ? (JSON.parse(row.planning_constraints_json) as SetPlanV1["planningConstraints"])
           : undefined,

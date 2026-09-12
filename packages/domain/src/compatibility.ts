@@ -1,9 +1,5 @@
 import { DEFAULT_SCORE_WEIGHTS } from "./constants.ts";
-import {
-  effectiveEnergy,
-  moodPresetScore,
-  type DescriptorValues,
-} from "./descriptor-filters.ts";
+import { effectiveEnergy, moodPresetScore, type DescriptorValues } from "./descriptor-filters.ts";
 import { normalizeGenre } from "./genres.ts";
 import { normalizePersonName } from "./identity.ts";
 import { camelotNumberDistance, harmonicMixScore, harmonicRelation } from "./keys.ts";
@@ -149,15 +145,11 @@ export function scoreCandidate(
   const sourceEnergy = source
     ? effectiveEnergy(source, {
         energy: ctx.sourceDescriptors?.energy ?? null,
-        suggestedEnergy: ctx.sourceSuggestedEnergy ?? ctx.sourceDescriptors?.suggestedEnergy ?? null,
+        suggestedEnergy:
+          ctx.sourceSuggestedEnergy ?? ctx.sourceDescriptors?.suggestedEnergy ?? null,
       })
     : null;
-  const energy = energyScore(
-    candidateEnergy,
-    ctx.targetEnergy,
-    sourceEnergy,
-    ctx.direction,
-  );
+  const energy = energyScore(candidateEnergy, ctx.targetEnergy, sourceEnergy, ctx.direction);
   const energyWeightScale = candidate.energy === null && candidateEnergy != null ? 0.6 : 1;
   const candidateBpm = candidate.bpm ?? ctx.bpmHint ?? null;
   const sourceBpm = source?.bpm ?? ctx.sourceBpmHint ?? null;
@@ -206,9 +198,7 @@ export function scoreCandidate(
     candidate.artistCanonical ?? (candidate.artist ? normalizePersonName(candidate.artist) : null);
   const preferredArtist =
     candidateArtistKey !== null &&
-    ctx.preferredArtists.some(
-      (artist) => normalizePersonName(artist) === candidateArtistKey,
-    )
+    ctx.preferredArtists.some((artist) => normalizePersonName(artist) === candidateArtistKey)
       ? 1
       : 0;
   const exploration = hashSeed(ctx.seed, candidate.id) * clamp01(ctx.explorationWeight);
@@ -216,9 +206,7 @@ export function scoreCandidate(
   const recentWindow = ctx.recentArtistIds.slice(-Math.max(ctx.artistRepeatSpacing, 0));
   const repeatedArtist =
     artistKey !== null &&
-    recentWindow.some(
-      (item) => item !== null && normalizePersonName(item) === artistKey,
-    )
+    recentWindow.some((item) => item !== null && normalizePersonName(item) === artistKey)
       ? 1
       : 0;
   const recentlyUsed = ctx.alreadyUsed ? 1 : 0;

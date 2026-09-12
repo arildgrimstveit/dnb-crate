@@ -4,31 +4,31 @@ The planner is deterministic. A host model turns “soulful liquid, peak at 45 m
 
 ## Default weights
 
-| Component | Weight | Notes |
-| --- | --- | --- |
-| Mood overlap | 8 | Requested moods present on the candidate |
-| Tag overlap | 4 | Half the mood weight |
-| Subgenre overlap | 8 | |
-| Target-energy proximity | 12 | Interpolated from `requestedArc` |
-| BPM compatibility | 12 | Falls off over ±8 BPM |
-| Harmonic (Camelot) | 10 × `harmonicImportance` | Same 1.0; relative / adjacent same-mode 0.85; else by number distance; unknown 0 |
-| Feedback | 6 | Pair bonus from stored likes/dislikes |
-| Join level | 6 | −(|ΔLUFS| − 3)⁺ / 6 |
-| Join structure | 8 | Incoming drop ≥ 16 bars and/or outgoing quiet tail |
-| Join aligned | 10 | Both grids accepted and BPM within ±3% |
-| Join harmonic | 8 | Same as harmonic, used in lookahead |
-| Genre prior | 4 | liquid funk / neurofunk / jump up / jungle |
-| Personal rating | 6 | 1–5 scaled to 0–1 |
-| Preferred-artist bonus | 8 | |
-| Exploration | 4 × `explorationWeight` | Seeded hash of `seed + trackId` |
-| Repeated-artist penalty | −20 | Inside `artistRepeatSpacing` |
-| Recently-used penalty | −8 | Already in the plan |
-| Missing BPM/key/energy | −10 | Split across the three fields |
-| Structure | 6 | Outro/intro length similarity |
+| Component               | Weight                    | Notes                                                                            |
+| ----------------------- | ------------------------- | -------------------------------------------------------------------------------- |
+| Mood overlap            | 8                         | Requested moods present on the candidate                                         |
+| Tag overlap             | 4                         | Half the mood weight                                                             |
+| Subgenre overlap        | 8                         |                                                                                  |
+| Target-energy proximity | 12                        | Interpolated from `requestedArc`                                                 |
+| BPM compatibility       | 12                        | Falls off over ±8 BPM                                                            |
+| Harmonic (Camelot)      | 10 × `harmonicImportance` | Same 1.0; relative / adjacent same-mode 0.85; else by number distance; unknown 0 |
+| Feedback                | 6                         | Pair bonus from stored likes/dislikes                                            |
+| Join level              | 6                         | −(max(0, abs(ΔLUFS) − 3) / 6)                                                    |
+| Join structure          | 8                         | Incoming drop ≥ 16 bars and/or outgoing quiet tail                               |
+| Join aligned            | 10                        | Both grids accepted and BPM within ±3%                                           |
+| Join harmonic           | 8                         | Same as harmonic, used in lookahead                                              |
+| Genre prior             | 4                         | liquid funk / neurofunk / jump up / jungle                                       |
+| Personal rating         | 6                         | 1–5 scaled to 0–1                                                                |
+| Preferred-artist bonus  | 8                         |                                                                                  |
+| Exploration             | 4 × `explorationWeight`   | Seeded hash of `seed + trackId`                                                  |
+| Repeated-artist penalty | −20                       | Inside `artistRepeatSpacing`                                                     |
+| Recently-used penalty   | −8                        | Already in the plan                                                              |
+| Missing BPM/key/energy  | −10                       | Split across the three fields                                                    |
+| Structure               | 6                         | Outro/intro length similarity                                                    |
 
 Effective energy is `track.energy ?? round(1 + 9·descriptors.energy)`. Suggested-only energy keeps a ×0.6 weight. `bpmHint` scores BPM at half weight and satisfies pool filters; aligned templates still need an accepted grid. Empty manual moods fall back to mood presets. Duplicate `recording_key` is rejected. Artist spacing uses `artist_canonical`.
 
-The planner scores the top 5 candidates, looks ahead one join (beam 3), and re-ranks `total + 0.35 * lookahead`. Ties break on `id.localeCompare`. Descriptor relaxation is ±0.08 / ±0.16 / ±0.24 from the original brief.
+The planner shortlists the top 12 candidates, looks ahead one join (up to 8 strict continuations), and re-ranks `total + 0.35 * lookahead`. When `explorationWeight` is above 0 it may draw a seeded near-best candidate from that shortlist. Ties break on `id.localeCompare`. Descriptor relaxation is ±0.08 / ±0.16 / ±0.24 from the original brief.
 
 ## Quality
 

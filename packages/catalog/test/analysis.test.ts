@@ -24,10 +24,10 @@ function testConfig(root: string): AppConfig {
   };
 }
 
-const cleanups: Array<() => void> = [];
-afterEach(() => {
+const cleanups: Array<() => void | Promise<void>> = [];
+afterEach(async () => {
   while (cleanups.length > 0) {
-    cleanups.pop()?.();
+    await cleanups.pop()?.();
   }
 });
 
@@ -412,7 +412,9 @@ describe("track analysis and aligned transitions", () => {
     await piped.service.waitForAnalysisJob(pipedStarted.job.id, 60_000);
     const pipedRows = pipedTracks.map((item) => piped.service.getTrackAnalysis(item.id));
     expect(pipedRows.map((row) => row.bpm)).toEqual(seqRows.map((row) => row.bpm));
-    expect(pipedRows.map((row) => row.gridRejected)).toEqual(seqRows.map((row) => row.gridRejected));
+    expect(pipedRows.map((row) => row.gridRejected)).toEqual(
+      seqRows.map((row) => row.gridRejected),
+    );
     expect(pipedRows.map((row) => row.gridSource)).toEqual(seqRows.map((row) => row.gridSource));
   });
 

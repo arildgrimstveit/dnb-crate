@@ -11,13 +11,7 @@ import {
 import type { BpmSource, CuePointType, KeySource } from "./track.ts";
 import type { TransitionType } from "./planning.ts";
 
-export type TrackSectionType =
-  | "intro"
-  | "build"
-  | "drop"
-  | "breakdown"
-  | "bridge"
-  | "outro";
+export type TrackSectionType = "intro" | "build" | "drop" | "breakdown" | "bridge" | "outro";
 
 export type TrackSection = {
   type: TrackSectionType;
@@ -246,7 +240,8 @@ export function clampBassSwapParams(
   const defaultSwap = barCount === 32 ? 16 : barCount === 8 ? 4 : 8;
   const swapRaw = input?.swapAtBar ?? defaultSwap;
   const step = barCount === 8 ? 2 : 4;
-  const swapAtBar = swapRaw > 0 && swapRaw < barCount && swapRaw % step === 0 ? swapRaw : defaultSwap;
+  const swapAtBar =
+    swapRaw > 0 && swapRaw < barCount && swapRaw % step === 0 ? swapRaw : defaultSwap;
   return {
     crossoverHz: clamp(
       input?.crossoverHz ?? DEFAULT_BASS_CROSSOVER_HZ,

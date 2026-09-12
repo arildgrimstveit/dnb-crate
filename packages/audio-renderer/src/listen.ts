@@ -1,4 +1,4 @@
-import { mkdir, rename, unlink } from "node:fs/promises";
+import { copyFile, mkdir, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import { DomainError } from "@dnb-crate/domain";
@@ -7,6 +7,7 @@ import type { FfmpegBinaries } from "./detect.ts";
 import type { ProcessRunner } from "./runner.ts";
 
 const LISTEN_FLAC_COMPRESSION_LEVEL = 8;
+const publishLocks = new Map<string, Promise<void>>();
 
 async function removeIfPresent(filePath: string): Promise<void> {
   try {
@@ -16,14 +17,59 @@ async function removeIfPresent(filePath: string): Promise<void> {
   }
 }
 
+async function withPublishLock(outputPath: string, work: () => Promise<void>): Promise<void> {
+  const previous = publishLocks.get(outputPath) ?? Promise.resolve();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const chain = previous.then(() => held);
+  publishLocks.set(outputPath, chain);
+  await previous;
+  try {
+    await work();
+  } finally {
+    release();
+    if (publishLocks.get(outputPath) === chain) {
+      publishLocks.delete(outputPath);
+    }
+  }
+}
+
 async function atomicReplace(fromPath: string, toPath: string): Promise<void> {
-  await removeIfPresent(toPath);
+  try {
+    await rename(fromPath, toPath);
+    return;
+  } catch {
+    // destination exists or rename is cross-device
+  }
+  const backup = `${toPath}.prev.${crypto.randomUUID()}`;
+  let backedUp = false;
+  try {
+    await rename(toPath, backup);
+    backedUp = true;
+  } catch {
+    // destination missing
+  }
   try {
     await rename(fromPath, toPath);
   } catch {
-    const { copyFile } = await import("node:fs/promises");
-    await copyFile(fromPath, toPath);
-    await removeIfPresent(fromPath);
+    try {
+      await copyFile(fromPath, toPath);
+      await removeIfPresent(fromPath);
+    } catch (error) {
+      if (backedUp) {
+        try {
+          await rename(backup, toPath);
+        } catch {
+          // restore failed; leave backup
+        }
+      }
+      throw error;
+    }
+  }
+  if (backedUp) {
+    await removeIfPresent(backup);
   }
 }
 
@@ -41,7 +87,7 @@ export async function encodeListenFlac(
     throw error;
   }
   await mkdir(path.dirname(outputPath), { recursive: true });
-  const partial = `${outputPath}.partial.flac`;
+  const partial = `${outputPath}.${crypto.randomUUID()}.partial.flac`;
   const args = [
     "-nostdin",
     "-hide_banner",
@@ -81,5 +127,5 @@ export async function encodeListenFlac(
       },
     );
   }
-  await atomicReplace(partial, outputPath);
+  await withPublishLock(outputPath, () => atomicReplace(partial, outputPath));
 }

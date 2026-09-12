@@ -151,7 +151,10 @@ export function draftSetPlan(
     percentiles?: DescriptorPercentiles | null;
     feedback?: FeedbackIndex | null;
     recipes?: RecipeRecallLookup | null;
-    varietyHistory?: { trackIds: string[]; pairs: Array<{ outgoingTrackId: string; incomingTrackId: string }> };
+    varietyHistory?: {
+      trackIds: string[];
+      pairs: Array<{ outgoingTrackId: string; incomingTrackId: string }>;
+    };
     /** Internal single retry with complete-chain candidates; keeps the user's brief and seed. */
     chainSearch?: boolean;
     /** Bounded alternate opener attempt; never changes the user's seed or constraints. */
@@ -179,13 +182,13 @@ export function draftSetPlan(
   const historyIds = new Set(options.varietyHistory?.trackIds ?? []);
   const recordingOf = (id: string) => catalog.find((track) => track.id === id)?.recordingKey ?? id;
   const historyRecordings = new Set([...historyIds].map(recordingOf));
-  const historyPairs = new Set((options.varietyHistory?.pairs ?? [])
-    .map((pair) => pairKey(recordingOf(pair.outgoingTrackId), recordingOf(pair.incomingTrackId))));
-  const rejected: RejectionExplanation[] = [];
-  const needed = Math.max(
-    16,
-    Math.ceil(targetDurationMs / typicalPlayable(catalog)),
+  const historyPairs = new Set(
+    (options.varietyHistory?.pairs ?? []).map((pair) =>
+      pairKey(recordingOf(pair.outgoingTrackId), recordingOf(pair.incomingTrackId)),
+    ),
   );
+  const rejected: RejectionExplanation[] = [];
+  const needed = Math.max(16, Math.ceil(targetDurationMs / typicalPlayable(catalog)));
   const originalDescriptorFilters = resolveDescriptorFilters(
     input.descriptors,
     options.percentiles,
@@ -499,8 +502,11 @@ export function draftSetPlan(
       candidateGenres: candidate.genres,
     });
     const repeatedTrack = historyRecordings.has(candidate.recordingKey ?? candidate.id);
-    const repeatedPair = source != null && historyPairs.has(pairKey(
-      source.recordingKey ?? source.id, candidate.recordingKey ?? candidate.id));
+    const repeatedPair =
+      source != null &&
+      historyPairs.has(
+        pairKey(source.recordingKey ?? source.id, candidate.recordingKey ?? candidate.id),
+      );
     const cost = varietyStrength * ((repeatedTrack ? 8 : 0) + (repeatedPair ? 4 : 0));
     score.components.recentlyUsed -= cost;
     score.total -= cost;
@@ -638,7 +644,7 @@ export function draftSetPlan(
         if (!requiredLeft.includes(track.id)) return false;
         return options.chainSearch
           ? chainFrom(track).every((item) => !used.has(item.id)) &&
-            selectionQualityOk([...selected, ...chainFrom(track)])
+              selectionQualityOk([...selected, ...chainFrom(track)])
           : joinAllowed(source, track);
       });
       if (forced.length > 0) {
@@ -671,11 +677,18 @@ export function draftSetPlan(
     }
     const usable = qualityFiltered;
     const ranked = usable
-      .filter((track) => source != null || qualityPolicy !== "strict"
-        || requiredIds.includes(track.id)
-        || (analyses.get(track.id)?.gridOk && track.camelotKey != null
-          && resolveCanonicalKeyConfidence(track, { musicalKey: track.musicalKey,
-            keyConfidence: analyses.get(track.id)?.keyConfidence ?? null }) >= 0.5))
+      .filter(
+        (track) =>
+          source != null ||
+          qualityPolicy !== "strict" ||
+          requiredIds.includes(track.id) ||
+          (analyses.get(track.id)?.gridOk &&
+            track.camelotKey != null &&
+            resolveCanonicalKeyConfidence(track, {
+              musicalKey: track.musicalKey,
+              keyConfidence: analyses.get(track.id)?.keyConfidence ?? null,
+            }) >= 0.5),
+      )
       .map((track) => ({
         track,
         breakdown: scoreFor(track, source, fraction),
@@ -707,8 +720,11 @@ export function draftSetPlan(
         .sort((a, b) => b.score - a.score);
       if (qualityPolicy === "strict") {
         // Score a continuation that can actually host both joins, rather than metadata alone.
-        const continuation = nextCandidates.slice(0, 8).find(({ track }) =>
-          selectionQualityOk([...selected, ...chainFrom(item.track), ...chainFrom(track)]));
+        const continuation = nextCandidates
+          .slice(0, 8)
+          .find(({ track }) =>
+            selectionQualityOk([...selected, ...chainFrom(item.track), ...chainFrom(track)]),
+          );
         item.lookahead = continuation?.score ?? 0;
       } else item.lookahead = nextCandidates[0]?.score ?? 0;
     }
@@ -721,12 +737,17 @@ export function draftSetPlan(
         a.track.id.localeCompare(b.track.id),
     );
     if (explorationWeight > 0 && top.length > 1) {
-      const merit = (item: typeof top[number]) => item.breakdown.total + item.requiredProgress + 0.35 * item.lookahead;
+      const merit = (item: (typeof top)[number]) =>
+        item.breakdown.total + item.requiredProgress + 0.35 * item.lookahead;
       const best = merit(top[0]!);
       const near = top.filter((item) => best - merit(item) <= 4 * explorationWeight);
-      const draw = (item: typeof top[number]) => -Math.log(Math.max(1e-9,
-        hashSeed(seed, `${selected.length}:${source?.id ?? "opener"}:${item.track.id}`)))
-        / Math.exp((merit(item) - best) / Math.max(0.1, explorationWeight));
+      const draw = (item: (typeof top)[number]) =>
+        -Math.log(
+          Math.max(
+            1e-9,
+            hashSeed(seed, `${selected.length}:${source?.id ?? "opener"}:${item.track.id}`),
+          ),
+        ) / Math.exp((merit(item) - best) / Math.max(0.1, explorationWeight));
       near.sort((a, b) => draw(a) - draw(b) || a.track.id.localeCompare(b.track.id));
       top.splice(0, top.length, ...near, ...top.filter((item) => !near.includes(item)));
     }
@@ -938,9 +959,7 @@ export function draftSetPlan(
           const neighbor = byId.get(id);
           if (
             neighbor &&
-            isConservativeHarmonic(
-              harmonicRelation(neighbor.camelotKey, first?.camelotKey ?? null),
-            )
+            isConservativeHarmonic(harmonicRelation(neighbor.camelotKey, first?.camelotKey ?? null))
           ) {
             harmonic += 2;
           }
@@ -950,13 +969,16 @@ export function draftSetPlan(
         );
         let progress = 0;
         for (const id of missingRoots) {
-          const dist = keyDistances.get(id)?.get(first?.camelotKey ?? "") ?? Number.POSITIVE_INFINITY;
+          const dist =
+            keyDistances.get(id)?.get(first?.camelotKey ?? "") ?? Number.POSITIVE_INFINITY;
           progress += 50 / (1 + dist);
         }
         return harmonic + progress;
       },
       musicalScore(ids) {
-        const tracks = ids.map((id) => byId.get(id)).filter((track): track is Track => track != null);
+        const tracks = ids
+          .map((id) => byId.get(id))
+          .filter((track): track is Track => track != null);
         let total = 0;
         for (let i = 0; i < tracks.length; i += 1) {
           const fraction = tracks.length <= 1 ? 0 : i / (tracks.length - 1);
@@ -966,7 +988,10 @@ export function draftSetPlan(
       },
       compatible(leftId, rightId) {
         return isConservativeHarmonic(
-          harmonicRelation(byId.get(leftId)?.camelotKey ?? null, byId.get(rightId)?.camelotKey ?? null),
+          harmonicRelation(
+            byId.get(leftId)?.camelotKey ?? null,
+            byId.get(rightId)?.camelotKey ?? null,
+          ),
         );
       },
     });
@@ -1001,10 +1026,7 @@ export function draftSetPlan(
   const durationOffQuality =
     duration + DURATION_QUALITY_WINDOW_MS < targetDurationMs ||
     duration > targetDurationMs + DURATION_QUALITY_WINDOW_MS;
-  const partial =
-    durationOffQuality ||
-    remainingRequired().length > 0 ||
-    partialReasons.length > 0;
+  const partial = durationOffQuality || remainingRequired().length > 0 || partialReasons.length > 0;
 
   let chainRetry: PlanExplanation["chainRetry"];
   if (!options.chainSearch && qualityPolicy === "strict" && !requiredSatisfied(selected)) {
@@ -1065,13 +1087,29 @@ export function draftSetPlan(
     }
   }
   const explanation: PlanExplanation = {
-    ...(input.variety ? { variety: {
-      referencePlanIds: input.variety.referencePlanIds, strength: varietyStrength,
-      trackIds: [...historyIds], pairs: options.varietyHistory?.pairs ?? [],
-      repeatedTracks: selected.filter((track) => historyRecordings.has(track.recordingKey ?? track.id)).length,
-      repeatedPairs: selected.slice(1).filter((track, i) => historyPairs.has(pairKey(
-        selected[i]!.recordingKey ?? selected[i]!.id, track.recordingKey ?? track.id))).length,
-    } } : {}),
+    ...(input.variety
+      ? {
+          variety: {
+            referencePlanIds: input.variety.referencePlanIds,
+            strength: varietyStrength,
+            trackIds: [...historyIds],
+            pairs: options.varietyHistory?.pairs ?? [],
+            repeatedTracks: selected.filter((track) =>
+              historyRecordings.has(track.recordingKey ?? track.id),
+            ).length,
+            repeatedPairs: selected
+              .slice(1)
+              .filter((track, i) =>
+                historyPairs.has(
+                  pairKey(
+                    selected[i]!.recordingKey ?? selected[i]!.id,
+                    track.recordingKey ?? track.id,
+                  ),
+                ),
+              ).length,
+          },
+        }
+      : {}),
     seed,
     selected: selected.map((track, order) => {
       const score = scoreFor(
@@ -1101,25 +1139,45 @@ export function draftSetPlan(
   };
 
   let result = { plan, explanation, partial, partialReasons };
-  if (qualityPolicy === "strict"
-    && !input.startTrackId && !options.openerAttempt && !options.chainSearch
-    && (partial || duration < minDuration || duration > maxDuration)) {
+  if (
+    qualityPolicy === "strict" &&
+    !input.startTrackId &&
+    !options.openerAttempt &&
+    !options.chainSearch &&
+    (partial || duration < minDuration || duration > maxDuration)
+  ) {
     const distance = (candidate: typeof result) => {
       const actual = planDurationMs(candidate.plan.entries, timingPlan);
-      const missing = requiredIds.filter((id) => !candidate.plan.entries.some((entry) => entry.trackId === id)).length;
+      const missing = requiredIds.filter(
+        (id) => !candidate.plan.entries.some((entry) => entry.trackId === id),
+      ).length;
       const missingPairs = [...compiled.successorOf].filter(([id, requirement]) => {
         const index = candidate.plan.entries.findIndex((entry) => entry.trackId === id);
-        return index < 0 || candidate.plan.entries[index + 1]?.trackId !== requirement.incomingTrackId;
+        return (
+          index < 0 || candidate.plan.entries[index + 1]?.trackId !== requirement.incomingTrackId
+        );
       }).length;
-      return (missing + missingPairs) * targetDurationMs + Math.max(minDuration - actual, actual - maxDuration, 0);
+      return (
+        (missing + missingPairs) * targetDurationMs +
+        Math.max(minDuration - actual, actual - maxDuration, 0)
+      );
     };
     const attempts = [{ openerTrackId: plan.entries[0]?.trackId ?? null, durationMs: duration }];
     for (let attempt = 1; attempt <= 3; attempt += 1) {
-      const alternative = draftSetPlan(catalog, input, analyses, { ...options, openerAttempt: attempt });
+      const alternative = draftSetPlan(catalog, input, analyses, {
+        ...options,
+        openerAttempt: attempt,
+      });
       const actual = planDurationMs(alternative.plan.entries, timingPlan);
-      attempts.push({ openerTrackId: alternative.plan.entries[0]?.trackId ?? null, durationMs: actual });
-      if (distance(alternative) < distance(result) ||
-        (distance(alternative) === distance(result) && result.partial && !alternative.partial)) result = alternative;
+      attempts.push({
+        openerTrackId: alternative.plan.entries[0]?.trackId ?? null,
+        durationMs: actual,
+      });
+      if (
+        distance(alternative) < distance(result) ||
+        (distance(alternative) === distance(result) && result.partial && !alternative.partial)
+      )
+        result = alternative;
       if (!result.partial && distance(result) === 0) break;
     }
     result.explanation.openerSearch = attempts;

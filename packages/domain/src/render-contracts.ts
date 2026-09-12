@@ -84,9 +84,18 @@ export const renderManifestTrackSchema = z.object({
   barCount: z.number().int().nullable().optional(),
   phraseShape: z.string().nullable().optional(),
   sequentialHandoff: z.enum(["legacy", "early", "supported"]).nullable().optional(),
-  landingFadeBars: z.union([z.literal(2), z.literal(4), z.literal(8)]).nullable().optional(),
-  landingCarryBars: z.union([z.literal(2), z.literal(3.5), z.literal(4), z.literal(4.5)]).nullable().optional(),
-  landingIncomingFadeBars: z.union([z.literal(8), z.literal(16), z.literal(32)]).nullable().optional(),
+  landingFadeBars: z
+    .union([z.literal(2), z.literal(4), z.literal(8)])
+    .nullable()
+    .optional(),
+  landingCarryBars: z
+    .union([z.literal(2), z.literal(3.5), z.literal(4), z.literal(4.5)])
+    .nullable()
+    .optional(),
+  landingIncomingFadeBars: z
+    .union([z.literal(8), z.literal(16), z.literal(32)])
+    .nullable()
+    .optional(),
   exitKind: z.string().nullable().optional(),
   mixOutMs: z.number().nullable().optional(),
   mixInMs: z.number().nullable().optional(),

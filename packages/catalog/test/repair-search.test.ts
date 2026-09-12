@@ -50,12 +50,7 @@ it("keeps a ready sequence unchanged and does not explore alternatives", () => {
 it("ranks optional units by the caller instead of first-twelve pool order", () => {
   const result = repairSequence({
     initial: ["start", "end"],
-    units: [
-      ["start"],
-      ["end"],
-      ...Array.from({ length: 12 }, (_, i) => [`noise${i}`]),
-      ["bridge"],
-    ],
+    units: [["start"], ["end"], ...Array.from({ length: 12 }, (_, i) => [`noise${i}`]), ["bridge"]],
     required: new Set(),
     start: "start",
     end: "end",
@@ -93,11 +88,9 @@ it("stops as a harmonic gap when no required unit can attach or be bridged", () 
     end: "end",
     minDurationMs: 390,
     maxDurationMs: 410,
-    evaluate: (ids) =>
-      ids.includes("far") ? "HARMONY" : ids.length * 100,
+    evaluate: (ids) => (ids.includes("far") ? "HARMONY" : ids.length * 100),
     compatible: (left, right) =>
-      (left === "start" && right === "end") ||
-      (left === "far" && right === "pair"),
+      (left === "start" && right === "end") || (left === "far" && right === "pair"),
   });
   expect(result.diagnostics.status).toBe("harmonic-gap");
   expect(result.ids).toEqual(["start", "end"]);

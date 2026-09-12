@@ -14,7 +14,9 @@ const SR = 8_000;
 const OVERLAP = 8_000;
 const BPM = 174;
 
-function alignedDecks(options: { incomingOffsetMs?: number; incomingBpm?: number; outgoingBpm?: number } = {}) {
+function alignedDecks(
+  options: { incomingOffsetMs?: number; incomingBpm?: number; outgoingBpm?: number } = {},
+) {
   const outgoingBpm = options.outgoingBpm ?? BPM;
   const incomingBpm = options.incomingBpm ?? BPM;
   const incomingOffsetMs = options.incomingOffsetMs ?? 0;
@@ -137,9 +139,10 @@ describe("independent overlap audio diagnostics", () => {
       intent: "breather",
     });
     expect(breather.mix.bassAbsence).toBe("expected-breather");
-    expect(breather.reasons.includes("overlap hole 800 ms") || breather.reasons.some((reason) => reason.includes("hole"))).toBe(
-      false,
-    );
+    expect(
+      breather.reasons.includes("overlap hole 800 ms") ||
+        breather.reasons.some((reason) => reason.includes("hole")),
+    ).toBe(false);
   });
 
   it("detects a late incoming landing", () => {

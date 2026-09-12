@@ -76,9 +76,10 @@ function mapAnalysis(row: AnalysisRow, sections: TrackSection[] = []): StoredTra
     keyConfidence: row.key_confidence,
     keyMode: row.key_mode,
     camelotKey: row.camelot_key,
-    keyCandidates: (row.descriptors_json
-      ? (JSON.parse(row.descriptors_json) as SonicDescriptors).keyCandidates
-      : null) ?? null,
+    keyCandidates:
+      (row.descriptors_json
+        ? (JSON.parse(row.descriptors_json) as SonicDescriptors).keyCandidates
+        : null) ?? null,
     tempoStability: row.tempo_stability,
     downbeatConfidence: row.downbeat_confidence,
     integratedLufs: row.integrated_lufs,
@@ -188,10 +189,13 @@ export class AnalysisRepository {
   ): TrackEvidenceSelection {
     const existing = this.getSelection(trackId);
     const next = {
-      rhythmEngine: input.rhythmEngine === undefined ? existing?.rhythmEngine ?? null : input.rhythmEngine,
+      rhythmEngine:
+        input.rhythmEngine === undefined ? (existing?.rhythmEngine ?? null) : input.rhythmEngine,
       structureEngine:
-        input.structureEngine === undefined ? existing?.structureEngine ?? null : input.structureEngine,
-      keyEngine: input.keyEngine === undefined ? existing?.keyEngine ?? null : input.keyEngine,
+        input.structureEngine === undefined
+          ? (existing?.structureEngine ?? null)
+          : input.structureEngine,
+      keyEngine: input.keyEngine === undefined ? (existing?.keyEngine ?? null) : input.keyEngine,
       selectedAt: new Date().toISOString(),
       reason: input.reason ?? existing?.reason ?? null,
     };
@@ -383,9 +387,9 @@ export class AnalysisRepository {
     const hint = resolveBpmHint(analysis);
     const keyCandidates =
       analysis.descriptors?.keyCandidates ??
-      ([analysis.musicalKey, analysis.keyCandidates?.[1]].filter(
-        (value): value is string => Boolean(value),
-      ) as string[]);
+      [analysis.musicalKey, analysis.keyCandidates?.[1]].filter((value): value is string =>
+        Boolean(value),
+      );
     return {
       ...analysis,
       keyCandidates: keyCandidates.length > 0 ? keyCandidates.slice(0, 2) : null,
@@ -410,9 +414,7 @@ export class AnalysisRepository {
     if (scope === "unanalyzed") {
       return (
         this.db
-          .prepare(
-            "SELECT id FROM tracks WHERE file_missing = 0 AND analysis_status != 'complete'",
-          )
+          .prepare("SELECT id FROM tracks WHERE file_missing = 0 AND analysis_status != 'complete'")
           .all() as { id: string }[]
       ).map((row) => row.id);
     }
@@ -445,7 +447,10 @@ export class AnalysisRepository {
         }
         const hasCanon =
           (row.bpm_source === "published" || row.bpm_source === "manual") && row.bpm != null;
-        if (hasCanon && (row.reference_bpm == null || Math.abs(row.reference_bpm - row.bpm!) > 0.01)) {
+        if (
+          hasCanon &&
+          (row.reference_bpm == null || Math.abs(row.reference_bpm - row.bpm!) > 0.01)
+        ) {
           return true;
         }
         return false;

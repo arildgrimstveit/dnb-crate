@@ -1,7 +1,4 @@
-import {
-  RENDER_CHECK_AUDIO_CONFIDENT_MS,
-  RENDER_CHECK_AUDIO_REVIEW_MS,
-} from "@dnb-crate/domain";
+import { RENDER_CHECK_AUDIO_CONFIDENT_MS, RENDER_CHECK_AUDIO_REVIEW_MS } from "@dnb-crate/domain";
 
 export type DiagnosticConfidence = "high" | "low" | "insufficient";
 export type DiagnosticStatus = "pass" | "review" | "fail" | "advisory" | "unmeasured";
@@ -60,7 +57,10 @@ export function clickTrack(options: {
   const samples = Math.max(1, Math.round((options.durationMs / 1000) * options.sampleRate));
   const pcm = new Float32Array(samples);
   const periodMs = 60_000 / options.bpm;
-  const clickSamples = Math.max(1, Math.round(((options.clickMs ?? 4) / 1000) * options.sampleRate));
+  const clickSamples = Math.max(
+    1,
+    Math.round(((options.clickMs ?? 4) / 1000) * options.sampleRate),
+  );
   const amp = options.amplitude ?? 0.8;
   const offset = options.offsetMs ?? 0;
   for (let t = offset; t < options.durationMs; t += periodMs) {
@@ -80,7 +80,12 @@ export function mixPcm(a: Float32Array, b: Float32Array, gainA = 1, gainB = 1): 
   return out;
 }
 
-export function fadePcm(pcm: Float32Array, sampleRate: number, from: number, to: number): Float32Array {
+export function fadePcm(
+  pcm: Float32Array,
+  sampleRate: number,
+  from: number,
+  to: number,
+): Float32Array {
   const out = pcm.slice();
   for (let i = 0; i < out.length; i += 1) {
     const t = i / (out.length - 1 || 1);
@@ -91,7 +96,12 @@ export function fadePcm(pcm: Float32Array, sampleRate: number, from: number, to:
   return out;
 }
 
-export function insertSilence(pcm: Float32Array, sampleRate: number, atMs: number, durationMs: number): Float32Array {
+export function insertSilence(
+  pcm: Float32Array,
+  sampleRate: number,
+  atMs: number,
+  durationMs: number,
+): Float32Array {
   const start = Math.round((atMs / 1000) * sampleRate);
   const count = Math.round((durationMs / 1000) * sampleRate);
   const out = pcm.slice();
@@ -137,7 +147,11 @@ export function onsetTimesMs(pcm: Float32Array, sampleRate: number, hopMs = HOP_
   const threshold = peak * 0.35;
   const times: number[] = [];
   for (let i = 1; i < flux.length - 1; i += 1) {
-    if ((flux[i] ?? 0) >= threshold && (flux[i] ?? 0) >= (flux[i - 1] ?? 0) && (flux[i] ?? 0) > (flux[i + 1] ?? 0)) {
+    if (
+      (flux[i] ?? 0) >= threshold &&
+      (flux[i] ?? 0) >= (flux[i - 1] ?? 0) &&
+      (flux[i] ?? 0) > (flux[i + 1] ?? 0)
+    ) {
       times.push(i * hopMs);
     }
   }
@@ -177,7 +191,11 @@ export function gridFitResidualMs(
   return { residualMs: residual, onsetCount: onsets.length, confidence };
 }
 
-export function firstEnergyMs(pcm: Float32Array, sampleRate: number, hopMs = HOP_MS): number | null {
+export function firstEnergyMs(
+  pcm: Float32Array,
+  sampleRate: number,
+  hopMs = HOP_MS,
+): number | null {
   const hop = Math.max(1, Math.round((hopMs / 1000) * sampleRate));
   const rms = rmsEnvelope(pcm, hop);
   const peak = Math.max(...rms, 1e-9);
@@ -219,9 +237,26 @@ export function diagnoseOverlapAudio(input: {
   intent?: MixIntent;
 }): OverlapAudioDiagnostic {
   const mix = input.mixPcm ?? mixPcm(input.outgoingPcm, input.incomingPcm);
-  const outgoing = diagnoseDeck(input.outgoingPcm, input.sampleRate, input.outgoingBeatsMs, input.overlapMs);
-  const incoming = diagnoseDeck(input.incomingPcm, input.sampleRate, input.incomingBeatsMs, input.overlapMs);
-  const mixDiag = diagnoseMix(mix, input.outgoingPcm, input.incomingPcm, input.sampleRate, input.overlapMs, input.intent ?? null);
+  const outgoing = diagnoseDeck(
+    input.outgoingPcm,
+    input.sampleRate,
+    input.outgoingBeatsMs,
+    input.overlapMs,
+  );
+  const incoming = diagnoseDeck(
+    input.incomingPcm,
+    input.sampleRate,
+    input.incomingBeatsMs,
+    input.overlapMs,
+  );
+  const mixDiag = diagnoseMix(
+    mix,
+    input.outgoingPcm,
+    input.incomingPcm,
+    input.sampleRate,
+    input.overlapMs,
+    input.intent ?? null,
+  );
   const incomingOrigin = originErrorMs(input.incomingPcm, input.sampleRate, input.incomingBeatsMs);
   const outgoingOrigin = originErrorMs(input.outgoingPcm, input.sampleRate, input.outgoingBeatsMs);
   const residuals = [...outgoing.regions, ...incoming.regions]
@@ -258,7 +293,9 @@ export function diagnoseOverlapAudio(input: {
     }
     reasons.push("boundary discontinuity");
   }
-  const confident = [...outgoing.regions, ...incoming.regions].some((region) => region.confidence === "high");
+  const confident = [...outgoing.regions, ...incoming.regions].some(
+    (region) => region.confidence === "high",
+  );
   if (!confident && status === "pass") {
     status = "advisory";
     reasons.push("insufficient onsets for independent grid fit");
@@ -505,5 +542,7 @@ function meanTail(values: number[], fraction: number): number {
 function median(values: number[]): number {
   const sorted = values.slice().sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2 : (sorted[mid] ?? 0);
+  return sorted.length % 2 === 0
+    ? ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2
+    : (sorted[mid] ?? 0);
 }

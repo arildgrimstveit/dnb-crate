@@ -8,7 +8,10 @@ import { resolveTargetDurationMs } from "../src/constants.ts";
 describe("hour briefs", () => {
   it("parses the liquid example as a floating-tempo drop-anchored hour", () => {
     const raw = JSON.parse(
-      readFileSync(path.join(process.cwd(), "docs/examples/liquid-hour.example.brief.json"), "utf8"),
+      readFileSync(
+        path.join(process.cwd(), "docs/examples/liquid-hour.example.brief.json"),
+        "utf8",
+      ),
     ) as unknown;
     const parsed = createSetPlanInputSchema.parse(raw);
     expect(parsed.dropAnchored).toBe(true);
@@ -39,8 +42,8 @@ describe("hour briefs", () => {
   it("defaults omitted duration to one hour", () => {
     expect(resolveTargetDurationMs({})).toBe(3_600_000);
     expect(resolveTargetDurationMs({ targetDurationMinutes: 90 })).toBe(5_400_000);
-    expect(resolveTargetDurationMs({ targetDurationMs: 1_200_000, targetDurationMinutes: 25 })).toBe(
-      1_500_000,
-    );
+    expect(
+      resolveTargetDurationMs({ targetDurationMs: 1_200_000, targetDurationMinutes: 25 }),
+    ).toBe(1_500_000);
   });
 });

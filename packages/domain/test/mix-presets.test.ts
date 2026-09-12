@@ -14,7 +14,11 @@ const BAR_MS = (4 * 60_000) / 174;
 
 describe("mix presets", () => {
   it("softens the incoming vocal-band entrance without moving bass or outgoing automation", () => {
-    const base = { phraseShape: "landing" as const, landingFadeBars: 8 as const, landingCarryBars: 4 as const };
+    const base = {
+      phraseShape: "landing" as const,
+      landingFadeBars: 8 as const,
+      landingCarryBars: 4 as const,
+    };
     const old = expandPreset("phrase_mix", base, 32, BAR_MS);
     const soft = expandPreset("phrase_mix", { ...base, landingIncomingFadeBars: 8 }, 32, BAR_MS);
     for (const target of ["incoming_mid", "incoming_high"]) {
@@ -23,48 +27,86 @@ describe("mix presets", () => {
       expect(soft.find((event) => event.target === target)?.atBar).toBe(24);
       expect(soft.find((event) => event.target === target)?.durationBars).toBe(8);
     }
-    expect(soft.filter((event) => !["incoming_mid", "incoming_high"].includes(event.target)))
-      .toEqual(old.filter((event) => !["incoming_mid", "incoming_high"].includes(event.target)));
-    expect(clampMixPresetParams({ landingIncomingFadeBars: 32 }, 8).landingIncomingFadeBars).toBe(8);
+    expect(
+      soft.filter((event) => !["incoming_mid", "incoming_high"].includes(event.target)),
+    ).toEqual(old.filter((event) => !["incoming_mid", "incoming_high"].includes(event.target)));
+    expect(clampMixPresetParams({ landingIncomingFadeBars: 32 }, 8).landingIncomingFadeBars).toBe(
+      8,
+    );
   });
   it("delays the audition arrival by four beats without changing the outgoing mid/high fade", () => {
-    const events = expandPreset("phrase_mix", { phraseShape: "landing", landingFadeBars: 8,
-      landingCarryBars: 3.5 }, 32, BAR_MS);
+    const events = expandPreset(
+      "phrase_mix",
+      { phraseShape: "landing", landingFadeBars: 8, landingCarryBars: 3.5 },
+      32,
+      BAR_MS,
+    );
     expect(events.find((event) => event.target === "incoming_mid")?.durationBars).toBe(28.5);
     expect(events.find((event) => event.target === "incoming_low")?.atBar).toBe(27.5);
-    expect(events.find((event) => event.target === "outgoing_low" && event.toDb === -24)?.atBar).toBe(27.5);
-    expect(events.find((event) => event.target === "outgoing_low" && event.toDb == null)?.atBar).toBe(28.5);
+    expect(
+      events.find((event) => event.target === "outgoing_low" && event.toDb === -24)?.atBar,
+    ).toBe(27.5);
+    expect(
+      events.find((event) => event.target === "outgoing_low" && event.toDb == null)?.atBar,
+    ).toBe(28.5);
     expect(events.find((event) => event.target === "outgoing_mid")?.atBar).toBe(24);
   });
   it("moves the landing bass handoff two beats earlier with the incoming drop", () => {
-    const events = expandPreset("phrase_mix", { phraseShape: "landing", landingFadeBars: 8,
-      landingCarryBars: 4.5 }, 32, BAR_MS);
+    const events = expandPreset(
+      "phrase_mix",
+      { phraseShape: "landing", landingFadeBars: 8, landingCarryBars: 4.5 },
+      32,
+      BAR_MS,
+    );
     expect(events.find((event) => event.target === "incoming_mid")?.durationBars).toBe(27.5);
     expect(events.find((event) => event.target === "incoming_low")?.atBar).toBe(26.5);
-    expect(events.find((event) => event.target === "outgoing_low" && event.toDb === -24)?.atBar).toBe(26.5);
-    expect(events.find((event) => event.target === "outgoing_low" && event.toDb == null)?.atBar).toBe(27.5);
+    expect(
+      events.find((event) => event.target === "outgoing_low" && event.toDb === -24)?.atBar,
+    ).toBe(26.5);
+    expect(
+      events.find((event) => event.target === "outgoing_low" && event.toDb == null)?.atBar,
+    ).toBe(27.5);
     expect(events.find((event) => event.target === "outgoing_mid")?.atBar).toBe(24);
   });
   it("carries outgoing presence past an earlier drop while releasing its bass separately", () => {
-    const events = expandPreset("phrase_mix", { phraseShape: "landing", landingFadeBars: 8,
-      landingCarryBars: 4 }, 32, BAR_MS);
+    const events = expandPreset(
+      "phrase_mix",
+      { phraseShape: "landing", landingFadeBars: 8, landingCarryBars: 4 },
+      32,
+      BAR_MS,
+    );
     expect(events.find((event) => event.target === "incoming_mid")?.durationBars).toBe(28);
     expect(events.find((event) => event.target === "incoming_low")?.atBar).toBe(27);
-    expect(events.find((event) => event.target === "outgoing_low" && event.toDb === -24)?.atBar).toBe(27);
-    expect(events.find((event) => event.target === "outgoing_low" && event.toDb == null)?.atBar).toBe(28);
-    expect(events.find((event) => event.target === "outgoing_low" && event.toDb == null)?.durationBars).toBe(1);
+    expect(
+      events.find((event) => event.target === "outgoing_low" && event.toDb === -24)?.atBar,
+    ).toBe(27);
+    expect(
+      events.find((event) => event.target === "outgoing_low" && event.toDb == null)?.atBar,
+    ).toBe(28);
+    expect(
+      events.find((event) => event.target === "outgoing_low" && event.toDb == null)?.durationBars,
+    ).toBe(1);
     expect(events.find((event) => event.target === "outgoing_mid")?.atBar).toBe(24);
     expect(events.find((event) => event.target === "outgoing_mid")?.durationBars).toBe(8);
   });
   it("holds outgoing presence until the DJ landing release without changing historical fades", () => {
     const old = expandPreset("phrase_mix", { phraseShape: "landing" }, 32, BAR_MS);
-    const dj = expandPreset("phrase_mix", { phraseShape: "landing", landingFadeBars: 2 }, 32, BAR_MS);
+    const dj = expandPreset(
+      "phrase_mix",
+      { phraseShape: "landing", landingFadeBars: 2 },
+      32,
+      BAR_MS,
+    );
     expect(old.find((event) => event.target === "outgoing_mid")?.atBar).toBe(24);
     expect(dj.find((event) => event.target === "outgoing_mid")?.atBar).toBe(30);
     expect(dj.find((event) => event.target === "outgoing_mid")?.durationBars).toBe(2);
     expect(dj.find((event) => event.target === "incoming_low")?.atBar).toBe(31);
-    expect(dj.find((event) => event.target === "outgoing_low" && event.toDb === -24)?.atBar).toBe(31);
-    expect(dj.find((event) => event.target === "outgoing_low" && event.toDb == null)?.atBar).toBe(32);
+    expect(dj.find((event) => event.target === "outgoing_low" && event.toDb === -24)?.atBar).toBe(
+      31,
+    );
+    expect(dj.find((event) => event.target === "outgoing_low" && event.toDb == null)?.atBar).toBe(
+      32,
+    );
   });
   it("hands over lift phrase_mix low earlier and holds outgoing mid/high first", () => {
     const sixteen = expandPreset("phrase_mix", null, 16, BAR_MS);
@@ -101,10 +143,16 @@ describe("mix presets", () => {
 
   it("uses sequential drums only for a hot drop into a drum-heavy intro", () => {
     expect(
-      choosePhraseShape({ type: "drop", sectionEnergy: 0.334 }, { type: "intro", sectionEnergy: 0.217 }),
+      choosePhraseShape(
+        { type: "drop", sectionEnergy: 0.334 },
+        { type: "intro", sectionEnergy: 0.217 },
+      ),
     ).toBe("sequential");
     expect(
-      choosePhraseShape({ type: "drop", sectionEnergy: 0.255 }, { type: "intro", sectionEnergy: 0.204 }),
+      choosePhraseShape(
+        { type: "drop", sectionEnergy: 0.255 },
+        { type: "intro", sectionEnergy: 0.204 },
+      ),
     ).toBe("complementary");
     expect(
       choosePhraseShape(
@@ -113,7 +161,10 @@ describe("mix presets", () => {
       ),
     ).toBe("complementary");
     expect(
-      choosePhraseShape({ type: "drop", sectionEnergy: 0.334 }, { type: "intro", sectionEnergy: 0.078 }),
+      choosePhraseShape(
+        { type: "drop", sectionEnergy: 0.334 },
+        { type: "intro", sectionEnergy: 0.078 },
+      ),
     ).toBe("complementary");
   });
 
@@ -122,11 +173,16 @@ describe("mix presets", () => {
     const hotIntro = { type: "intro" as const, sectionEnergy: 0.217 };
     expect(choosePhraseShape(hotDrop, hotIntro)).toBe("sequential");
     expect(resolveRenderPhraseShape("landing", null, hotDrop, hotIntro)).toBe("landing");
-    expect(resolveRenderPhraseShape("complementary", "dropLanding", hotDrop, hotIntro)).toBe("complementary");
+    expect(resolveRenderPhraseShape("complementary", "dropLanding", hotDrop, hotIntro)).toBe(
+      "complementary",
+    );
     expect(resolveRenderPhraseShape("sequential", "quietTail", hotDrop, null)).toBe("sequential");
     expect(resolveRenderPhraseShape(undefined, undefined, hotDrop, hotIntro)).toBe("sequential");
     expect(
-      resolveRenderPhraseShape("complementary", "quietTail", hotDrop, { type: "intro", sectionEnergy: 0.078 }),
+      resolveRenderPhraseShape("complementary", "quietTail", hotDrop, {
+        type: "intro",
+        sectionEnergy: 0.078,
+      }),
     ).toBe("complementary");
   });
 

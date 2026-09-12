@@ -12,7 +12,11 @@ import {
   type RecipeLiveIdentity,
   type ReusableRecipePayload,
 } from "../src/index.ts";
-import { outputPositionToSourceMs, resolveRateRegions, sourcePositionToOutputMs } from "../src/rate-regions.ts";
+import {
+  outputPositionToSourceMs,
+  resolveRateRegions,
+  sourcePositionToOutputMs,
+} from "../src/rate-regions.ts";
 
 function payload(overrides: Partial<ReusableRecipePayload> = {}): ReusableRecipePayload {
   const transition = {
@@ -64,7 +68,10 @@ function payload(overrides: Partial<ReusableRecipePayload> = {}): ReusableRecipe
   };
 }
 
-function liveFrom(approved: ReusableRecipePayload, overrides: Partial<RecipeLiveIdentity> = {}): RecipeLiveIdentity {
+function liveFrom(
+  approved: ReusableRecipePayload,
+  overrides: Partial<RecipeLiveIdentity> = {},
+): RecipeLiveIdentity {
   return {
     outgoingTrackId: approved.outgoingTrackId,
     incomingTrackId: approved.incomingTrackId,
@@ -161,9 +168,9 @@ describe("approved recipe recall", () => {
       },
     ];
     expect(pickApprovedRecipe(recipes, liveFrom(shared))?.recipe.id).toBe("gold");
-    expect(recipeApplicability(shared, liveFrom(shared, { outgoingSourceFingerprint: "stale" })).ok).toBe(
-      false,
-    );
+    expect(
+      recipeApplicability(shared, liveFrom(shared, { outgoingSourceFingerprint: "stale" })).ok,
+    ).toBe(false);
     const unreviewed: ApprovedRecipeRecord[] = [
       {
         ...recipes[0]!,
@@ -173,7 +180,6 @@ describe("approved recipe recall", () => {
     ];
     expect(pickApprovedRecipe(unreviewed, liveFrom(shared))).toBeNull();
   });
-
 });
 
 describe("plan-level rate region resolution", () => {
@@ -182,8 +188,14 @@ describe("plan-level rate region resolution", () => {
     const rate = 175 / 174;
     const regions = resolveRateRegions(40_000, rate, overlap, overlap / 2);
     const mid = regions[1]!.sourceStartMs + 10;
-    expect(outputPositionToSourceMs(regions, sourcePositionToOutputMs(regions, mid))).toBeCloseTo(mid, 8);
-    expect(resolvePlanRateRegionsVersion({ entries: [{ transitionToNext: { parameters: {} } }] }).version).toBe(1);
+    expect(outputPositionToSourceMs(regions, sourcePositionToOutputMs(regions, mid))).toBeCloseTo(
+      mid,
+      8,
+    );
+    expect(
+      resolvePlanRateRegionsVersion({ entries: [{ transitionToNext: { parameters: {} } }] })
+        .version,
+    ).toBe(1);
     expect(
       resolvePlanRateRegionsVersion({
         entries: [

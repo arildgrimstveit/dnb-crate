@@ -72,7 +72,12 @@ export function storedGridResidualMs(
 /** @deprecated Use storedGridResidualMs — this is not an audio measurement. */
 export const alignmentResidualMs = storedGridResidualMs;
 
-export function beatsInWindow(beats: number[], startMs: number, endMs: number, padMs = 12_000): number[] {
+export function beatsInWindow(
+  beats: number[],
+  startMs: number,
+  endMs: number,
+  padMs = 12_000,
+): number[] {
   return beats.filter((time) => time >= startMs - padMs && time <= endMs + padMs);
 }
 
@@ -90,6 +95,18 @@ export function evaluateDurationError(
   }
   const strictHour = kind === "full" && plannedDurationMs >= 5 * 60_000;
   return { errorMs, status: strictHour ? "fail" : "warning" };
+}
+
+/** Job-completion rule: a full render must match the plan within 1000 ms. */
+export function fullRenderDurationFailure(
+  outputDurationMs: number,
+  plannedDurationMs: number,
+): string | null {
+  const delta = Math.abs(outputDurationMs - plannedDurationMs);
+  if (delta <= RENDER_DURATION_TOLERANCE_MS) {
+    return null;
+  }
+  return `Output duration ${outputDurationMs}ms differs from plan ${plannedDurationMs}ms by ${delta}ms (tolerance ${RENDER_DURATION_TOLERANCE_MS}ms).`;
 }
 
 export function freezeJoinEvidence(input: {
@@ -117,8 +134,16 @@ export function freezeJoinEvidence(input: {
     incomingTrackId: input.incomingTrackId,
     outgoingAnalysisVersion: input.outgoingAnalysisVersion,
     incomingAnalysisVersion: input.incomingAnalysisVersion,
-    outgoingBeatsMs: beatsInWindow(input.outgoingBeatsMs, input.outgoingSourceStartMs, input.outgoingSourceEndMs),
-    incomingBeatsMs: beatsInWindow(input.incomingBeatsMs, input.incomingSourceStartMs, input.incomingSourceEndMs),
+    outgoingBeatsMs: beatsInWindow(
+      input.outgoingBeatsMs,
+      input.outgoingSourceStartMs,
+      input.outgoingSourceEndMs,
+    ),
+    incomingBeatsMs: beatsInWindow(
+      input.incomingBeatsMs,
+      input.incomingSourceStartMs,
+      input.incomingSourceEndMs,
+    ),
     outgoingCamelotKey: input.outgoingCamelotKey,
     incomingCamelotKey: input.incomingCamelotKey,
     outgoingAudioEndMs: input.outgoingAudioEndMs,
@@ -138,7 +163,11 @@ export function storedGridFromEvidence(
   incomingRate: number,
   downbeatOffsetMs: number | null,
   periodMs: number | null,
-): { residualMs: number | null; source: "frozen-manifest" | "missing"; kind: "stored-grid-consistency" } {
+): {
+  residualMs: number | null;
+  source: "frozen-manifest" | "missing";
+  kind: "stored-grid-consistency";
+} {
   if (!evidence || evidence.outgoingBeatsMs.length < 4 || evidence.incomingBeatsMs.length < 4) {
     return { residualMs: null, source: "missing", kind: "stored-grid-consistency" };
   }
@@ -240,7 +269,10 @@ export function plannedLevelStepLu(
   );
 }
 
-export function joinCamelotDistance(outgoingKey: string | null, incomingKey: string | null): number | null {
+export function joinCamelotDistance(
+  outgoingKey: string | null,
+  incomingKey: string | null,
+): number | null {
   return camelotWheelDistance(outgoingKey, incomingKey);
 }
 

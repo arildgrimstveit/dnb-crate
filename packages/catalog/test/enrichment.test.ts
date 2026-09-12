@@ -75,15 +75,18 @@ function deezerTrack(overrides: Record<string, unknown> = {}): Record<string, un
   };
 }
 
-const cleanups: Array<() => void> = [];
+const cleanups: Array<() => void | Promise<void>> = [];
 
-afterEach(() => {
+afterEach(async () => {
   while (cleanups.length > 0) {
-    cleanups.pop()?.();
+    await cleanups.pop()?.();
   }
 });
 
-async function workspace(http: ReturnType<typeof createFakeHttpClient>, extras: Partial<AppConfig> = {}) {
+async function workspace(
+  http: ReturnType<typeof createFakeHttpClient>,
+  extras: Partial<AppConfig> = {},
+) {
   const root = path.join(
     os.tmpdir(),
     `dnb-enrich-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -134,12 +137,13 @@ describe("chromaprint fingerprint", () => {
   it("parses bare base64 stdout from FFmpeg", async () => {
     const fp = await fingerprintFile(
       {
-        run: async () => ({
-          exitCode: 0,
-          signal: null,
-          stdout: "AQAAC0mUaEkSZSoAAAAA\n",
-          stderr: "",
-        }),
+        run: () =>
+          Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            stdout: "AQAAC0mUaEkSZSoAAAAA\n",
+            stderr: "",
+          }),
       },
       "ffmpeg",
       "clip.wav",
@@ -150,12 +154,13 @@ describe("chromaprint fingerprint", () => {
   it("parses URL-safe base64 chromaprint stdout", async () => {
     const fp = await fingerprintFile(
       {
-        run: async () => ({
-          exitCode: 0,
-          signal: null,
-          stdout: "AQAAC0mU_EkS-SoAAAAA\n",
-          stderr: "",
-        }),
+        run: () =>
+          Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            stdout: "AQAAC0mU_EkS-SoAAAAA\n",
+            stderr: "",
+          }),
       },
       "ffmpeg",
       "clip.wav",
@@ -169,8 +174,9 @@ describe("rate limiter", () => {
     let now = 0;
     const clock = {
       now: () => now,
-      sleep: async (ms: number) => {
+      sleep: (ms: number) => {
         now += ms;
+        return Promise.resolve();
       },
     };
     const limiter = new RateLimiter(1000, clock);
@@ -347,7 +353,9 @@ describe("metadata enrichment", () => {
     ]);
     const other = await workspace(disagree);
     const track = await seedTrack(other.catalog, other.library, { title: "Disagree" });
-    other.catalog.db.prepare("UPDATE tracks SET recording_mbid = ? WHERE id = ?").run(MBID, track.id);
+    other.catalog.db
+      .prepare("UPDATE tracks SET recording_mbid = ? WHERE id = ?")
+      .run(MBID, track.id);
     other.catalog.analyses.upsert({
       trackId: track.id,
       analyzerName: DSP_ANALYZER_NAME,

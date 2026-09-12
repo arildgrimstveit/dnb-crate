@@ -68,14 +68,17 @@ function mapRecording(raw: unknown): MbRecording | null {
   }
   const credit = artistCreditName(row["artist-credit"]);
   const releases = asArray(row.releases).map(asRecord);
-  const official = releases.find((item) => String(item.status ?? "").toLowerCase() === "official") ?? releases[0];
+  const official =
+    releases.find(
+      (item) => (typeof item.status === "string" ? item.status : "").toLowerCase() === "official",
+    ) ?? releases[0];
   const group = asRecord(row["release-group"] ?? official?.["release-group"]);
   const genres = [
-    ...asArray(row.genres).map((item) => String(asRecord(item).name ?? "")),
+    ...asArray(row.genres).map((item) => asRecord(item).name),
     ...asArray(row.tags)
       .filter((item) => Number(asRecord(item).count ?? 0) >= 2)
-      .map((item) => String(asRecord(item).name ?? "")),
-  ];
+      .map((item) => asRecord(item).name),
+  ].filter((name): name is string => typeof name === "string");
   return {
     id: row.id,
     title: row.title,
@@ -131,12 +134,18 @@ export class MusicBrainzClient {
     return [];
   }
 
-  async searchRecordings(title: string, artist: string, durationMs: number): Promise<MbRecording[]> {
+  async searchRecordings(
+    title: string,
+    artist: string,
+    durationMs: number,
+  ): Promise<MbRecording[]> {
     const window = 4000;
     const query = `recording:"${title.replaceAll('"', "")}" AND artist:"${artist.replaceAll('"', "")}" AND dur:[${Math.max(0, durationMs - window)} TO ${durationMs + window}]`;
     const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=10`;
     const json = asRecord(await this.getJson(url));
-    return asArray(json.recordings).map(mapRecording).filter((row): row is MbRecording => row !== null);
+    return asArray(json.recordings)
+      .map(mapRecording)
+      .filter((row): row is MbRecording => row !== null);
   }
 
   async lookupRelease(mbid: string): Promise<MbRelease | null> {
@@ -151,8 +160,10 @@ export class MusicBrainzClient {
     return {
       id: json.id,
       date: typeof json.date === "string" ? json.date : null,
-      label: typeof asRecord(first.label).name === "string" ? String(asRecord(first.label).name) : null,
-      catalogNumber: typeof first["catalog-number"] === "string" ? String(first["catalog-number"]) : null,
+      label:
+        typeof asRecord(first.label).name === "string" ? String(asRecord(first.label).name) : null,
+      catalogNumber:
+        typeof first["catalog-number"] === "string" ? String(first["catalog-number"]) : null,
       firstReleaseDate:
         typeof group["first-release-date"] === "string" ? group["first-release-date"] : null,
     };

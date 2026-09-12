@@ -4,6 +4,7 @@ import {
   alignmentResidualMs,
   evaluateDurationError,
   firstDropMs,
+  fullRenderDurationFailure,
   freezeJoinEvidence,
   joinCamelotDistance,
   plannedLevelStepLu,
@@ -60,15 +61,20 @@ describe("render:check v2 metrics", () => {
   it("computes camelot distance and first drop", () => {
     expect(joinCamelotDistance("5A", "5B")).toBe(1);
     expect(joinCamelotDistance("5A", "6A")).toBe(1);
-    expect(firstDropMs([{ type: "intro", startMs: 0 }, { type: "drop", startMs: 64_000 }])).toBe(
-      64_000,
-    );
+    expect(
+      firstDropMs([
+        { type: "intro", startMs: 0 },
+        { type: "drop", startMs: 64_000 },
+      ]),
+    ).toBe(64_000);
   });
 
   it("does not compute a stored-grid residual without frozen beats", () => {
-    expect(
-      storedGridFromEvidence(undefined, 10_000, 0, 1, 1, 0, 345),
-    ).toEqual({ residualMs: null, source: "missing", kind: "stored-grid-consistency" });
+    expect(storedGridFromEvidence(undefined, 10_000, 0, 1, 1, 0, 345)).toEqual({
+      residualMs: null,
+      source: "missing",
+      kind: "stored-grid-consistency",
+    });
   });
 
   it("uses frozen beats and ignores a later catalog mutation", () => {
@@ -118,5 +124,10 @@ describe("render:check v2 metrics", () => {
     expect(evaluateDurationError(58_000, 60_000, "preview").status).toBe("warning");
     expect(evaluateDurationError(1_000, 90_000, "full").status).toBe("warning");
     expect(evaluateDurationError(3_515_400, 3_515_154, "full").status).toBe("pass");
+  });
+
+  it("treats any full-render miss over 1000 ms as a duration failure message", () => {
+    expect(fullRenderDurationFailure(1_000, 15_000)).toMatch(/tolerance 1000ms/);
+    expect(fullRenderDurationFailure(15_000, 15_400)).toBeNull();
   });
 });

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { camelotDistance, camelotNumberDistance, interpolateEnergy, scoreCandidate } from "../src/index.ts";
+import {
+  camelotDistance,
+  camelotNumberDistance,
+  interpolateEnergy,
+  scoreCandidate,
+} from "../src/index.ts";
 import type { Track } from "../src/index.ts";
 
 function track(partial: Partial<Track> & Pick<Track, "id" | "title">): Track {

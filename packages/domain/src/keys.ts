@@ -238,7 +238,10 @@ export function harmonicClass(relation: HarmonicRelation): "compatible" | "risky
   return isConservativeHarmonic(relation) ? "compatible" : "risky";
 }
 
-export function harmonicMixScore(relation: HarmonicRelation, numberDistance: number | null): number {
+export function harmonicMixScore(
+  relation: HarmonicRelation,
+  numberDistance: number | null,
+): number {
   if (relation === "same") {
     return 1;
   }

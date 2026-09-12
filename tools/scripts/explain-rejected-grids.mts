@@ -32,12 +32,13 @@ function reasonBucket(reason: string | null): string {
   if (reason.includes("Beat-grid confidence")) return "low_confidence";
   if (reason.includes("Reference tempo")) return "reference_mismatch";
   if (reason.includes("disagrees with published")) return "disagrees_published";
-  if (reason.toLowerCase().includes("3:2") || reason.toLowerCase().includes("3/2")) return "ratio_confusion";
+  if (reason.toLowerCase().includes("3:2") || reason.toLowerCase().includes("3/2"))
+    return "ratio_confusion";
   return reason.length > 80 ? `${reason.slice(0, 80)}…` : reason;
 }
 
 const config = loadConfig();
-const runtime = createCatalogRuntime(config);
+const runtime = createCatalogRuntime(config, undefined, { passive: true });
 try {
   const tracks = runtime.repository.listAll();
   const byId = new Map(tracks.map((track) => [track.id, track]));
@@ -80,8 +81,12 @@ try {
       row.confidence >= 0.45 &&
       row.bpmRaw != null,
   );
-  const hasPublished = rows.filter((row) => row.publishedBpm != null && row.publishedBpm >= 160 && row.publishedBpm <= 190);
-  const noPublished = rows.filter((row) => row.publishedBpm == null || row.publishedBpm < 160 || row.publishedBpm > 190);
+  const hasPublished = rows.filter(
+    (row) => row.publishedBpm != null && row.publishedBpm >= 160 && row.publishedBpm <= 190,
+  );
+  const noPublished = rows.filter(
+    (row) => row.publishedBpm == null || row.publishedBpm < 160 || row.publishedBpm > 190,
+  );
   for (const row of rows) buckets[row.bucket] = (buckets[row.bucket] ?? 0) + 1;
   const byBucket: Record<string, typeof rows> = {};
   for (const row of rows) (byBucket[row.bucket] ??= []).push(row);
@@ -107,7 +112,9 @@ try {
         referenceMismatchWithDnbHint: rows.filter(
           (row) => row.bucket === "reference_mismatch" && row.hint != null,
         ).length,
-        lowConfidenceWithHint: rows.filter((row) => row.bucket === "low_confidence" && row.hint != null).length,
+        lowConfidenceWithHint: rows.filter(
+          (row) => row.bucket === "low_confidence" && row.hint != null,
+        ).length,
         strongFreeGridKilledByPublished: rows
           .filter(
             (row) =>
@@ -141,5 +148,5 @@ try {
     ),
   );
 } finally {
-  runtime.close();
+  await runtime.close();
 }

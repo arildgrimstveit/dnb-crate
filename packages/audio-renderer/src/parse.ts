@@ -38,9 +38,7 @@ export function parseEbur128(text: string): {
   integratedLufs: number | null;
   truePeakDb: number | null;
 } {
-  const integratedMatches = [
-    ...text.matchAll(/I:\s+([+-]?\d+(?:\.\d+)?)\s+LUFS/gi),
-  ];
+  const integratedMatches = [...text.matchAll(/I:\s+([+-]?\d+(?:\.\d+)?)\s+LUFS/gi)];
   const peakMatches = [...text.matchAll(/Peak:\s+([+-]?\d+(?:\.\d+)?)\s+dB/gi)];
   const lastIntegrated = integratedMatches.at(-1);
   const lastPeak = peakMatches.at(-1);

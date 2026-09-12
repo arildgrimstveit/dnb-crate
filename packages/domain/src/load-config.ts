@@ -148,7 +148,9 @@ export function loadConfig(options: ConfigLoadOptions = {}): AppConfig {
 
   if (env.DNB_CRATE_ACOUSTID_API_KEY || env.DNB_CRATE_ENRICHMENT_CONTACT) {
     const existing =
-      merged.enrichment && typeof merged.enrichment === "object" && !Array.isArray(merged.enrichment)
+      merged.enrichment &&
+      typeof merged.enrichment === "object" &&
+      !Array.isArray(merged.enrichment)
         ? { ...(merged.enrichment as Record<string, unknown>) }
         : {};
     if (env.DNB_CRATE_ENRICHMENT_CONTACT) {
@@ -156,7 +158,9 @@ export function loadConfig(options: ConfigLoadOptions = {}): AppConfig {
     }
     if (env.DNB_CRATE_ACOUSTID_API_KEY) {
       const acoustid =
-        existing.acoustid && typeof existing.acoustid === "object" && !Array.isArray(existing.acoustid)
+        existing.acoustid &&
+        typeof existing.acoustid === "object" &&
+        !Array.isArray(existing.acoustid)
           ? { ...(existing.acoustid as Record<string, unknown>) }
           : {};
       acoustid.apiKey = env.DNB_CRATE_ACOUSTID_API_KEY;

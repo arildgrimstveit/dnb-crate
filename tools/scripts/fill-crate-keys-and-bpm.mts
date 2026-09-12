@@ -5,7 +5,12 @@ import path from "node:path";
 import { createNodeProcessRunner } from "../../packages/audio-renderer/src/index.ts";
 import { probeKeyEngine, runKeyEngine } from "../../packages/catalog/src/analysis/key-engine.ts";
 import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
-import { DSP_ANALYZER_NAME, loadConfig, resolveBpmHint, type Track } from "../../packages/domain/src/index.ts";
+import {
+  DSP_ANALYZER_NAME,
+  loadConfig,
+  resolveBpmHint,
+  type Track,
+} from "../../packages/domain/src/index.ts";
 
 const KEY_REASON = "KeyFinder crate-wide 2026-09-09; DSP chroma unused";
 const CONCURRENCY = 2;
@@ -15,7 +20,7 @@ const runtime = createCatalogRuntime(config);
 const runner = createNodeProcessRunner();
 const probe = await probeKeyEngine(config);
 if (!probe.available) {
-  runtime.close();
+  await runtime.close();
   throw new Error("KeyFinder is not installed");
 }
 
@@ -134,9 +139,11 @@ async function worker(): Promise<void> {
     if (!track) {
       return;
     }
-    console.error(`[keys ${index + 1}/${missingKeyfinder.length}] ${track.artist ?? "?"} — ${track.title}`);
+    console.error(
+      `[keys ${index + 1}/${missingKeyfinder.length}] ${track.artist ?? "?"} — ${track.title}`,
+    );
     try {
-      const key = await runKeyEngine(runner, config, track.filePath!);
+      const key = await runKeyEngine(runner, config, track.filePath);
       await enqueueWrite(() => {
         storeKeyfinder(track, key);
         measured.push({ title: track.title, key: key.musicalKey, error: null });
@@ -151,7 +158,11 @@ async function worker(): Promise<void> {
   }
 }
 
-await Promise.all(Array.from({ length: Math.min(CONCURRENCY, Math.max(missingKeyfinder.length, 1)) }, () => worker()));
+await Promise.all(
+  Array.from({ length: Math.min(CONCURRENCY, Math.max(missingKeyfinder.length, 1)) }, () =>
+    worker(),
+  ),
+);
 await writeChain;
 
 const bpmFilled: Array<{ title: string; bpm: number; from: "grid" | "hint" }> = [];
@@ -178,14 +189,20 @@ for (const track of runtime.repository.listAll()) {
   }
   bpmLeftover.push({
     title: fresh.title,
-    reason: dsp == null ? "no DSP row" : dsp.gridRejected ? "rejected grid, hint did not fold 160-190" : "no BPM on accepted grid",
+    reason:
+      dsp == null
+        ? "no DSP row"
+        : dsp.gridRejected
+          ? "rejected grid, hint did not fold 160-190"
+          : "no BPM on accepted grid",
   });
 }
 
 const after = runtime.repository.listAll();
 const summary = {
   tracks: after.length,
-  keyfinderRows: after.filter((track) => runtime.analyses.findByTrackId(track.id, "keyfinder")).length,
+  keyfinderRows: after.filter((track) => runtime.analyses.findByTrackId(track.id, "keyfinder"))
+    .length,
   canonicalKey: after.filter((track) => track.musicalKey).length,
   keyBySource: {
     analyzed: after.filter((track) => track.keySource === "analyzed").length,
@@ -205,7 +222,9 @@ const summary = {
   bpmFilledHint: bpmFilled.filter((row) => row.from === "hint").length,
   bpmLeftover: bpmLeftover.length,
   leftoverTitles: bpmLeftover.slice(0, 24).map((row) => row.title),
-  failedTitles: measured.filter((row) => row.error).map((row) => ({ title: row.title, error: row.error })),
+  failedTitles: measured
+    .filter((row) => row.error)
+    .map((row) => ({ title: row.title, error: row.error })),
 };
 
 const outDir = path.join(
@@ -214,6 +233,9 @@ const outDir = path.join(
   `crate-keys-bpm-${new Date().toISOString().replaceAll(":", "-")}`,
 );
 await mkdir(outDir, { recursive: true });
-await writeFile(path.join(outDir, "report.json"), `${JSON.stringify({ summary, promotedExisting, skippedCanonical, measured, bpmFilled, bpmLeftover }, null, 2)}\n`);
-runtime.close();
+await writeFile(
+  path.join(outDir, "report.json"),
+  `${JSON.stringify({ summary, promotedExisting, skippedCanonical, measured, bpmFilled, bpmLeftover }, null, 2)}\n`,
+);
+await runtime.close();
 console.log(JSON.stringify({ outDir, ...summary }, null, 2));

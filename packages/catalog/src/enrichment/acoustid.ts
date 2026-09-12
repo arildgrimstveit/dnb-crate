@@ -59,7 +59,8 @@ export async function fingerprintFile(
   }
   const duration = /DURATION=([0-9.]+)/i.exec(text);
   const fp =
-    /FINGERPRINT=([A-Za-z0-9+\-/=_]+)/i.exec(text) ?? /fingerprint=([A-Za-z0-9+\-/=_]+)/i.exec(text);
+    /FINGERPRINT=([A-Za-z0-9+\-/=_]+)/i.exec(text) ??
+    /fingerprint=([A-Za-z0-9+\-/=_]+)/i.exec(text);
   if (!fp) {
     return null;
   }
@@ -87,11 +88,11 @@ export class AcoustidClient {
       const row = asRecord(item);
       const recordings = Array.isArray(row.recordings) ? row.recordings : [];
       return {
-        acoustidId: String(row.id ?? ""),
+        acoustidId: typeof row.id === "string" ? row.id : "",
         score: Number(row.score ?? 0),
         recordingMbids: recordings
-          .map((rec) => String(asRecord(rec).id ?? ""))
-          .filter((id) => id.length > 0),
+          .map((rec) => asRecord(rec).id)
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
       };
     });
   }

@@ -2,7 +2,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
-import { createSetPlanInputSchema, loadConfig, type SetPlanEntry, type SetPlanV1 } from "../../packages/domain/src/index.ts";
+import {
+  createSetPlanInputSchema,
+  loadConfig,
+  type SetPlanEntry,
+  type SetPlanV1,
+} from "../../packages/domain/src/index.ts";
 
 const args = process.argv.slice(2);
 const value = (flag: string) => {
@@ -58,7 +63,7 @@ const brief = createSetPlanInputSchema.parse({
   name: `${briefJson.name} / live recreate seed ${seed}`,
 });
 
-const runtime = createCatalogRuntime(config);
+const runtime = createCatalogRuntime(config, undefined, { passive: true });
 const root = path.join(
   config.outputRoot,
   "reviews",
@@ -80,8 +85,18 @@ try {
     .map((_, index) => joinPayload(created.plan.entries, index));
   const lineupMatch =
     snapshot.plan.entries.length === created.plan.entries.length &&
-    snapshot.plan.entries.every((entry, index) => entry.trackId === created.plan.entries[index]?.trackId);
-  const joinDiffs = snapshotJoins.flatMap((frozen, index) => {
+    snapshot.plan.entries.every(
+      (entry, index) => entry.trackId === created.plan.entries[index]?.trackId,
+    );
+  type JoinDiff = {
+    index: number;
+    kind?: string;
+    frozen?: ReturnType<typeof joinPayload>;
+    live?: null;
+    pair?: string;
+    changes?: Array<{ field: string; snapshot: unknown; live: unknown }>;
+  };
+  const joinDiffs = snapshotJoins.flatMap<JoinDiff>((frozen, index) => {
     const live = liveJoins[index];
     if (!live) return [{ index, kind: "missing-live", frozen, live: null }];
     if (same(frozen, live)) return [];
@@ -133,7 +148,14 @@ try {
   };
   await writeFile(path.join(root, "report.json"), JSON.stringify(report, null, 2));
   await writeFile(path.join(root, "live-plan.json"), JSON.stringify(created, null, 2));
-  console.log(JSON.stringify({ root, ...report, liveLineup: report.liveLineup, snapshotLineup: report.snapshotLineup }));
+  console.log(
+    JSON.stringify({
+      root,
+      ...report,
+      liveLineup: report.liveLineup,
+      snapshotLineup: report.snapshotLineup,
+    }),
+  );
 } finally {
-  runtime.close();
+  await runtime.close();
 }

@@ -201,13 +201,41 @@ export async function renderMix(
   }
 
   if (request.rateRegionsVersion === 2) {
-    if (!request.rubberbandCliPath) throw new Error("Head/body/tail rendering requires the accepted R3 CLI");
+    if (!request.rubberbandCliPath)
+      throw new Error("Head/body/tail rendering requires the accepted R3 CLI");
     await mkdir(path.dirname(request.outputPath), { recursive: true });
-    const prepared = await prepareBothJoinRegions(runner, binaries, request.rubberbandCliPath, request, request.sampleRateHz ?? DEFAULT_RENDER_SAMPLE_RATE_HZ);
+    const prepared = await prepareBothJoinRegions(
+      runner,
+      binaries,
+      request.rubberbandCliPath,
+      request,
+      request.sampleRateHz ?? DEFAULT_RENDER_SAMPLE_RATE_HZ,
+    );
     try {
-      const result = await renderMix(runner, binaries, { ...request, segments: prepared.segments, rateRegionsVersion: undefined, stretchScope: "all" });
-      const expected = request.segments.reduce((sum, segment, i) => sum + resolveRateRegions(segment.sourceEndMs - segment.sourceStartMs, segment.playbackRate ?? 1, request.overlapMs[i - 1] ?? 0, request.overlapMs[i] ?? 0).at(-1)!.outputEndMs, 0) - request.overlapMs.reduce((a, b) => a + b, 0);
-      return { ...result, expectedDurationMs: Math.round(expected), warnings: [...prepared.warnings, ...result.warnings], invocation: `${prepared.invocation} ; ${result.invocation}` };
+      const result = await renderMix(runner, binaries, {
+        ...request,
+        segments: prepared.segments,
+        rateRegionsVersion: undefined,
+        stretchScope: "all",
+      });
+      const expected =
+        request.segments.reduce(
+          (sum, segment, i) =>
+            sum +
+            resolveRateRegions(
+              segment.sourceEndMs - segment.sourceStartMs,
+              segment.playbackRate ?? 1,
+              request.overlapMs[i - 1] ?? 0,
+              request.overlapMs[i] ?? 0,
+            ).at(-1)!.outputEndMs,
+          0,
+        ) - request.overlapMs.reduce((a, b) => a + b, 0);
+      return {
+        ...result,
+        expectedDurationMs: Math.round(expected),
+        warnings: [...prepared.warnings, ...result.warnings],
+        invocation: `${prepared.invocation} ; ${result.invocation}`,
+      };
     } finally {
       await Promise.all(prepared.tempPaths.map(removeIfPresent));
     }
@@ -285,9 +313,9 @@ export async function renderMix(
       isolatePrefix: request.isolatePrefix,
       tempoEngine: useCli
         ? "atempo"
-        : (request.tempoEngine === "rubberband-r3"
+        : request.tempoEngine === "rubberband-r3"
           ? "rubberband"
-          : (request.tempoEngine ?? (binaries.hasRubberband ? "rubberband" : "atempo"))),
+          : (request.tempoEngine ?? (binaries.hasRubberband ? "rubberband" : "atempo")),
       stretchScope: useCli ? "all" : stretchScope,
     });
     invocation = cliInvocation;
@@ -444,7 +472,10 @@ export async function renderMix(
             `Applied ${peakGainDb.toFixed(2)} dB after limiter so true peak meets ${request.truePeakCeilingDb} dBTP.`,
           );
           measured = await measureLoudness(runner, binaries, workingPath, request.abortSignal);
-          if (measured.truePeakDb !== null && measured.truePeakDb > request.truePeakCeilingDb + 0.3) {
+          if (
+            measured.truePeakDb !== null &&
+            measured.truePeakDb > request.truePeakCeilingDb + 0.3
+          ) {
             throw new DomainError(
               "RENDER_FAILED",
               `True peak ${measured.truePeakDb.toFixed(2)} dB exceeds ceiling ${request.truePeakCeilingDb} dB`,
@@ -563,7 +594,8 @@ async function buildFlacEncodeArgs(
   }
   let durationMs = expectedMs;
   try {
-    durationMs = (await probeAudioFile(runner, binaries, workingPath, request.abortSignal)).durationMs;
+    durationMs = (await probeAudioFile(runner, binaries, workingPath, request.abortSignal))
+      .durationMs;
   } catch {
     // Chapter ends fall back to the planned duration.
   }
@@ -670,7 +702,12 @@ async function renderPairwise(
     }
     const probe = await probeAudioFile(runner, binaries, request.outputPath, request.abortSignal);
     const checksumSha256 = await sha256File(request.outputPath);
-    const loudness = await measureLoudness(runner, binaries, request.outputPath, request.abortSignal);
+    const loudness = await measureLoudness(
+      runner,
+      binaries,
+      request.outputPath,
+      request.abortSignal,
+    );
     return {
       durationMs: probe.durationMs,
       sampleRateHz: probe.sampleRateHz,

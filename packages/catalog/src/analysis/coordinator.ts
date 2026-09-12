@@ -29,6 +29,8 @@ import { loadPcmForAnalysis } from "./load-pcm.ts";
 import type { TrackRepository } from "../repository.ts";
 
 export class AnalysisCoordinator {
+  canRun: () => boolean = () => true;
+  private readonly active = new Set<Promise<void>>();
   private running = 0;
   private stopped = false;
   private binaries: FfmpegBinaries | null | undefined;
@@ -46,8 +48,9 @@ export class AnalysisCoordinator {
     return this.jobs.failRunningAsInterrupted();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopped = true;
+    await Promise.all(this.active);
   }
 
   kick(): void {
@@ -134,7 +137,7 @@ export class AnalysisCoordinator {
   }
 
   private pump(): void {
-    if (this.stopped || this.running > 0) {
+    if (this.stopped || !this.canRun() || this.running > 0) {
       return;
     }
     const claimed = this.jobs.claimNextQueued();
@@ -142,23 +145,25 @@ export class AnalysisCoordinator {
       return;
     }
     this.running += 1;
-    void this.execute(claimed)
+    const task = this.execute(claimed)
       .catch((error: unknown) => {
         this.logger.error({ err: error, jobId: claimed.id }, "Analysis job crashed");
       })
       .finally(() => {
+        this.active.delete(task);
         this.running -= 1;
         this.pump();
       });
+    this.active.add(task);
   }
 
   private async execute(job: AnalysisJob): Promise<void> {
     const completed: string[] = [];
     const failed: string[] = [];
+    const pcmCache = new Map<string, Promise<PcmAudio>>();
     try {
       const binaries = await this.detect();
       const prefetchN = this.config.analysis?.prefetch ?? 1;
-      const pcmCache = new Map<string, Promise<PcmAudio>>();
       const queueDecode = (trackId: string): void => {
         if (pcmCache.has(trackId)) {
           return;
@@ -167,7 +172,10 @@ export class AnalysisCoordinator {
         if (!track || track.fileMissing) {
           return;
         }
-        pcmCache.set(trackId, loadPcmForAnalysis(track.filePath, this.runner, binaries));
+        const decoded = loadPcmForAnalysis(track.filePath, this.runner, binaries);
+        // Observe failures immediately, but preserve the rejection for this track's turn.
+        void decoded.catch(() => undefined);
+        pcmCache.set(trackId, decoded);
       };
       for (let i = 0; i < job.trackIds.length; i += 1) {
         if (this.stopped) {
@@ -190,10 +198,7 @@ export class AnalysisCoordinator {
           }
         }
         try {
-          const overlap = prefetchN > 0 && i + 1 < job.trackIds.length
-            ? pcmCache.get(job.trackIds[i + 1]!)
-            : undefined;
-          await this.analyzeTrack(trackId, binaries, pcmCache.get(trackId), overlap);
+          await this.analyzeTrack(trackId, binaries, pcmCache.get(trackId));
           completed.push(trackId);
         } catch (error) {
           failed.push(trackId);
@@ -224,6 +229,9 @@ export class AnalysisCoordinator {
         completed,
         failed,
       );
+    } finally {
+      // Pending decodes own temporary files and must settle before shutdown completes.
+      await Promise.allSettled(pcmCache.values());
     }
   }
 
@@ -231,7 +239,6 @@ export class AnalysisCoordinator {
     trackId: string,
     binaries: FfmpegBinaries | null,
     preloaded?: Promise<PcmAudio>,
-    overlap?: Promise<PcmAudio>,
   ): Promise<void> {
     const track = this.tracks.findById(trackId);
     if (!track) {
@@ -270,7 +277,7 @@ export class AnalysisCoordinator {
           ],
         })
       : Promise.resolve(null);
-    const [loudness] = await Promise.all([loudnessPromise, overlap ?? Promise.resolve(null)]);
+    const loudness = await loudnessPromise;
     let integratedLufs: number | null = null;
     let truePeakDb: number | null = null;
     if (loudness) {
@@ -279,7 +286,9 @@ export class AnalysisCoordinator {
       truePeakDb = parsed.truePeakDb;
     }
     this.storeResult(trackId, dsp, anchor, integratedLufs, truePeakDb, referenceBpm ?? null);
-    const preferred = this.analyses.findByTrackId(trackId) ?? this.analyses.findByTrackId(trackId, dsp.analyzerName);
+    const preferred =
+      this.analyses.findByTrackId(trackId) ??
+      this.analyses.findByTrackId(trackId, dsp.analyzerName);
     if (preferred) {
       this.tracks.applyAnalyzedMetadata(trackId, {
         bpm: preferred.gridRejected ? null : preferred.bpm,

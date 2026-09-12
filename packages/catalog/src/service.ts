@@ -1,3 +1,4 @@
+import type { ApprovedRecipeRecord } from "@dnb-crate/domain";
 import { access, mkdir } from "node:fs/promises";
 import { constants } from "node:fs";
 
@@ -66,10 +67,9 @@ import {
 import { ffmpegMixReady, sha256Json } from "@dnb-crate/audio-renderer";
 import type { HourFeedbackRepository } from "./hour-feedback-repository.ts";
 
-import type { SqliteDatabase } from "./db.ts";
 import { fingerprintFile } from "./fingerprint.ts";
 import { extractAudioMetadata } from "./metadata.ts";
-import { isPathInsideAnyRoot } from "./paths.ts";
+import { isPathInsideAnyRoot, normalizedPath } from "./paths.ts";
 import { draftSetPlan } from "./planning/planner.ts";
 import { PlanningConstraintError } from "./planning/constraints.ts";
 import { reportSetPlanQuality, type TrackQualityEvidence } from "./planning/quality.ts";
@@ -86,13 +86,13 @@ import { planTransition, validateTransition } from "./planning/transition-planne
 import type { FeedbackRepository } from "./feedback-repository.ts";
 import type { ApprovedRecipeRepository } from "./approved-recipe-repository.ts";
 import type { TrackEvidenceSelection } from "./analysis-repository.ts";
-
-export type CatalogRuntime = {
-  db: SqliteDatabase;
-  repository: TrackRepository;
-  service: CatalogService;
-  close: () => void;
-};
+import {
+  analysisForTimeline,
+  assertEvidenceEnginesExist,
+  isFrozenSnapshot,
+  resolveTrackEvidence,
+} from "./evidence.ts";
+import type { FrozenRenderRequest } from "./render-job-repository.ts";
 
 function capWarnings(warnings: string[]): string[] {
   if (warnings.length <= SCAN_WARNING_LIMIT) {
@@ -117,16 +117,29 @@ export class CatalogService {
     private readonly hourFeedback: HourFeedbackRepository,
   ) {}
 
-  recordHourFeedback(input: {renderJobId: string; outputChecksum: string; accepted: boolean; quote: string}) {
+  recordHourFeedback(input: {
+    renderJobId: string;
+    outputChecksum: string;
+    accepted: boolean;
+    quote: string;
+  }) {
     const parsed = recordHourFeedbackSchema.parse(input);
     const manifest = this.renders.getManifest(parsed.renderJobId);
-    if (manifest.kind !== "full" || manifest.outputChecksumSha256.toLowerCase() !== parsed.outputChecksum.toLowerCase()) {
-      throw new DomainError("INVALID_SET_PLAN", "Hour feedback must reference the full render's actual checksum");
+    if (
+      manifest.kind !== "full" ||
+      manifest.outputChecksumSha256.toLowerCase() !== parsed.outputChecksum.toLowerCase()
+    ) {
+      throw new DomainError(
+        "INVALID_SET_PLAN",
+        "Hour feedback must reference the full render's actual checksum",
+      );
     }
     return this.hourFeedback.record(manifest, parsed.accepted, parsed.quote);
   }
 
-  listHourFeedback(renderJobId?: string) { return this.hourFeedback.list(renderJobId); }
+  listHourFeedback(renderJobId?: string) {
+    return this.hourFeedback.list(renderJobId);
+  }
 
   async getServerStatus(): Promise<ServerStatus> {
     const { resolved } = await resolveLibraryRoots(this.config.libraryRoots);
@@ -174,10 +187,10 @@ export class CatalogService {
     let moved = 0;
     let skippedMalformed = 0;
 
-    const { resolved } = await resolveLibraryRoots(this.config.libraryRoots);
+    const resolved = walk.resolvedRoots;
 
     for (const file of walk.files) {
-      seenPaths.add(file.realPath);
+      seenPaths.add(normalizedPath(file.realPath));
       try {
         const metadata = await extractAudioMetadata(file.realPath);
         const fileFingerprint = await fingerprintFile(file.realPath, {
@@ -223,18 +236,23 @@ export class CatalogService {
     }
 
     let markedMissing = 0;
-    if (!dryRun) {
+    if (!dryRun && walk.complete) {
       const missingIds: string[] = [];
       for (const entry of this.repository.listPathIndex()) {
         if (!isPathInsideAnyRoot(entry.filePath, resolved)) {
           continue;
         }
-        if (!seenPaths.has(entry.filePath)) {
+        if (!seenPaths.has(normalizedPath(entry.filePath))) {
           missingIds.push(entry.id);
         }
       }
       this.repository.markMissing(missingIds);
       markedMissing = missingIds.length;
+    }
+    if (!dryRun && !walk.complete) {
+      warnings.push(
+        "Scan incomplete; existing file availability was preserved. Retry the scan after resolving unreadable paths.",
+      );
     }
 
     return {
@@ -297,11 +315,25 @@ export class CatalogService {
     }>,
     beatAnchorMs?: number,
   ): { trackId: string; cuePoints: CuePoint[] } {
-    const result = { trackId, cuePoints: this.repository.replaceCuePoints(trackId, cuePoints) };
-    if (beatAnchorMs !== undefined) {
-      this.analysis.setBeatAnchor(trackId, beatAnchorMs);
+    const track = this.requireTrack(trackId);
+    for (const cue of cuePoints) {
+      if (cue.positionMs > track.durationMs) {
+        throw new DomainError(
+          "INVALID_METADATA",
+          `Cue ${cue.type} at ${cue.positionMs}ms is past track duration ${track.durationMs}ms`,
+        );
+      }
     }
-    return result;
+    if (beatAnchorMs !== undefined && beatAnchorMs > track.durationMs) {
+      throw new DomainError("INVALID_BEAT_GRID", "Beat anchor is past the track duration");
+    }
+    return this.repository.withTransaction(() => {
+      const result = { trackId, cuePoints: this.repository.replaceCuePoints(trackId, cuePoints) };
+      if (beatAnchorMs !== undefined) {
+        this.analysis.setBeatAnchor(trackId, beatAnchorMs);
+      }
+      return result;
+    });
   }
 
   startTrackAnalysis(input: {
@@ -312,8 +344,7 @@ export class CatalogService {
   }): {
     job: AnalysisJob;
   } {
-    const scope =
-      input.scope ?? (input.planningReadyOnly === true ? "planningReady" : "ids");
+    const scope = input.scope ?? (input.planningReadyOnly === true ? "planningReady" : "ids");
     const ids = new Set<string>();
     for (const id of input.trackIds ?? []) {
       ids.add(id);
@@ -345,7 +376,9 @@ export class CatalogService {
 
   getTrackAnalysis(trackId: string, engine?: string): TrackAnalysisView {
     const track = this.requireTrack(trackId);
-    const stored = this.analyses.findByTrackId(trackId, engine);
+    const stored = engine
+      ? this.analyses.findByTrackId(trackId, engine)
+      : analysisForTimeline(resolveTrackEvidence(this.analyses, trackId));
     const view = this.analyses.toView(track, stored);
     if (!view) {
       throw new DomainError(
@@ -357,7 +390,9 @@ export class CatalogService {
     return view;
   }
 
-  toToolAnalysis(view: TrackAnalysisView): Omit<TrackAnalysisView, "beatTimesMs" | "downbeatTimesMs"> {
+  toToolAnalysis(
+    view: TrackAnalysisView,
+  ): Omit<TrackAnalysisView, "beatTimesMs" | "downbeatTimesMs"> {
     const { beatTimesMs: _b, downbeatTimesMs: _d, ...rest } = view;
     return rest;
   }
@@ -410,15 +445,27 @@ export class CatalogService {
     };
   }
 
-  getTrackSections(trackId: string, engine?: string): {
+  getTrackSections(
+    trackId: string,
+    engine?: string,
+  ): {
     trackId: string;
     analyzerName: string;
     sections: TrackAnalysisView["sections"];
   } {
-    const analysis = this.getTrackAnalysis(trackId, engine);
+    if (engine) {
+      const analysis = this.getTrackAnalysis(trackId, engine);
+      return {
+        trackId,
+        analyzerName: analysis.analyzerName,
+        sections: analysis.sections,
+      };
+    }
+    const evidence = resolveTrackEvidence(this.analyses, trackId);
+    const analysis = this.getTrackAnalysis(trackId);
     return {
       trackId,
-      analyzerName: analysis.analyzerName,
+      analyzerName: evidence.structure?.analyzerName ?? analysis.analyzerName,
       sections: analysis.sections,
     };
   }
@@ -634,7 +681,12 @@ export class CatalogService {
     trackId: string;
     cue?: "intro_start" | "drop" | "breakdown" | "outro_start";
     windowMs?: number;
-  }): Promise<{ trackId: string; cue: "intro_start" | "drop" | "breakdown" | "outro_start"; positionMs: number; outputRelpath: string }> {
+  }): Promise<{
+    trackId: string;
+    cue: "intro_start" | "drop" | "breakdown" | "outro_start";
+    positionMs: number;
+    outputRelpath: string;
+  }> {
     const track = this.requireTrack(input.trackId);
     const analysis = this.getTrackAnalysis(track.id);
     const cueType = input.cue ?? "drop";
@@ -803,25 +855,35 @@ export class CatalogService {
   }): { sourceTrackId: string; candidates: CompatibleTrack[] } {
     const source = this.requireTrack(input.sourceTrackId);
     const limit = Math.min(input.limit ?? 10, COMPATIBLE_TRACKS_LIMIT_MAX);
+    const analysisOf = (trackId: string) =>
+      analysisForTimeline(resolveTrackEvidence(this.analyses, trackId));
+    const srcA = analysisOf(source.id);
+    const sectionMs = (
+      analysis: ReturnType<typeof analysisOf>,
+      type: "intro" | "outro",
+    ): number | null => {
+      const section = analysis?.sections.find((row) => row.type === type);
+      return section ? section.endMs - section.startMs : null;
+    };
     const scored = this.repository
       .listAll()
       .filter((track) => {
         if (track.id === source.id || track.fileMissing) {
           return false;
         }
+        const desc = analysisOf(track.id)?.descriptors ?? null;
         if (input.energyMin !== undefined) {
-          const energy = track.energy ?? this.analyses.findByTrackId(track.id)?.descriptors?.suggestedEnergy;
+          const energy = track.energy ?? desc?.suggestedEnergy;
           if (energy == null || energy < input.energyMin) {
             return false;
           }
         }
         if (input.energyMax !== undefined) {
-          const energy = track.energy ?? this.analyses.findByTrackId(track.id)?.descriptors?.suggestedEnergy;
+          const energy = track.energy ?? desc?.suggestedEnergy;
           if (energy == null || energy > input.energyMax) {
             return false;
           }
         }
-        const desc = this.analyses.findByTrackId(track.id)?.descriptors ?? null;
         if (input.subBassMin !== undefined && (desc?.subBassRatio ?? -1) < input.subBassMin) {
           return false;
         }
@@ -839,50 +901,41 @@ export class CatalogService {
         return true;
       })
       .map((track) => {
-        const candA = this.analyses.findByTrackId(track.id);
-        const srcA = this.analyses.findByTrackId(source.id);
+        const candA = analysisOf(track.id);
         return {
-        track,
-        score: scoreCandidate({
-          source,
-          candidate: track,
-          targetEnergy: null,
-          direction: input.direction ?? "any",
-          preferredMoods: input.preferredMoods ?? [],
-          preferredSubgenres: input.preferredSubgenres ?? [],
-          preferredTags: input.preferredTags ?? [],
-          preferredArtists: [],
-          recentArtistIds: [source.artist],
-          artistRepeatSpacing: 1,
-          harmonicImportance: input.harmonicImportance ?? 1,
-          explorationWeight: 0,
-          seed: 1,
-          alreadyUsed: false,
-          suggestedEnergy: candA?.descriptors?.suggestedEnergy ?? null,
-          sourceSuggestedEnergy: srcA?.descriptors?.suggestedEnergy ?? null,
-          outgoingOutroMs:
-            srcA?.sections.find((s) => s.type === "outro")
-              ? (srcA.sections.find((s) => s.type === "outro")!.endMs -
-                srcA.sections.find((s) => s.type === "outro")!.startMs)
-              : null,
-          incomingIntroMs:
-            candA?.sections.find((s) => s.type === "intro")
-              ? (candA.sections.find((s) => s.type === "intro")!.endMs -
-                candA.sections.find((s) => s.type === "intro")!.startMs)
-              : null,
-          bpmHint: candA ? resolveBpmHint(candA).bpm : null,
-          sourceBpmHint: srcA ? resolveBpmHint(srcA).bpm : null,
-          descriptors: candA?.descriptors ?? null,
-          sourceDescriptors: srcA?.descriptors ?? null,
-          candidateKeyConfidence: resolveCanonicalKeyConfidence(track, candA),
-          sourceKeyConfidence: resolveCanonicalKeyConfidence(source, srcA),
-          candidateGridOk: Boolean(candA && !candA.gridRejected),
-          sourceGridOk: Boolean(srcA && !srcA.gridRejected),
-          candidateLufs: candA?.integratedLufs ?? null,
-          sourceLufs: srcA?.integratedLufs ?? null,
-          candidateGenres: track.genres,
-        }),
-      };
+          track,
+          score: scoreCandidate({
+            source,
+            candidate: track,
+            targetEnergy: null,
+            direction: input.direction ?? "any",
+            preferredMoods: input.preferredMoods ?? [],
+            preferredSubgenres: input.preferredSubgenres ?? [],
+            preferredTags: input.preferredTags ?? [],
+            preferredArtists: [],
+            recentArtistIds: [source.artist],
+            artistRepeatSpacing: 1,
+            harmonicImportance: input.harmonicImportance ?? 1,
+            explorationWeight: 0,
+            seed: 1,
+            alreadyUsed: false,
+            suggestedEnergy: candA?.descriptors?.suggestedEnergy ?? null,
+            sourceSuggestedEnergy: srcA?.descriptors?.suggestedEnergy ?? null,
+            outgoingOutroMs: sectionMs(srcA, "outro"),
+            incomingIntroMs: sectionMs(candA, "intro"),
+            bpmHint: candA ? resolveBpmHint(candA).bpm : null,
+            sourceBpmHint: srcA ? resolveBpmHint(srcA).bpm : null,
+            descriptors: candA?.descriptors ?? null,
+            sourceDescriptors: srcA?.descriptors ?? null,
+            candidateKeyConfidence: resolveCanonicalKeyConfidence(track, candA),
+            sourceKeyConfidence: resolveCanonicalKeyConfidence(source, srcA),
+            candidateGridOk: Boolean(candA && !candA.gridRejected),
+            sourceGridOk: Boolean(srcA && !srcA.gridRejected),
+            candidateLufs: candA?.integratedLufs ?? null,
+            sourceLufs: srcA?.integratedLufs ?? null,
+            candidateGenres: track.genres,
+          }),
+        };
       })
       .sort((a, b) => b.score.total - a.score.total || a.track.id.localeCompare(b.track.id))
       .slice(0, limit);
@@ -906,31 +959,48 @@ export class CatalogService {
 
   createSetPlan(input: CreateSetPlanInput): CreateSetPlanResult {
     try {
-      const referencePlans = (input.variety?.referencePlanIds ?? []).map((id) => this.requirePlan(id).plan);
+      const referencePlans = (input.variety?.referencePlanIds ?? []).map(
+        (id) => this.requirePlan(id).plan,
+      );
       const varietyHistory = {
-        trackIds: [...new Set(referencePlans.flatMap((plan) => plan.entries.map((entry) => entry.trackId)))],
-        pairs: referencePlans.flatMap((plan) => plan.entries.slice(1).map((entry, i) => ({
-          outgoingTrackId: plan.entries[i]!.trackId, incomingTrackId: entry.trackId,
-        }))),
+        trackIds: [
+          ...new Set(referencePlans.flatMap((plan) => plan.entries.map((entry) => entry.trackId))),
+        ],
+        pairs: referencePlans.flatMap((plan) =>
+          plan.entries.slice(1).map((entry, i) => ({
+            outgoingTrackId: plan.entries[i]!.trackId,
+            incomingTrackId: entry.trackId,
+          })),
+        ),
       };
       const analyses = new Map(
         this.repository
           .listAll()
           .map((track) => [track.id, this.toTimeline(track)] as const)
-          .filter((entry): entry is readonly [string, NonNullable<ReturnType<typeof analysisToTimeline>>] => entry[1] != null),
+          .filter(
+            (
+              entry,
+            ): entry is readonly [string, NonNullable<ReturnType<typeof analysisToTimeline>>] =>
+              entry[1] != null,
+          ),
       );
-      const drafted = draftSetPlan(this.repository.listAll(), {
-        ...input,
-        descriptors: resolveDescriptorFilters(
-          input.descriptors,
-          this.getLibraryStats().descriptorPercentiles,
-        ),
-      }, analyses, {
-        percentiles: this.getLibraryStats().descriptorPercentiles,
-        feedback: this.feedback.index(),
-        recipes: this.recipes,
-        varietyHistory,
-      });
+      const drafted = draftSetPlan(
+        this.repository.listAll(),
+        {
+          ...input,
+          descriptors: resolveDescriptorFilters(
+            input.descriptors,
+            this.getLibraryStats().descriptorPercentiles,
+          ),
+        },
+        analyses,
+        {
+          percentiles: this.getLibraryStats().descriptorPercentiles,
+          feedback: this.feedback.index(),
+          recipes: this.recipes,
+          varietyHistory,
+        },
+      );
       const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
       const validation = validateSetPlan(drafted.plan, tracksById, {
         artistRepeatSpacing: input.artistRepeatSpacing,
@@ -957,8 +1027,14 @@ export class CatalogService {
         quality,
       };
     } catch (error) {
-      if (error instanceof PlanningConstraintError || (error instanceof Error && error.message.startsWith("CONSTRAINT_INVALID:"))) {
-        throw new DomainError("INVALID_SET_PLAN", error.message.replace(/^CONSTRAINT_INVALID:/, ""));
+      if (
+        error instanceof PlanningConstraintError ||
+        (error instanceof Error && error.message.startsWith("CONSTRAINT_INVALID:"))
+      ) {
+        throw new DomainError(
+          "INVALID_SET_PLAN",
+          error.message.replace(/^CONSTRAINT_INVALID:/, ""),
+        );
       }
       if (error instanceof Error && error.message.startsWith("TRACK_NOT_FOUND:")) {
         const parts = error.message.split(":");
@@ -996,7 +1072,11 @@ export class CatalogService {
               .filter((entry) => entry.gainDb !== 0)
               .map((entry) => [entry.trackId, { gainDb: entry.gainDb }]),
           ),
-          { dropAnchored: true, targetBpm: stored.plan.targetBpm, recall: this.recipeLookupFor(stored.plan) },
+          {
+            dropAnchored: true,
+            targetBpm: stored.plan.targetBpm,
+            recall: this.recipeLookupFor(stored.plan),
+          },
         )
       : ordered.map((entry) => ({
           ...entry,
@@ -1064,24 +1144,39 @@ export class CatalogService {
   }
 
   assertPlanReadyForRender(
-    setPlanId: string,
-    options: { allowOverlongDuration?: boolean } = {},
+    planOrId: string | SetPlanV1,
+    options: {
+      allowOverlongDuration?: boolean;
+      evidence?: FrozenRenderRequest["evidence"];
+    } = {},
   ): void {
-    const quality = this.reportSetPlanQuality(setPlanId);
-    const plan = this.requirePlan(setPlanId).plan;
-    const invalidApplication = plan.entries.some((entry,index) => entry.transitionToNext?.parameters.appliedRecipeId != null && quality.joins[index]?.recipeStatus !== "applied");
+    const plan = typeof planOrId === "string" ? this.requirePlan(planOrId).plan : planOrId;
+    const quality = this.qualityForPlan(plan, options.evidence);
+    const invalidApplication = plan.entries.some(
+      (entry, index) =>
+        entry.transitionToNext?.parameters.appliedRecipeId != null &&
+        quality.joins[index]?.recipeStatus !== "applied",
+    );
     const durationOnly =
       quality.partialReasons.length > 0 &&
-      quality.partialReasons.every((reason) => reason === "DURATION" || reason === "AUDITION_DURATION");
+      quality.partialReasons.every(
+        (reason) => reason === "DURATION" || reason === "AUDITION_DURATION",
+      );
     const allowOverlong =
       options.allowOverlongDuration === true &&
       quality.qualityChecksPassed &&
       quality.structurallyValid &&
       durationOnly;
-    if (quality.partialReasons.includes("REQUIRED_TRANSITION_UNSATISFIED") || quality.partialReasons.includes("CONSTRAINT_UNSATISFIED") ||
-        invalidApplication ||
-        (quality.qualityPolicy === "strict" && !quality.readyForAudition && !allowOverlong)) {
-      throw new DomainError("INVALID_SET_PLAN", "Plan is not ready: resolve quality, duration and required-transition blockers before rendering");
+    if (
+      quality.partialReasons.includes("REQUIRED_TRANSITION_UNSATISFIED") ||
+      quality.partialReasons.includes("CONSTRAINT_UNSATISFIED") ||
+      invalidApplication ||
+      (quality.qualityPolicy === "strict" && !quality.readyForAudition && !allowOverlong)
+    ) {
+      throw new DomainError(
+        "INVALID_SET_PLAN",
+        "Plan is not ready: resolve quality, duration and required-transition blockers before rendering",
+      );
     }
   }
 
@@ -1336,7 +1431,7 @@ export class CatalogService {
     const track = this.requireTrack(trackId);
     return {
       track,
-      analysis: this.analyses.findByTrackId(trackId),
+      analysis: analysisForTimeline(resolveTrackEvidence(this.analyses, trackId)),
       cues: this.repository.listCuePoints(trackId),
     };
   }
@@ -1346,9 +1441,9 @@ export class CatalogService {
   }
 
   private toTimeline(track: Track) {
-    const row = this.analyses.findByTrackId(track.id);
-    const keyRow = this.analyses.findKeyAnalysis(track.id) ?? row;
-    const canon = resolveCanonicalBpm(track, row);
+    const evidence = resolveTrackEvidence(this.analyses, track.id);
+    const row = analysisForTimeline(evidence);
+    const canon = resolveCanonicalBpm(track, evidence.rhythm ?? row);
     const timeline = analysisToTimeline(
       row,
       canon.bpm,
@@ -1356,7 +1451,7 @@ export class CatalogService {
       track.durationMs,
     );
     if (timeline) {
-      timeline.keyConfidence = resolveCanonicalKeyConfidence(track, keyRow);
+      timeline.keyConfidence = resolveCanonicalKeyConfidence(track, evidence.key ?? row);
     }
     return timeline;
   }
@@ -1369,6 +1464,7 @@ export class CatalogService {
     reason?: string;
   }): TrackEvidenceSelection {
     this.requireTrack(input.trackId);
+    assertEvidenceEnginesExist(this.analyses, input.trackId, input);
     return this.analyses.setSelection(input.trackId, input);
   }
 
@@ -1392,18 +1488,29 @@ export class CatalogService {
           recipeFingerprint: fingerprint,
         };
       } else {
-        const index = manifest.tracks.findIndex((track) => track.transitionId === input.transitionId);
+        const index = manifest.tracks.findIndex(
+          (track) => track.transitionId === input.transitionId,
+        );
         const outgoing = manifest.tracks[index];
         const incoming = manifest.tracks[index + 1];
-        if (index < 0 || !outgoing || !incoming) throw new Error("Transition not found in the heard render");
+        if (index < 0 || !outgoing || !incoming)
+          throw new Error("Transition not found in the heard render");
         const fingerprint = renderJoinFingerprint(manifest, input.transitionId);
-        if ((input.outgoingTrackId && input.outgoingTrackId !== outgoing.trackId) ||
-            (input.incomingTrackId && input.incomingTrackId !== incoming.trackId) ||
-            (input.recipeFingerprint && input.recipeFingerprint !== fingerprint)) {
+        if (
+          (input.outgoingTrackId && input.outgoingTrackId !== outgoing.trackId) ||
+          (input.incomingTrackId && input.incomingTrackId !== incoming.trackId) ||
+          (input.recipeFingerprint && input.recipeFingerprint !== fingerprint)
+        ) {
           throw new Error("Rating fields disagree with the stored render join");
         }
-        input = { ...input, outgoingTrackId: outgoing.trackId, incomingTrackId: incoming.trackId,
-          setPlanId: manifest.setPlanId, rendererVersion: manifest.rendererVersion, recipeFingerprint: fingerprint };
+        input = {
+          ...input,
+          outgoingTrackId: outgoing.trackId,
+          incomingTrackId: incoming.trackId,
+          setPlanId: manifest.setPlanId,
+          rendererVersion: manifest.rendererVersion,
+          recipeFingerprint: fingerprint,
+        };
       }
     }
     const fingerprint =
@@ -1457,9 +1564,9 @@ export class CatalogService {
     return { preferences: this.feedback.summarize(input) };
   }
 
-  importApprovedRecipe(row: Omit<import("@dnb-crate/domain").ApprovedRecipeRecord, "id" | "createdAt"> & { id?: string }): {
+  importApprovedRecipe(row: Omit<ApprovedRecipeRecord, "id" | "createdAt"> & { id?: string }): {
     inserted: boolean;
-    recipe: import("@dnb-crate/domain").ApprovedRecipeRecord;
+    recipe: ApprovedRecipeRecord;
   } {
     const existing = this.recipes.findDuplicate({
       reusableFingerprint: row.reusableFingerprint,
@@ -1492,7 +1599,8 @@ export class CatalogService {
         )?.recipeId,
       reuseForPair: (outgoingTrackId: string, incomingTrackId: string) =>
         plan.planningConstraints?.requiredTransitions?.find(
-          (row) => row.outgoingTrackId === outgoingTrackId && row.incomingTrackId === incomingTrackId,
+          (row) =>
+            row.outgoingTrackId === outgoingTrackId && row.incomingTrackId === incomingTrackId,
         )?.reuse,
     };
   }
@@ -1513,8 +1621,14 @@ export class CatalogService {
       const keyRow = this.analyses.findKeyAnalysis(track.id) ?? rhythm;
       const timeline = this.toTimeline(track);
       out.set(track.id, {
-        musicalKey: track.keySource === "manual" || track.keySource === "published" ? track.musicalKey : keyRow?.musicalKey ?? track.musicalKey,
-        camelotKey: track.keySource === "manual" || track.keySource === "published" ? track.camelotKey : keyRow?.camelotKey ?? track.camelotKey,
+        musicalKey:
+          track.keySource === "manual" || track.keySource === "published"
+            ? track.musicalKey
+            : (keyRow?.musicalKey ?? track.musicalKey),
+        camelotKey:
+          track.keySource === "manual" || track.keySource === "published"
+            ? track.camelotKey
+            : (keyRow?.camelotKey ?? track.camelotKey),
         keySource: track.keySource,
         keyConfidence: resolveCanonicalKeyConfidence(track, keyRow),
         keyAnalyzerName: keyRow?.analyzerName ?? null,
@@ -1526,14 +1640,66 @@ export class CatalogService {
     return out;
   }
 
+  private qualityForPlan(
+    plan: SetPlanV1,
+    evidence?: FrozenRenderRequest["evidence"],
+  ): PlanQualityReport {
+    const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
+    const audioEndMsByTrackId = this.audioEndMsByTrackId();
+    const keyConfidenceByTrackId = this.keyConfidenceByTrackId();
+    const firstDropStartMsByTrackId = this.firstDropStartMsByTrackId();
+    const evidenceByTrackId = this.qualityEvidenceByTrackId();
+    if (evidence) {
+      for (const [trackId, row] of Object.entries(evidence)) {
+        if (!isFrozenSnapshot(row)) {
+          continue;
+        }
+        if (typeof row.audioEndMs === "number") {
+          audioEndMsByTrackId.set(trackId, row.audioEndMs);
+        }
+        if (typeof row.keyConfidence === "number") {
+          keyConfidenceByTrackId.set(trackId, row.keyConfidence);
+        }
+        const drop = row.sections.find((section) => section.type === "drop");
+        if (drop && Number.isFinite(drop.startMs)) {
+          firstDropStartMsByTrackId.set(trackId, drop.startMs);
+        }
+        const track = tracksById.get(trackId);
+        evidenceByTrackId.set(trackId, {
+          musicalKey: row.musicalKey ?? track?.musicalKey ?? null,
+          camelotKey: row.camelotKey ?? track?.camelotKey ?? null,
+          keySource: track?.keySource ?? null,
+          keyConfidence: row.keyConfidence ?? 0,
+          keyAnalyzerName: row.keyEngine ?? null,
+          nativeBpm: row.bpm,
+          gridOk: row.present && !row.gridRejected,
+          gridEngine: row.rhythmEngine ?? null,
+        });
+      }
+    }
+    const validation = validateSetPlan(plan, tracksById, {
+      artistRepeatSpacing: plan.planningConstraints?.artistRepeatSpacing,
+      audioEndMsByTrackId,
+      effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
+      keyConfidenceByTrackId,
+      firstDropStartMsByTrackId,
+    });
+    return this.qualityFor(plan, { validation, evidenceByTrackId });
+  }
+
   private qualityFor(
     plan: SetPlanV1,
-    options: { validation: ValidateSetPlanResult; partial?: boolean; partialReasons?: string[] },
+    options: {
+      validation: ValidateSetPlanResult;
+      partial?: boolean;
+      partialReasons?: string[];
+      evidenceByTrackId?: Map<string, TrackQualityEvidence>;
+    },
   ): PlanQualityReport {
     return reportSetPlanQuality({
       plan,
       tracksById: new Map(this.repository.listAll().map((track) => [track.id, track])),
-      evidenceByTrackId: this.qualityEvidenceByTrackId(),
+      evidenceByTrackId: options.evidenceByTrackId ?? this.qualityEvidenceByTrackId(),
       validation: options.validation,
       recipes: this.recipes,
       constraints: plan.planningConstraints ?? null,
@@ -1557,7 +1723,9 @@ export class CatalogService {
   private firstDropStartMsByTrackId(): Map<string, number> {
     const map = new Map<string, number>();
     for (const track of this.repository.listAll()) {
-      const drop = this.analyses.findByTrackId(track.id)?.sections?.find((section) => section.type === "drop");
+      const drop = analysisForTimeline(
+        resolveTrackEvidence(this.analyses, track.id),
+      )?.sections?.find((section) => section.type === "drop");
       if (drop && Number.isFinite(drop.startMs)) {
         map.set(track.id, drop.startMs);
       }
@@ -1584,7 +1752,10 @@ export class CatalogService {
   private effectiveEnergyByTrackId(): Map<string, number> {
     const out = new Map<string, number>();
     for (const track of this.repository.listAll()) {
-      const energy = effectiveEnergy(track, this.analyses.findByTrackId(track.id)?.descriptors ?? null);
+      const energy = effectiveEnergy(
+        track,
+        this.analyses.findByTrackId(track.id)?.descriptors ?? null,
+      );
       if (energy != null) {
         out.set(track.id, energy);
       }

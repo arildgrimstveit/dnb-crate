@@ -52,6 +52,8 @@ function foldDeezerBpm(bpm: number, isDnb: boolean): number {
 }
 
 export class EnrichmentCoordinator {
+  canRun: () => boolean = () => true;
+  private readonly active = new Set<Promise<void>>();
   private running = 0;
   private stopped = false;
   private binaries: FfmpegBinaries | null | undefined;
@@ -76,8 +78,9 @@ export class EnrichmentCoordinator {
     return this.jobs.failRunningAsInterrupted();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopped = true;
+    await Promise.all(this.active);
   }
 
   kick(): void {
@@ -107,10 +110,7 @@ export class EnrichmentCoordinator {
     return ids;
   }
 
-  start(input: {
-    trackIds: string[];
-    dryRun?: boolean;
-  }): { job: EnrichmentJob } {
+  start(input: { trackIds: string[]; dryRun?: boolean }): { job: EnrichmentJob } {
     if (input.trackIds.length === 0) {
       throw new DomainError("ENRICHMENT_FAILED", "No tracks to enrich");
     }
@@ -178,7 +178,7 @@ export class EnrichmentCoordinator {
   }
 
   private pump(): void {
-    if (this.stopped || this.running > 0) {
+    if (this.stopped || !this.canRun() || this.running > 0) {
       return;
     }
     const claimed = this.jobs.claimNextQueued();
@@ -186,14 +186,16 @@ export class EnrichmentCoordinator {
       return;
     }
     this.running += 1;
-    void this.execute(claimed)
+    const task = this.execute(claimed)
       .catch((error: unknown) => {
         this.logger.error({ err: error, jobId: claimed.id }, "Enrichment job crashed");
       })
       .finally(() => {
+        this.active.delete(task);
         this.running -= 1;
         this.pump();
       });
+    this.active.add(task);
   }
 
   private async execute(job: EnrichmentJob): Promise<void> {
@@ -223,13 +225,7 @@ export class EnrichmentCoordinator {
           failed.push(trackId);
           this.logger.warn({ err: error, trackId }, "Track enrichment failed");
         }
-        this.jobs.updateProgress(
-          job.id,
-          (i + 1) / job.trackIds.length,
-          completed,
-          failed,
-          null,
-        );
+        this.jobs.updateProgress(job.id, (i + 1) / job.trackIds.length, completed, failed, null);
       }
       this.jobs.markSucceeded(job.id, completed, failed);
     } catch (error) {
@@ -365,7 +361,9 @@ export class EnrichmentCoordinator {
 
     let release = null;
     try {
-      release = recording?.releaseMbid ? await clients.mb.lookupRelease(recording.releaseMbid) : null;
+      release = recording?.releaseMbid
+        ? await clients.mb.lookupRelease(recording.releaseMbid)
+        : null;
     } catch {
       release = null;
     }
@@ -408,13 +406,20 @@ export class EnrichmentCoordinator {
     }
 
     const dsp = this.analyses.findByTrackId(trackId);
-    const acceptedGrid =
-      dsp && !dsp.gridRejected && dsp.bpm != null ? dsp.bpm : null;
+    const acceptedGrid = dsp && !dsp.gridRejected && dsp.bpm != null ? dsp.bpm : null;
     let bpmWritten = false;
     let bpmDisagreement = false;
     const writeBpm = this.config.enrichment?.writePublishedBpm !== false;
-    if (deezer?.bpm && writeBpm && track.bpmSource !== "manual" && track.bpmSource !== "published") {
-      const folded = foldDeezerBpm(deezer.bpm, hasDrumAndBassGenre(track.genres ?? recording?.genres ?? []));
+    if (
+      deezer?.bpm &&
+      writeBpm &&
+      track.bpmSource !== "manual" &&
+      track.bpmSource !== "published"
+    ) {
+      const folded = foldDeezerBpm(
+        deezer.bpm,
+        hasDrumAndBassGenre(track.genres ?? recording?.genres ?? []),
+      );
       if (acceptedGrid != null && Math.abs(folded - acceptedGrid) > 1) {
         bpmDisagreement = true;
       } else {
@@ -456,14 +461,16 @@ export class EnrichmentCoordinator {
       this.tracks.applyPublishedEnrichment(trackId, {
         album: null,
         label: release?.label ?? null,
-        releaseDate: recording.firstReleaseDate ?? release?.firstReleaseDate ?? release?.date ?? null,
+        releaseDate:
+          recording.firstReleaseDate ?? release?.firstReleaseDate ?? release?.date ?? null,
         isrc: recording.isrcs[0] ?? deezer?.isrc ?? null,
         recordingMbid: recording.id,
         artistCanonical: recording.artist ? normalizePersonName(recording.artist) : null,
         genres: recording.genres,
-        bpm: bpmWritten && deezer?.bpm
-          ? foldDeezerBpm(deezer.bpm, hasDrumAndBassGenre(recording.genres))
-          : null,
+        bpm:
+          bpmWritten && deezer?.bpm
+            ? foldDeezerBpm(deezer.bpm, hasDrumAndBassGenre(recording.genres))
+            : null,
       });
     } else if (bpmWritten && deezer?.bpm) {
       this.tracks.applyPublishedEnrichment(trackId, {

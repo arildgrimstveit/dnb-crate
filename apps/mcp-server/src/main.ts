@@ -13,9 +13,16 @@ await runtime.service.ensureOutputRoot();
 
 const handle = serveStdio(() => createDnbCrateMcpServer({ service: runtime.service }));
 
-const shutdown = async () => {
-  await handle.close();
-  runtime.close();
+let closing: Promise<void> | undefined;
+const shutdown = () => {
+  closing ??= (async () => {
+    try {
+      await handle.close();
+    } finally {
+      await runtime.close();
+    }
+  })();
+  return closing;
 };
 
 process.on("SIGINT", () => {

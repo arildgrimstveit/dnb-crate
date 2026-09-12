@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { resolveRateRegions, sourcePositionToOutputMs, outputPositionToSourceMs } from "../src/rate-regions.ts";
+import {
+  resolveRateRegions,
+  sourcePositionToOutputMs,
+  outputPositionToSourceMs,
+} from "../src/rate-regions.ts";
 
 it("maps both 175→174 joins around a native body without accumulating a grid error", () => {
   const overlap = (64 * 60_000) / 174;
@@ -18,7 +22,10 @@ it("maps both 175→174 joins around a native body without accumulating a grid e
     60_000 + 2 * overlap * (1 - rate),
     8,
   );
-  const back = outputPositionToSourceMs(regions, sourcePositionToOutputMs(regions, tail!.sourceStartMs));
+  const back = outputPositionToSourceMs(
+    regions,
+    sourcePositionToOutputMs(regions, tail!.sourceStartMs),
+  );
   expect(back).toBeCloseTo(tail!.sourceStartMs, 8);
   expect(() => resolveRateRegions(30_000, rate, overlap, overlap)).toThrow("native body");
 });

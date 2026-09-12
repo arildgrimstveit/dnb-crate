@@ -5,7 +5,7 @@ const planId = process.argv[2];
 if (!planId) {
   throw new Error("usage: summarize-plan.mts <planId>");
 }
-const runtime = createCatalogRuntime(loadConfig());
+const runtime = createCatalogRuntime(loadConfig(), undefined, { passive: true });
 const plan = runtime.service.getSetPlan(planId);
 const tracks = new Map(runtime.repository.listAll().map((track) => [track.id, track]));
 const rows = plan.entries.map((entry, index) => {
@@ -30,17 +30,17 @@ const rows = plan.entries.map((entry, index) => {
     intent: trans?.parameters.intent ?? null,
     shape: trans?.parameters.phraseShape ?? null,
     keyClash: trans?.parameters.keyClash ?? false,
-    relation: nextTrack
-      ? harmonicRelation(track?.camelotKey ?? null, nextTrack.camelotKey)
+    relation: nextTrack ? harmonicRelation(track?.camelotKey ?? null, nextTrack.camelotKey) : null,
+    camelotDist: nextTrack
+      ? camelotDistance(track?.camelotKey ?? null, nextTrack.camelotKey)
       : null,
-    camelotDist: nextTrack ? camelotDistance(track?.camelotKey ?? null, nextTrack.camelotKey) : null,
   };
 });
 const last = plan.entries.at(-1);
 const durationMs = last
   ? last.timelineStartMs + (last.sourceEndMs - last.sourceStartMs) / last.playbackRate
   : 0;
-runtime.close();
+await runtime.close();
 console.log(
   JSON.stringify(
     {

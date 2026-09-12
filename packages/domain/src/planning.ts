@@ -239,7 +239,12 @@ export type JoinQualityReport = {
   incomingSourceEndMs: number;
   barCount: number | null;
   overlapMs: number;
-  continuity?: { evidence: string; energyFloor: number | null; valleyBars: number | null; coexistenceBars: number | null };
+  continuity?: {
+    evidence: string;
+    energyFloor: number | null;
+    valleyBars: number | null;
+    coexistenceBars: number | null;
+  };
   phraseShape: string | null;
   sequentialHandoff: string | null;
   intent: string | null;

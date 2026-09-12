@@ -189,11 +189,7 @@ export function dfaDanceabilityTerm(samples: Float32Array, sampleRateHz: number)
 
   const logTau: number[] = [];
   const logF: number[] = [];
-  for (
-    let tauMs = DFA_TAU_MIN_MS;
-    tauMs <= DFA_TAU_MAX_MS;
-    tauMs *= DFA_TAU_MULTIPLIER
-  ) {
+  for (let tauMs = DFA_TAU_MIN_MS; tauMs <= DFA_TAU_MAX_MS; tauMs *= DFA_TAU_MULTIPLIER) {
     const window = Math.round(tauMs / DFA_FRAME_MS);
     const fluctuation = dfaFluctuation(integrated, window);
     if (fluctuation == null || fluctuation <= 1e-12) {

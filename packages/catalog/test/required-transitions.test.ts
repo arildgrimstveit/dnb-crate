@@ -13,10 +13,10 @@ import {
   type SonicDescriptors,
 } from "@dnb-crate/domain";
 
-const cleanups: Array<() => void> = [];
-afterEach(() => {
+const cleanups: Array<() => void | Promise<void>> = [];
+afterEach(async () => {
   while (cleanups.length > 0) {
-    cleanups.pop()?.();
+    await cleanups.pop()?.();
   }
 });
 
@@ -130,15 +130,36 @@ function seedTrack(
 
 describe("required transitions and strict quality", () => {
   it("rejects two predecessors and conflicting duplicate declarations", () => {
-    const row={outgoingTrackId:"a",incomingTrackId:"c",strength:"required" as const,reuse:"pair" as const};
-    expect(()=>compilePlanningConstraints([row,{...row,outgoingTrackId:"b"}])).toThrow("predecessors");
-    expect(()=>compilePlanningConstraints([row,{...row,strength:"preferred"}])).toThrow("Conflicting");
-    expect(compilePlanningConstraints([{...row,strength:"preferred"}]).lockedTrackIds.size).toBe(0);
+    const row = {
+      outgoingTrackId: "a",
+      incomingTrackId: "c",
+      strength: "required" as const,
+      reuse: "pair" as const,
+    };
+    expect(() => compilePlanningConstraints([row, { ...row, outgoingTrackId: "b" }])).toThrow(
+      "predecessors",
+    );
+    expect(() => compilePlanningConstraints([row, { ...row, strength: "preferred" }])).toThrow(
+      "Conflicting",
+    );
+    expect(
+      compilePlanningConstraints([{ ...row, strength: "preferred" }]).lockedTrackIds.size,
+    ).toBe(0);
   });
 
   it("does not reinsert explicitly excluded pinned tracks", () => {
-    const catalog=runtime();const a=seedTrack(catalog,{title:"A",artist:"A",camelot:"8A"});const b=seedTrack(catalog,{title:"B",artist:"B",camelot:"8A"});
-    expect(()=>catalog.service.createSetPlan({name:"conflict",excludedTrackIds:[b],requiredTransitions:[{outgoingTrackId:a,incomingTrackId:b,strength:"required",reuse:"pair"}]})).toThrow("excluded or missing");
+    const catalog = runtime();
+    const a = seedTrack(catalog, { title: "A", artist: "A", camelot: "8A" });
+    const b = seedTrack(catalog, { title: "B", artist: "B", camelot: "8A" });
+    expect(() =>
+      catalog.service.createSetPlan({
+        name: "conflict",
+        excludedTrackIds: [b],
+        requiredTransitions: [
+          { outgoingTrackId: a, incomingTrackId: b, strength: "required", reuse: "pair" },
+        ],
+      }),
+    ).toThrow("excluded or missing");
   });
   it("keeps an unconstrained seed free of a weaker neighbour", () => {
     const catalog = runtime();
@@ -229,15 +250,25 @@ describe("required transitions and strict quality", () => {
     const join = created.quality.joins[0];
     expect(join?.recipeStatus).toBe("applied");
     expect(join?.constraintSatisfaction).toBe("satisfied");
-    expect(String(created.plan.entries[0]?.transitionToNext?.parameters.selectionReason ?? "")).toContain(
-      "approved",
-    );
-    const entry=created.plan.entries[0]!;
-    const edited=catalog.service.updateSetPlan({setPlanId:created.plan.id,setTransition:{entryId:entry.id,type:"phrase_mix",durationMs:entry.transitionToNext!.durationMs,parameters:{...entry.transitionToNext!.parameters,midDipDb:-19}}});
+    expect(
+      String(created.plan.entries[0]?.transitionToNext?.parameters.selectionReason ?? ""),
+    ).toContain("approved");
+    const entry = created.plan.entries[0]!;
+    const edited = catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      setTransition: {
+        entryId: entry.id,
+        type: "phrase_mix",
+        durationMs: entry.transitionToNext!.durationMs,
+        parameters: { ...entry.transitionToNext!.parameters, midDipDb: -19 },
+      },
+    });
     expect(edited.quality.joins[0]?.recipeStatus).toBe("stale");
     expect(edited.quality.readyForAudition).toBe(false);
     expect(edited.partial).toBe(true);
-    expect(()=>catalog.service.startSetRender({setPlanId:created.plan.id})).toThrow("not ready");
+    expect(() => catalog.service.startSetRender({ setPlanId: created.plan.id })).toThrow(
+      "not ready",
+    );
     expect(catalog.service.reportSetPlanQuality(created.plan.id).readyForAudition).toBe(false);
   });
 
@@ -260,7 +291,12 @@ describe("required transitions and strict quality", () => {
 
   it("skips short files that cannot host version-2 head and tail regions", () => {
     const catalog = runtime();
-    const start = seedTrack(catalog, { title: "Open", artist: "A", camelot: "8A", durationMs: 180_000 });
+    const start = seedTrack(catalog, {
+      title: "Open",
+      artist: "A",
+      camelot: "8A",
+      durationMs: 180_000,
+    });
     seedTrack(catalog, { title: "Tiny", artist: "B", camelot: "8A", durationMs: 40_000 });
     seedTrack(catalog, { title: "Filler", artist: "C", camelot: "8A", durationMs: 180_000 });
     const created = catalog.service.createSetPlan({
@@ -278,7 +314,13 @@ describe("required transitions and strict quality", () => {
 
   it("uses a chain-aware retry when local repair cannot bridge a distant required pair", () => {
     const catalog = runtime();
-    const start = seedTrack(catalog, { title: "Open", artist: "A", camelot: "8A", energy: 9, rating: 5 });
+    const start = seedTrack(catalog, {
+      title: "Open",
+      artist: "A",
+      camelot: "8A",
+      energy: 9,
+      rating: 5,
+    });
     for (let i = 0; i < 8; i += 1) {
       seedTrack(catalog, {
         title: `Stay ${i}`,

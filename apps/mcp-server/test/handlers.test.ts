@@ -8,7 +8,7 @@ import {
   encodeMonoWav,
   writeSineWav,
 } from "@dnb-crate/catalog";
-import type { AppConfig } from "@dnb-crate/domain";
+import type { AppConfig, SetPlanV1 } from "@dnb-crate/domain";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, it } from "vitest";
@@ -265,30 +265,62 @@ describe("MCP tool handlers", () => {
     });
     await runtime.service.scanLibrary();
     const tracks = runtime.service.searchTracks({ limit: 10 }).tracks;
-    const start = tracks.find((track) => track.title === "Alpha")!.id;
-    const ending = tracks.find((track) => track.title === "Bravo")!.id;
-    const created = runtime.service.createSetPlan({
+    const start = tracks.find((track) => track.title === "Alpha")!;
+    const ending = tracks.find((track) => track.title === "Bravo")!;
+    const transitionId = crypto.randomUUID();
+    const created: SetPlanV1 = {
+      schemaVersion: 1,
+      id: crypto.randomUUID(),
       name: "MCP render",
-      targetDurationMs: 12_000,
-      startTrackId: start,
-      endTrackId: ending,
-      seed: 1,
-      qualityPolicy: "off",
-    });
-    const firstEntry = created.plan.entries[0];
-    expect(firstEntry?.transitionToNext?.id).toBeDefined();
-    if (firstEntry?.transitionToNext) {
-      runtime.service.updateSetPlan({
-        setPlanId: created.plan.id,
-        setTransition: {
-          entryId: firstEntry.id,
-          type: "crossfade",
-          durationMs: 1000,
+      targetDurationMs: 15_000,
+      targetBpm: 174,
+      requestedArc: [
+        { atFraction: 0, targetEnergy: 3 },
+        { atFraction: 1, targetEnergy: 6 },
+      ],
+      entries: [
+        {
+          id: crypto.randomUUID(),
+          trackId: start.id,
+          order: 0,
+          sourceStartMs: 0,
+          sourceEndMs: start.durationMs,
+          timelineStartMs: 0,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: {
+            id: transitionId,
+            type: "crossfade",
+            durationMs: 1000,
+            outgoingCuePointId: null,
+            incomingCuePointId: null,
+            parameters: { purpose: "fixture" },
+          },
         },
-      });
-    }
-    const transitionId = runtime.service.getSetPlan(created.plan.id).entries[0]?.transitionToNext
-      ?.id;
+        {
+          id: crypto.randomUUID(),
+          trackId: ending.id,
+          order: 1,
+          sourceStartMs: 0,
+          sourceEndMs: ending.durationMs,
+          timelineStartMs: start.durationMs - 1000,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: null,
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    runtime.setPlans.save(created, 1, {
+      seed: 1,
+      selected: [],
+      rejected: [],
+      harmonicCoverage: { knownJoins: 0, totalJoins: 0 },
+    });
+    expect(runtime.service.getSetPlan(created.id).entries[0]?.transitionToNext?.id).toBe(
+      transitionId,
+    );
     expect(transitionId).toBeDefined();
 
     const handler = createMcpHandler(() => createDnbCrateMcpServer({ service: runtime.service }));
@@ -307,7 +339,7 @@ describe("MCP tool handlers", () => {
 
     const queued = await client.callTool({
       name: "start_set_render",
-      arguments: { setPlanId: created.plan.id },
+      arguments: { setPlanId: created.id },
     });
     const jobPayload = queued.structuredContent as {
       ok: true;
@@ -343,7 +375,7 @@ describe("MCP tool handlers", () => {
 
     const preview = await client.callTool({
       name: "create_transition_preview",
-      arguments: { setPlanId: created.plan.id, transitionId, windowMs: 30_000 },
+      arguments: { setPlanId: created.id, transitionId, windowMs: 30_000 },
     });
     expect(preview.structuredContent).toMatchObject({ ok: true });
 

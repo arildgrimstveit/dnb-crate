@@ -1,10 +1,4 @@
-import {
-  artistTokens,
-  jaccard,
-  remixTokens,
-  stripFeaturing,
-  titleTokens,
-} from "@dnb-crate/domain";
+import { artistTokens, jaccard, remixTokens, stripFeaturing, titleTokens } from "@dnb-crate/domain";
 
 export type MatchCandidate = {
   title: string;
@@ -28,10 +22,16 @@ export function scoreMatch(
 ): MatchScore {
   const queryRemix = remixTokens(query.title);
   const candRemix = remixTokens(candidate.title);
-  if (queryRemix.size !== candRemix.size || [...queryRemix].some((token) => !candRemix.has(token))) {
+  if (
+    queryRemix.size !== candRemix.size ||
+    [...queryRemix].some((token) => !candRemix.has(token))
+  ) {
     return { score: 0, title: 0, artist: 0, duration: 0, accept: false, needsReview: false };
   }
-  const title = jaccard(titleTokens(stripFeaturing(query.title)), titleTokens(stripFeaturing(candidate.title)));
+  const title = jaccard(
+    titleTokens(stripFeaturing(query.title)),
+    titleTokens(stripFeaturing(candidate.title)),
+  );
   const artist = jaccard(artistTokens(query.artist ?? ""), artistTokens(candidate.artist));
   let duration = 0.5;
   if (candidate.durationMs != null) {

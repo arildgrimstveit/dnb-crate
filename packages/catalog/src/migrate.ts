@@ -13,6 +13,7 @@ import { migration011ApprovedRecipes } from "./migrations/011_approved_recipes.t
 import { migration012PlanningConstraints } from "./migrations/012_planning_constraints.ts";
 import { migration013HourFeedback } from "./migrations/013_hour_feedback.ts";
 import { migration014HourFeedbackHistory } from "./migrations/014_hour_feedback_history.ts";
+import { migration015WorkerOwner } from "./migrations/015_worker_owner.ts";
 
 export type Migration = {
   id: number;
@@ -36,6 +37,7 @@ const MIGRATIONS: Migration[] = [
   migration012PlanningConstraints,
   migration013HourFeedback,
   migration014HourFeedbackHistory,
+  migration015WorkerOwner,
 ];
 
 export function runMigrations(db: SqliteDatabase): void {
