@@ -237,7 +237,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Start track analysis",
       description:
-        "Queue BPM/beat-grid/key/loudness analysis. Pass trackIds (scope ids), planningReadyOnly, or scope unanalyzed|stale|all|planningReady. Whole-library analysis is allowed via scope. Returns a job id; poll get_analysis_status. Analysis is advisory (confidence + provenance).",
+        "Queue BPM/beat-grid/loudness analysis with dnb-crate-dsp (the only analysis engine). Pass trackIds (scope ids), planningReadyOnly, or scope unanalyzed|stale|all|planningReady. Whole-library analysis is allowed via scope. Returns a job id; poll get_analysis_status. Analysis is advisory (confidence + provenance).",
       inputSchema: startTrackAnalysisInputSchema,
       outputSchema: toolResultSchema(analysisJobSchema),
       annotations: { readOnlyHint: false, idempotentHint: false },
@@ -1029,7 +1029,7 @@ Brief:
 ${request}
 
 Workflow:
-1. Call get_planning_readiness if metadata may be incomplete. Optionally start_track_analysis for unanalyzed/stale tracks with engines ["dnb-crate-dsp"] and poll get_analysis_status.
+1. Call get_planning_readiness if metadata may be incomplete. Optionally start_track_analysis for unanalyzed/stale tracks and poll get_analysis_status. DSP is the only analysis engine.
 2. Use search_tracks to resolve named tracks to UUIDs (never filesystem paths).
 3. Call create_set_plan with structured fields only: name, targetDurationMinutes or targetDurationMs, requestedArc, preferredMoods/Subgenres/Artists, descriptors, genres include/exclude, dropAnchored, artistRepeatSpacing, seed. Pass the user's requested length (20 minutes, 90 minutes, etc.). Default to 60 minutes only when they do not say. Default qualityPolicy is strict. Omit targetBpm so each overlap beatmatches at the pair tempo. Pass targetBpm only for an explicit mix-wide tempo lock. Do not pin historical pairs or recipes unless the user asks.
 4. Call validate_set_plan and read quality (qualityChecksPassed, readyForAudition, per-join harmonicClass and fallbackReason).

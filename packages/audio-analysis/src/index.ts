@@ -6,7 +6,7 @@ export type {
   PcmAudio,
 } from "./types.ts";
 export { emptyDescriptors } from "./types.ts";
-export { envelopeAnalyzer, attachBarIndices } from "./envelope-analyzer.ts";
+export { attachBarIndices } from "./cues.ts";
 export { dspAnalyzer } from "./dsp-analyzer.ts";
 export { buildClickTrackPcm, encodeMonoWav } from "./click-track.ts";
 export { decodeWavPcm, mixToMono } from "./wav.ts";

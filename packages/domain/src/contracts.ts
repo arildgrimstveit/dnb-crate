@@ -287,8 +287,6 @@ export const serverStatusDataSchema = z.object({
   ffmpegVersion: z.string().nullable(),
   ffprobeVersion: z.string().nullable(),
   supportedExtensions: z.array(z.string()),
-  pythonAnalyzerAvailable: z.boolean(),
-  pythonAnalyzerEngines: z.array(z.string()),
   enrichment: z
     .object({
       enabled: z.boolean(),

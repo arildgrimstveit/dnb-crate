@@ -8,12 +8,11 @@ Canonical BPM/key order: **manual > published > analyzed > tag**. A general libr
 
 | Engine | Role |
 | --- | --- |
-| `dnb-crate-dsp` | Default. Onsets, tempogram, beat grid, downbeats, sections, descriptors. |
-| `keyfinder` | Local key-only row (WAV decode + libkeyfinder). Not labelled `published`. |
-| `beat-this` / `allin1` | Optional Python sidecars. Off by default. |
-| `dnb-crate-envelope` | Legacy rows only. |
+| `dnb-crate-dsp` | The only `analysis:run` / `start_track_analysis` engine. Onsets, tempogram, beat grid, downbeats, sections, descriptors. |
 
-Planning uses the selected rhythm engine when `track_evidence_selection` is set; otherwise DSP. Key and loudness still come from the selected key engine / DSP. Rows are stored per `(track_id, analyzer_name)`.
+KeyFinder is a script (`tools/scripts/fill-crate-keys-and-bpm.mts`, `promote-keyfinder.mts`), not an analysis engine. Older catalogs may still have `dnb-crate-envelope` rows or `gridSource: "sidecar"`; those are read so existing plans keep working, and they are not written again.
+
+Planning uses the selected rhythm row when `track_evidence_selection` is set; otherwise DSP. Rows are stored per `(track_id, analyzer_name)`.
 
 Descriptors (`energy`, `danceability`, `acousticness`, `melodicness`, `valence`) are deterministic heuristics on a 0–1 scale, not a trained model.
 

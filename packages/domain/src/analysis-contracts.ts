@@ -28,11 +28,11 @@ export const startTrackAnalysisInputSchema = z
         "ids (default) uses trackIds; planningReady / unanalyzed / stale / all select from the catalog.",
       ),
     engines: z
-      .array(z.enum(["dnb-crate-dsp", "beat-this", "allin1", "keyfinder", "essentia-key"]))
+      .array(z.literal("dnb-crate-dsp"))
       .min(1)
-      .max(3)
+      .max(1)
       .optional()
-      .describe("Analysis engines to run. Default is config analysis.defaultEngine."),
+      .describe("Only dnb-crate-dsp is supported. Default is config analysis.defaultEngine."),
   })
   .refine(
     (value) =>
@@ -50,7 +50,7 @@ export const getAnalysisStatusInputSchema = z.object({
 
 export const getTrackAnalysisInputSchema = z.object({
   trackId: trackIdSchema,
-  engine: analysisEngineIdSchema.optional(),
+  engine: z.string().min(1).optional(),
 });
 
 export const compareTrackAnalysesInputSchema = z.object({
@@ -59,7 +59,7 @@ export const compareTrackAnalysesInputSchema = z.object({
 
 export const getTrackSectionsInputSchema = z.object({
   trackId: trackIdSchema,
-  engine: analysisEngineIdSchema.optional(),
+  engine: z.string().min(1).optional(),
 });
 
 export const cuePreviewCueSchema = z.enum(["intro_start", "drop", "breakdown", "outro_start"]);

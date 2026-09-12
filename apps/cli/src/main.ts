@@ -9,7 +9,6 @@ import {
   loadConfig,
   rateTransitionInputSchema,
   selectTrackEvidenceInputSchema,
-  type AnalysisEngineId,
   type Logger,
 } from "@dnb-crate/domain";
 import pino from "pino";
@@ -49,7 +48,7 @@ Commands:
   library:scan [--dry-run]
   library:stats
   track:search [--query TEXT] [--artist TEXT] [--limit N]
-  analysis:start --track-id UUID [--engine dsp|beat-this|allin1] [--wait]
+  analysis:start --track-id UUID [--wait]
   analysis:run --scope stale|unanalyzed|all|planningReady [--wait] [--timeout-min N]
   enrich:run --scope unmatched|all|ids [--dry-run] [--limit N] [--wait] [--timeout-min N]
   enrich:status [--id UUID]
@@ -58,7 +57,7 @@ Commands:
   analysis:get --track-id UUID
   analysis:compare --track-id UUID
   analysis:report
-  analysis:gate [--engine dsp|beat-this] [--previews]
+  analysis:gate [--previews]
   analysis:cue-preview --track-id UUID [--cue drop]
   transition:plan --from UUID --to UUID [--type phrase_mix|bass_swap|crossfade|any] [--bars 16|32]
   transition:validate --from UUID --to UUID --type phrase_mix|bass_swap|crossfade
@@ -130,17 +129,9 @@ async function main(): Promise<void> {
         if (!trackId && !planningReady) {
           throw new Error("analysis:start requires --track-id or --planning-ready");
         }
-        const enginesRaw = option(args, "--engine");
-        let engines: AnalysisEngineId[] | undefined;
-        if (enginesRaw === "beat-this" || enginesRaw === "allin1") {
-          engines = [enginesRaw];
-        } else if (enginesRaw === "dsp" || enginesRaw === "dnb-crate-dsp") {
-          engines = ["dnb-crate-dsp"];
-        }
         const started = runtime.service.startTrackAnalysis({
           trackIds: trackId ? [trackId] : undefined,
           planningReadyOnly: planningReady,
-          engines,
         });
         if (flag(args, "--wait")) {
           const done = await runtime.service.waitForAnalysisJob(started.job.id);
@@ -249,19 +240,12 @@ async function main(): Promise<void> {
         printJson({ ok: true, data: runtime.service.getAnalysisReport() });
         break;
       case "analysis:gate": {
-        const enginesRaw = option(args, "--engine");
-        let engines: AnalysisEngineId[] | undefined;
-        if (enginesRaw === "beat-this" || enginesRaw === "allin1") {
-          engines = [enginesRaw];
-        } else if (enginesRaw === "dsp" || enginesRaw === "dnb-crate-dsp" || enginesRaw === undefined) {
-          engines = ["dnb-crate-dsp"];
-        }
         const ids = runtime.repository
           .listAll()
           .filter((track) => track.bpmSource === "published" || track.bpmSource === "manual")
           .map((track) => track.id);
         if (ids.length > 0) {
-          const started = runtime.service.startTrackAnalysis({ trackIds: ids, engines });
+          const started = runtime.service.startTrackAnalysis({ trackIds: ids });
           const done = await runtime.service.waitForAnalysisJob(started.job.id, 30 * 60_000);
           if (done.status !== "succeeded") {
             throw new Error(`analysis:gate job ${done.status}: ${done.errorMessage ?? done.id}`);

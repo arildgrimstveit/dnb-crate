@@ -8,12 +8,7 @@
   "truePeakCeilingDb": -1,
   "renderWorkerLimit": 1,
   "analysis": {
-    "defaultEngine": "dnb-crate-dsp",
-    "engines": {
-      "python": {
-        "enabled": false
-      }
-    }
+    "defaultEngine": "dnb-crate-dsp"
   },
   "enrichment": {
     "enabled": false,

@@ -11,7 +11,6 @@ import {
   MIN_ANALYSIS_CONFIDENCE,
   reconstructGrid,
   resolveCanonicalBpm,
-  type AnalysisEngineId,
   type AnalysisJob,
   type AppConfig,
   type Logger,
@@ -27,8 +26,6 @@ import {
 import type { AnalysisJobRepository } from "../analysis-job-repository.ts";
 import type { AnalysisRepository, StoredTrackAnalysis } from "../analysis-repository.ts";
 import { loadPcmForAnalysis } from "./load-pcm.ts";
-import { mergeAnalyzerResults } from "./merger.ts";
-import { runPythonAnalyzer } from "./python-engine.ts";
 import type { TrackRepository } from "../repository.ts";
 
 export class AnalysisCoordinator {
@@ -57,10 +54,7 @@ export class AnalysisCoordinator {
     this.pump();
   }
 
-  start(
-    trackIds: string[],
-    engines: AnalysisEngineId[] = [DEFAULT_ANALYSIS_ENGINE],
-  ): { job: AnalysisJob } {
+  start(trackIds: string[]): { job: AnalysisJob } {
     if (trackIds.length === 0) {
       throw new DomainError("ANALYSIS_FAILED", "No tracks to analyze");
     }
@@ -71,7 +65,7 @@ export class AnalysisCoordinator {
       }
       this.tracks.setAnalysisStatus(id, "pending");
     }
-    const resolved = engines.length > 0 ? engines : [DEFAULT_ANALYSIS_ENGINE];
+    const resolved = [DEFAULT_ANALYSIS_ENGINE];
     const job = this.jobs.insertQueued(trackIds, resolved);
     this.kick();
     return { job };
@@ -199,7 +193,7 @@ export class AnalysisCoordinator {
           const overlap = prefetchN > 0 && i + 1 < job.trackIds.length
             ? pcmCache.get(job.trackIds[i + 1]!)
             : undefined;
-          await this.analyzeTrack(trackId, binaries, job.engines, pcmCache.get(trackId), overlap);
+          await this.analyzeTrack(trackId, binaries, pcmCache.get(trackId), overlap);
           completed.push(trackId);
         } catch (error) {
           failed.push(trackId);
@@ -236,7 +230,6 @@ export class AnalysisCoordinator {
   private async analyzeTrack(
     trackId: string,
     binaries: FfmpegBinaries | null,
-    engines: AnalysisEngineId[],
     preloaded?: Promise<PcmAudio>,
     overlap?: Promise<PcmAudio>,
   ): Promise<void> {
@@ -285,27 +278,7 @@ export class AnalysisCoordinator {
       integratedLufs = parsed.integratedLufs;
       truePeakDb = parsed.truePeakDb;
     }
-    const requested = engines.length > 0 ? engines : [DEFAULT_ANALYSIS_ENGINE];
     this.storeResult(trackId, dsp, anchor, integratedLufs, truePeakDb, referenceBpm ?? null);
-    for (const engine of requested) {
-      if (engine === "dnb-crate-dsp" || engine === "dnb-crate-envelope") {
-        continue;
-      }
-      const python = await runPythonAnalyzer(
-        this.runner,
-        this.config,
-        engine === "allin1" ? "allin1" : "beat-this",
-        track.filePath,
-      );
-      this.storeResult(
-        trackId,
-        mergeAnalyzerResults(python, dsp),
-        anchor,
-        integratedLufs,
-        truePeakDb,
-        referenceBpm ?? null,
-      );
-    }
     const preferred = this.analyses.findByTrackId(trackId) ?? this.analyses.findByTrackId(trackId, dsp.analyzerName);
     if (preferred) {
       this.tracks.applyAnalyzedMetadata(trackId, {

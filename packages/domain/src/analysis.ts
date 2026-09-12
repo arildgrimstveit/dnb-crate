@@ -8,7 +8,7 @@ import {
   MIN_BASS_CROSSOVER_HZ,
   MIN_BASS_SWAP_RAMP_MS,
 } from "./constants.ts";
-import type { AnalysisEngineId, BpmSource, CuePointType, KeySource } from "./track.ts";
+import type { BpmSource, CuePointType, KeySource } from "./track.ts";
 import type { TransitionType } from "./planning.ts";
 
 export type TrackSectionType =
@@ -137,7 +137,7 @@ export type AnalysisJob = {
   status: AnalysisJobStatus;
   progress: number;
   trackIds: string[];
-  engines: AnalysisEngineId[];
+  engines: string[];
   completedTrackIds: string[];
   failedTrackIds: string[];
   errorCode: string | null;

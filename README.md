@@ -8,30 +8,32 @@ An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server. The same ser
 
 Talk to the MCP host (Cursor, Codex). Mood or energy plus a length is enough. The host maps that onto `create_set_plan` and can scan, analyze, plan, validate, and render. The planner picks the order and joins; it does not write audio. The renderer prints a gapless **24-bit 48 kHz master** and a **16-bit listen** FLAC named from the plan.
 
-Say whatever else you care about: preferred moods, subgenres, or artists; an energy arc; a start or closer by title; a seed; genres to include or exclude; descriptor floors. Named titles are resolved with `search_tracks` (your catalog only). If you omit a length, the plan is **60 minutes**. Allowed range is 1 minute–8 hours.
+Say whatever else you care about: preferred moods, subgenres, or artists; how the energy should move; a start or closer by title; a seed; genres to include or exclude; how pretty, danceable, or heavy the tracks should stay. Named titles are resolved with `search_tracks` (your catalog only). If you omit a length, the plan is **60 minutes**. Allowed range is 1 minute–8 hours.
 
 The catalog must already be configured and migrated (`libraryRoots`, `db:migrate`). New or unanalyzed files need `scan_library` / `library:scan` and `start_track_analysis` / `analysis:run` before a full-length plan is likely. A crate that cannot fill the length returns a **partial** plan.
 
 Examples:
 
-- “30 minutes of liquid, keep it mid energy, seed 4.”
-- “Peak-time hour. Climb into the last third, then ease off.”
 - “Hour of liquid. Close on a title from this folder.”
 - “20-minute mix, rolling energy.”
+- “Peak hour. Climb into the last third, then ease off.”
+- “30 minutes of liquid, keep the pretty ones. Give me a different take.”
 
 Those words become structured fields:
 
 | You say | `create_set_plan` |
 | --- | --- |
 | “20 minutes” / “an hour” | `targetDurationMinutes` or `targetDurationMs` |
-| “liquid”, “peak-time” | `preferredMoods` |
+| “liquid”, “soulful”, “rolling” | `preferredMoods` (also `heavy`, `dark`, `deep`, `neuro`, `uplifting`) |
 | “liquid funk” | `preferredSubgenres` |
 | named artists | `preferredArtists` |
-| energy curve | `requestedArc` (energy 1–10 at fractions of the mix). Default 3 → 9 at 0.75 → 6 |
+| start easy, peak late, then ease off | `requestedArc` — start energy, when it peaks, how it ends (1–10 vs mix position). Default: open at 3, peak at 9 three-quarters in, land at 6 |
+| Peak-style hour | energy/`danceability` floors + that arc + a subgenre if you have one. Not a mood named peak-time |
 | “start on X” / “close on Y” | `startTrackId` / `endTrackId` |
-| descriptor floors | `descriptors` (`min`/`max` 0–1, or `minPct`/`maxPct`) |
+| “keep the pretty ones” / “keep it danceable” | `descriptors`: `melodicness` / `danceability` / `energy` / `valence` / `acousticness` / `subBass` / `brightness`. Absolute `min`/`max` 0–1, or crate-relative `minPct`/`maxPct` |
 | include/exclude genres | `genres.include` / `genres.exclude` |
-| “same mix again” | `seed` (default 1) |
+| “same mix again” | same brief + same `seed` (default 1) |
+| “try another one” / “a different take” | change `seed` |
 
 New plans: `qualityPolicy: "strict"`, omit `targetBpm` (each overlap beatmatches at the pair tempo), `dropAnchored` defaults true. Do not pin historical pairs or recipes unless you ask.
 
@@ -121,7 +123,7 @@ Tool contracts: `docs/tool-contracts.md`. Prompt: `build-dnb-set` (see **Ask for
 | Part | Job |
 | --- | --- |
 | **Catalog** | Scan configured roots. Source files stay read-only. |
-| **Analyzer** | Measure BPM/grid, key, sections, loudness. Advisory until confidence clears the floor. |
+| **Analyzer** | `dnb-crate-dsp` measures BPM/grid, sections, and loudness. Advisory until confidence clears the floor. KeyFinder is an optional script, not an analysis engine. |
 | **Planner** | Same catalog + brief + seed → same mix. Picks order and joins; does not write audio. |
 | **Renderer** | Prints the plan: beatmatched overlaps, 3-band fades, −14 LUFS, 24-bit master + 16-bit listen FLAC. |
 

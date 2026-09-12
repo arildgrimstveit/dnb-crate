@@ -36,8 +36,6 @@ private/
 .vscode/
 .idea/
 
-# Optional Python sidecar
-tools/analyzer-py/.venv/
 # Local Rubber Band CLI (GPL utility, downloaded for stretch A/Bs)
 tools/rubberband-cli/
 # Local KeyFinder build (vcpkg + libkeyfinder + CLI)

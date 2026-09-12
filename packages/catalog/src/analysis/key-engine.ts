@@ -1,37 +1,27 @@
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { access, unlink } from "node:fs/promises";
 import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
 
 import type { AnalyzerResult } from "@dnb-crate/audio-analysis";
-import { normalizeKey, type AnalysisEngineId, type AppConfig } from "@dnb-crate/domain";
+import { normalizeKey, type AppConfig } from "@dnb-crate/domain";
 import type { ProcessRunner } from "@dnb-crate/audio-renderer";
 
 export type KeyEngineProbe = {
-  engine: "keyfinder" | "essentia-key" | null;
+  engine: "keyfinder" | null;
   command: string | null;
   available: boolean;
 };
 
-function essentiaScriptPath(): string {
-  return path.join(process.cwd(), "tools", "analyzer-py", "extract-key.py");
-}
-
-function defaultPythonPath(): string {
-  const base = path.join(process.cwd(), "tools", "analyzer-py", ".venv");
-  return process.platform === "win32"
-    ? path.join(base, "Scripts", "python.exe")
-    : path.join(base, "bin", "python");
-}
-
 async function findOnPath(name: string): Promise<string | null> {
   const names = process.platform === "win32" ? [name, `${name}.exe`] : [name];
-  const bundled = path.resolve(process.cwd(), "tools", "keyfinder-cli", process.platform === "win32" ? "keyfinder-cli.exe" : "keyfinder-cli");
+  const bundled = path.resolve(
+    process.cwd(),
+    "tools",
+    "keyfinder-cli",
+    process.platform === "win32" ? "keyfinder-cli.exe" : "keyfinder-cli",
+  );
   const dirs = [path.dirname(bundled), process.cwd(), ...(process.env.PATH ?? "").split(path.delimiter)];
   const extra = [bundled];
   for (const candidate of extra) {
@@ -56,21 +46,12 @@ async function findOnPath(name: string): Promise<string | null> {
   return null;
 }
 
-export async function probeKeyEngine(config: AppConfig): Promise<KeyEngineProbe> {
+export async function probeKeyEngine(_config: AppConfig): Promise<KeyEngineProbe> {
   const keyfinder = await findOnPath("keyfinder-cli");
   if (keyfinder) {
     return { engine: "keyfinder", command: keyfinder, available: true };
   }
-  const pythonPath = config.analysis?.engines?.python?.pythonPath ?? defaultPythonPath();
-  const script = essentiaScriptPath();
-  try {
-    await access(pythonPath, constants.F_OK);
-    await access(script, constants.F_OK);
-    await execFileAsync(pythonPath, ["-c", "import essentia.standard"], { timeout: 20_000 });
-    return { engine: "essentia-key", command: pythonPath, available: true };
-  } catch {
-    return { engine: null, command: null, available: false };
-  }
+  return { engine: null, command: null, available: false };
 }
 
 export async function runKeyEngine(
@@ -80,52 +61,44 @@ export async function runKeyEngine(
 ): Promise<AnalyzerResult> {
   const probe = await probeKeyEngine(config);
   if (!probe.available || !probe.engine || !probe.command) {
-    throw new Error("No local key engine is installed (keyfinder-cli or Essentia extract-key.py)");
+    throw new Error("KeyFinder CLI is not installed (keyfinder-cli)");
   }
   const started = Date.now();
   let wavPath: string | null = null;
   let result;
   try {
-    if (probe.engine === "keyfinder") {
-      wavPath = path.join(os.tmpdir(), `dnb-key-${randomBytes(6).toString("hex")}.wav`);
-      const ffmpeg = config.ffmpegPath ?? "ffmpeg";
-      const decoded = await runner.run({
-        executable: ffmpeg,
-        args: [
-          "-nostdin",
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-y",
-          "-i",
-          filePath,
-          "-ac",
-          "2",
-          "-ar",
-          "44100",
-          "-c:a",
-          "pcm_s16le",
-          wavPath,
-        ],
-        timeoutMs: 180_000,
-        cwd: path.dirname(probe.command),
-      });
-      if (decoded.exitCode !== 0) {
-        throw new Error(decoded.stderr.slice(-400) || "FFmpeg decode for KeyFinder failed");
-      }
-      result = await runner.run({
-        executable: probe.command,
-        args: [wavPath],
-        timeoutMs: 180_000,
-        cwd: path.dirname(probe.command),
-      });
-    } else {
-      result = await runner.run({
-        executable: probe.command,
-        args: [essentiaScriptPath(), "--input", filePath],
-        timeoutMs: 180_000,
-      });
+    wavPath = path.join(os.tmpdir(), `dnb-key-${randomBytes(6).toString("hex")}.wav`);
+    const ffmpeg = config.ffmpegPath ?? "ffmpeg";
+    const decoded = await runner.run({
+      executable: ffmpeg,
+      args: [
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        filePath,
+        "-ac",
+        "2",
+        "-ar",
+        "44100",
+        "-c:a",
+        "pcm_s16le",
+        wavPath,
+      ],
+      timeoutMs: 180_000,
+      cwd: path.dirname(probe.command),
+    });
+    if (decoded.exitCode !== 0) {
+      throw new Error(decoded.stderr.slice(-400) || "FFmpeg decode for KeyFinder failed");
     }
+    result = await runner.run({
+      executable: probe.command,
+      args: [wavPath],
+      timeoutMs: 180_000,
+      cwd: path.dirname(probe.command),
+    });
   } finally {
     if (wavPath) {
       try {
@@ -138,10 +111,9 @@ export async function runKeyEngine(
   if (result.exitCode !== 0) {
     throw new Error(result.stderr.slice(-400) || `${probe.engine} exited ${result.exitCode}`);
   }
-  const parsed = parseKeyStdout(result.stdout, probe.engine);
-  const engine: AnalysisEngineId = probe.engine;
+  const parsed = parseKeyStdout(result.stdout);
   return {
-    analyzerName: engine,
+    analyzerName: "keyfinder",
     analyzerVersion: "1.0.0",
     bpm: null,
     bpmConfidence: null,
@@ -194,26 +166,8 @@ export async function runKeyEngine(
 
 export function parseKeyStdout(
   stdout: string,
-  engine: "keyfinder" | "essentia-key",
 ): { musicalKey: string | null; camelotKey: string | null; keyConfidence: number | null } {
-  const trimmed = stdout.trim();
-  if (engine === "essentia-key") {
-    try {
-      const parsed = JSON.parse(trimmed) as {
-        musicalKey?: string | null;
-        keyConfidence?: number | null;
-      };
-      const normalized = normalizeKey(parsed.musicalKey);
-      return {
-        musicalKey: normalized?.musicalKey ?? null,
-        camelotKey: normalized?.camelotKey ?? null,
-        keyConfidence: parsed.keyConfidence ?? null,
-      };
-    } catch {
-      return { musicalKey: null, camelotKey: null, keyConfidence: null };
-    }
-  }
-  const first = trimmed.split(/\s+/)[0] ?? "";
+  const first = stdout.trim().split(/\s+/)[0] ?? "";
   const normalized = normalizeKey(first);
   return {
     musicalKey: normalized?.musicalKey ?? null,

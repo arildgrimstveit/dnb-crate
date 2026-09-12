@@ -475,7 +475,7 @@ describe("track analysis and aligned transitions", () => {
     expect(period).toBeCloseTo(60_000 / 176, 0);
   });
 
-  it("uses a selected sidecar rhythm for planning BPM", async () => {
+  it("reads a leftover sidecar rhythm row when evidence is selected", async () => {
     const root = path.join(
       os.tmpdir(),
       `dnb-sel-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,

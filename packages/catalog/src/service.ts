@@ -41,7 +41,6 @@ import {
   recordHourFeedbackSchema,
   APP_VERSION,
   COMPATIBLE_TRACKS_LIMIT_MAX,
-  DEFAULT_ANALYSIS_ENGINE,
   DomainError,
   MIN_ANALYSIS_CONFIDENCE,
   RESOURCE_LIST_LIMIT,
@@ -84,7 +83,6 @@ import type { AnalysisCoordinator } from "./analysis/coordinator.ts";
 import type { AnalysisRepository } from "./analysis-repository.ts";
 import type { EnrichmentCoordinator } from "./enrichment/coordinator.ts";
 import { planTransition, validateTransition } from "./planning/transition-planner.ts";
-import { probePythonEngine } from "./analysis/python-engine.ts";
 import type { FeedbackRepository } from "./feedback-repository.ts";
 import type { ApprovedRecipeRepository } from "./approved-recipe-repository.ts";
 import type { TrackEvidenceSelection } from "./analysis-repository.ts";
@@ -140,7 +138,6 @@ export class CatalogService {
       outputRootConfigured = this.config.outputRoot.length > 0;
     }
 
-    const python = await probePythonEngine(this.config);
     const detected = await this.renders.detect();
     const ffmpegReady = ffmpegMixReady(detected);
 
@@ -156,8 +153,6 @@ export class CatalogService {
       ffmpegVersion: detected?.ffmpegVersion ?? null,
       ffprobeVersion: detected?.ffprobeVersion ?? null,
       supportedExtensions: this.config.supportedExtensions,
-      pythonAnalyzerAvailable: python.available,
-      pythonAnalyzerEngines: python.engines,
       enrichment: {
         enabled: this.config.enrichment?.enabled === true,
         musicbrainz: this.config.enrichment?.musicbrainz?.enabled !== false,
@@ -341,10 +336,7 @@ export class CatalogService {
         "No tracks to analyze. Pass trackIds, planningReadyOnly=true, or scope unanalyzed|stale|all|planningReady.",
       );
     }
-    return this.analysis.start(
-      [...ids],
-      input.engines ?? [this.config.analysis?.defaultEngine ?? DEFAULT_ANALYSIS_ENGINE],
-    );
+    return this.analysis.start([...ids]);
   }
 
   getAnalysisStatus(analysisJobId?: string): { jobs: AnalysisJob[] } {

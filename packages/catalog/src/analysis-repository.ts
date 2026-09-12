@@ -101,7 +101,7 @@ function mapAnalysis(row: AnalysisRow, sections: TrackSection[] = []): StoredTra
   };
 }
 
-const PREFERRED_ORDER = ["dnb-crate-dsp", "beat-this", "allin1", "dnb-crate-envelope"];
+const PREFERRED_ORDER = ["dnb-crate-dsp", "dnb-crate-envelope"];
 
 export type TrackEvidenceSelection = {
   trackId: string;

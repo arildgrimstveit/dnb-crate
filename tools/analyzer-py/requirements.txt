@@ -1,4 +1,0 @@
-numpy
-soundfile
-beat-this
-# Optional, slow (Demucs): all-in-one-infer

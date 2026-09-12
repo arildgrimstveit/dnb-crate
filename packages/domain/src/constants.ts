@@ -10,14 +10,7 @@ export const ANALYZER_NAME = "dnb-crate-envelope";
 export const ANALYZER_VERSION = "1.0.0";
 export const DSP_ANALYZER_NAME = "dnb-crate-dsp";
 export const DSP_ANALYZER_VERSION = "3.2.0";
-export const ANALYSIS_ENGINE_IDS = [
-  "dnb-crate-dsp",
-  "dnb-crate-envelope",
-  "beat-this",
-  "allin1",
-  "keyfinder",
-  "essentia-key",
-] as const;
+export const ANALYSIS_ENGINE_IDS = ["dnb-crate-dsp"] as const;
 export const DEFAULT_ANALYSIS_ENGINE = "dnb-crate-dsp" as const;
 export const ANALYSIS_SAMPLE_RATE_HZ = 22_050;
 

@@ -14,17 +14,6 @@ export const analysisConfigSchema = z
   .object({
     defaultEngine: analysisEngineIdSchema.default(DEFAULT_ANALYSIS_ENGINE),
     prefetch: z.number().int().min(0).max(4).optional(),
-    engines: z
-      .object({
-        python: z
-          .object({
-            enabled: z.boolean().default(false),
-            pythonPath: z.string().min(1).optional(),
-            scriptPath: z.string().min(1).optional(),
-          })
-          .optional(),
-      })
-      .optional(),
   })
   .optional();
 

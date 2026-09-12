@@ -49,7 +49,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `start_track_analysis`
 
-- Input: `{ trackIds?: UUID[], planningReadyOnly?: boolean, scope?: ids|planningReady|unanalyzed|stale|all }` — pass trackIds, planningReadyOnly=true, or a non-ids scope. Whole-library is allowed via `scope`.
+- Input: `{ trackIds?: UUID[], planningReadyOnly?: boolean, scope?: ids|planningReady|unanalyzed|stale|all, engines?: ["dnb-crate-dsp"] }` — pass trackIds, planningReadyOnly=true, or a non-ids scope. Whole-library is allowed via `scope`. DSP is the only analysis engine.
 - Output: analysis job
 - Errors: `TRACK_NOT_FOUND`, `ANALYSIS_FAILED`
 
@@ -140,7 +140,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 - One of: `name`, `replaceTrack`, `setTrim`, `setTransition`, `setPlaybackRate`, `applyTransition`, `moveEntry`
 - Rebuilds timeline; rejects structurally invalid edits with `INVALID_SET_PLAN`
 - `applyTransition` keeps `outgoing.sourceStartMs = min(existing, proposal)` so a phrase-length proposal does not collapse the playable window below 90 s. `incoming.sourceEndMs` is only written when the incoming entry is last (no `transitionToNext`).
-- Analysis rows include `gridSource` (`analyzed` | `reference` | `anchor`) and optional `descriptors.audioStartMs` / `audioEndMs`. Reference grids never change canonical BPM/key.
+- Analysis rows include `gridSource` (`analyzed` | `reference` | `anchor`, plus leftover `sidecar` reads) and optional `descriptors.audioStartMs` / `audioEndMs`. Reference grids never change canonical BPM/key.
 - `validate_set_plan` warns `WINDOW_IN_SILENCE` when `sourceEndMs` is more than 250 ms past `descriptors.audioEndMs`. Render readiness blocks only when the whole overlap sits past `audioEndMs`.
 
 ## `delete_set_plan`
