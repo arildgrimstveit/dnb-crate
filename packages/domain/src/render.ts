@@ -14,6 +14,8 @@ export type RenderJob = {
   outputFormat: RenderOutputFormat;
   outputRootRelativePath: string | null;
   outputFileName: string | null;
+  listenRootRelativePath: string | null;
+  listenFileName: string | null;
   outputChecksumSha256: string | null;
   transitionId: string | null;
   errorCode: string | null;
@@ -107,6 +109,8 @@ export type RenderManifestV1 = {
   outputChannels: number;
   outputDurationMs: number;
   outputChecksumSha256: string;
+  listenRootRelativePath?: string;
+  listenBitDepth?: 16;
   integratedLufs: number | null;
   truePeakDb: number | null;
   loudnessTargetLufs: number;

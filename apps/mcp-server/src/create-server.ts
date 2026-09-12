@@ -93,7 +93,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
       version: APP_VERSION,
       title: "DnB Crate",
       description:
-        "Local drum & bass crate: catalog, set planning, beat-grid analysis, and 24-bit FLAC rendering with equal-power, phrase-mix, and bass-swap templates. Identify tracks and plans by UUID.",
+        "Local drum & bass crate: catalog, set planning, beat-grid analysis, and FLAC rendering (24-bit master plus 16-bit named listen copy) with equal-power, phrase-mix, and bass-swap templates. Identify tracks and plans by UUID.",
     },
     { capabilities: { tools: {}, resources: {}, prompts: {} } },
   );
@@ -773,7 +773,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Start set render",
       description:
-        "Validate a saved set plan and queue a full 24-bit FLAC render. Phrase-mix and bass-swap use beat-aligned templates; crossfade remains equal-power. Returns a job id immediately. Poll get_render_status. Pass allowLowConfidence / allowExcessiveTempo to override analysis and ±3% rate bounds. Pass allowOverlongDuration when the only blockers are duration / the hour audition window.",
+        "Validate a saved set plan and queue a full render: 24-bit 48 kHz FLAC master (job id filename) plus a 16-bit 48 kHz listen FLAC named from the plan. Phrase-mix and bass-swap use beat-aligned templates; crossfade remains equal-power. Returns a job id immediately. Poll get_render_status. Pass allowLowConfidence / allowExcessiveTempo to override analysis and ±3% rate bounds. Pass allowOverlongDuration when the only blockers are duration / the hour audition window.",
       inputSchema: startSetRenderInputSchema,
       outputSchema: toolResultSchema(renderJobSchema),
       annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false },
@@ -799,7 +799,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Get render status",
       description:
-        "Poll a preview or full-render job. progress is 0–1. On success, outputRootRelativePath is under the configured output directory (not an absolute path). Use get_render_manifest for checksums and loudness.",
+        "Poll a preview or full-render job. progress is 0–1. On success, outputRootRelativePath is the 24-bit master and listenRootRelativePath is the 16-bit named listen copy, both under the configured output directory (not absolute paths). Use get_render_manifest for checksums and loudness. Point the user at the listen file for playback. Do not copy the master to a second 24-bit file.",
       inputSchema: getRenderStatusInputSchema,
       outputSchema: toolResultSchema(renderJobSchema),
       annotations: { readOnlyHint: true, idempotentHint: true },
@@ -980,7 +980,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
       list: () => ({
         resources: service.listRenderResources().map((job) => ({
           uri: `dnbcrate://renders/${job.id}/manifest`,
-          name: job.outputFileName ?? `render ${job.id}`,
+          name: job.listenFileName ?? job.outputFileName ?? `render ${job.id}`,
           mimeType: "application/json",
         })),
       }),
@@ -1034,7 +1034,7 @@ Workflow:
 3. Call create_set_plan with structured fields only: name, targetDurationMinutes or targetDurationMs, requestedArc, preferredMoods/Subgenres/Artists, descriptors, genres include/exclude, dropAnchored, artistRepeatSpacing, seed. Pass the user's requested length (20 minutes, 90 minutes, etc.). Default to 60 minutes only when they do not say. Default qualityPolicy is strict. Omit targetBpm so each overlap beatmatches at the pair tempo. Pass targetBpm only for an explicit mix-wide tempo lock. Do not pin historical pairs or recipes unless the user asks.
 4. Call validate_set_plan and read quality (qualityChecksPassed, readyForAudition, per-join harmonicClass and fallbackReason).
 5. start_set_render. Poll get_render_status; read get_render_manifest when succeeded.
-6. Summarize the tracklist with timeline times, remaining warnings, quality flags, and render job id.
+6. Summarize the tracklist with timeline times, remaining warnings, quality flags, and render job id. Give listenRootRelativePath for playback and outputRootRelativePath as the 24-bit master. Do not copy the master to a second identical FLAC.
 
 Do not invent BPM, key, energy, or cue points. Analysis is advisory. Provenance is manual > published > analyzed > tag. Playback-rate changes stay within ±3% unless allowExcessiveTempo.`,
           },

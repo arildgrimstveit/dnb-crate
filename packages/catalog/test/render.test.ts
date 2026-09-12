@@ -47,7 +47,7 @@ async function seededLibrary() {
   const alpha = tracks.find((track) => track.title === "Alpha")!;
   const bravo = tracks.find((track) => track.title === "Bravo")!;
   const plan = saveTwoTrackPlan(catalog, alpha.id, bravo.id);
-  return { catalog, plan, aPath, bPath, alpha, bravo };
+  return { catalog, plan, aPath, bPath, alpha, bravo, root };
 }
 
 function saveTwoTrackPlan(
@@ -113,7 +113,7 @@ function saveTwoTrackPlan(
 
 describe("render jobs", () => {
   it("queues a full render, completes, and keeps source bytes unchanged", async () => {
-    const { catalog, plan, aPath } = await seededLibrary();
+    const { catalog, plan, aPath, root } = await seededLibrary();
     const before = createHash("sha256")
       .update(await readFile(aPath))
       .digest("hex");
@@ -122,9 +122,16 @@ describe("render jobs", () => {
     const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
     expect(done.status).toBe("succeeded");
     expect(done.outputFormat).toBe("flac");
-    expect(done.outputRootRelativePath).toMatch(/^renders\/.+\.flac$/);
+    expect(done.outputRootRelativePath).toMatch(/^renders\/[0-9a-f-]{36}\.flac$/);
     expect(done.outputRootRelativePath).not.toMatch(/^[A-Za-z]:\\/);
+    expect(done.listenRootRelativePath).toBe("renders/fixture-mix.flac");
+    expect(done.listenFileName).toBe("fixture-mix.flac");
+    expect(done.listenRootRelativePath).not.toBe(done.outputRootRelativePath);
+    const listenAbs = path.join(root, "output", "renders", "fixture-mix.flac");
+    await expect(readFile(listenAbs)).resolves.toBeInstanceOf(Buffer);
     const manifest = catalog.service.getRenderManifest(done.id);
+    expect(manifest.listenRootRelativePath).toBe("renders/fixture-mix.flac");
+    expect(manifest.listenBitDepth).toBe(16);
     expect(manifest.tracks).toHaveLength(2);
     expect(manifest.outputFormat).toBe("flac");
     expect(manifest.outputChecksumSha256).toMatch(/^[a-f0-9]{64}$/);
@@ -178,6 +185,7 @@ describe("render jobs", () => {
     expect(second.job.outputRootRelativePath).toBe(
       catalog.service.getRenderStatus(first.job.id).outputRootRelativePath,
     );
+    expect(second.job.listenRootRelativePath).toBeNull();
   });
 
   it("cancels a running job by aborting the child process", async () => {

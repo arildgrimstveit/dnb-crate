@@ -1,12 +1,12 @@
 # DnB Crate
 
-Point this at a local drum & bass folder. It catalogs the files, measures grids and keys, plans a deterministic mix of the length you ask for, and renders a gapless 24-bit FLAC.
+Point this at a local drum & bass folder. It catalogs the files, measures grids and keys, plans a deterministic mix of the length you ask for, and renders a gapless 24-bit master plus a 16-bit listen FLAC.
 
 An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server. The same services are on the CLI. The model interprets requests; this app owns scanning, storage, search, planning, and rendering.
 
 ## Ask for a mix
 
-Talk to the MCP host (Cursor, Codex). Mood or energy plus a length is enough. The host maps that onto `create_set_plan` and can scan, analyze, plan, validate, and render. The planner picks the order and joins; it does not write audio. The renderer prints a gapless **24-bit 48 kHz FLAC**.
+Talk to the MCP host (Cursor, Codex). Mood or energy plus a length is enough. The host maps that onto `create_set_plan` and can scan, analyze, plan, validate, and render. The planner picks the order and joins; it does not write audio. The renderer prints a gapless **24-bit 48 kHz master** and a **16-bit listen** FLAC named from the plan.
 
 Say whatever else you care about: preferred moods, subgenres, or artists; an energy arc; a start or closer by title; a seed; genres to include or exclude; descriptor floors. Named titles are resolved with `search_tracks` (your catalog only). If you omit a length, the plan is **60 minutes**. Allowed range is 1 minute–8 hours.
 
@@ -123,7 +123,7 @@ Tool contracts: `docs/tool-contracts.md`. Prompt: `build-dnb-set` (see **Ask for
 | **Catalog** | Scan configured roots. Source files stay read-only. |
 | **Analyzer** | Measure BPM/grid, key, sections, loudness. Advisory until confidence clears the floor. |
 | **Planner** | Same catalog + brief + seed → same mix. Picks order and joins; does not write audio. |
-| **Renderer** | Prints the plan: beatmatched overlaps, 3-band fades, −14 LUFS, 24-bit FLAC. |
+| **Renderer** | Prints the plan: beatmatched overlaps, 3-band fades, −14 LUFS, 24-bit master + 16-bit listen FLAC. |
 
 Docs: [analysis](docs/analysis.md), [scoring](docs/scoring.md), [mixing](docs/mixing.md), [rendering](docs/rendering.md). Example briefs: `docs/examples/liquid-hour.example.brief.json`, `docs/examples/peak-hour.example.brief.json`.
 

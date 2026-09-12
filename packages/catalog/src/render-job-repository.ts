@@ -66,6 +66,8 @@ function fileNameOf(relPath: string | null): string | null {
 }
 
 function mapJob(row: JobRow): StoredRenderJob {
+  const manifest = row.manifest_json ? (JSON.parse(row.manifest_json) as RenderManifestV1) : null;
+  const listenRel = manifest?.listenRootRelativePath ?? null;
   return {
     id: row.id,
     setPlanId: row.set_plan_id,
@@ -75,6 +77,8 @@ function mapJob(row: JobRow): StoredRenderJob {
     outputFormat: row.output_format,
     outputRootRelativePath: row.output_relpath,
     outputFileName: fileNameOf(row.output_relpath),
+    listenRootRelativePath: listenRel,
+    listenFileName: fileNameOf(listenRel),
     outputChecksumSha256: row.output_checksum,
     transitionId: row.transition_id,
     errorCode: row.error_code,
@@ -87,7 +91,7 @@ function mapJob(row: JobRow): StoredRenderJob {
     completedAt: row.completed_at,
     cacheKey: row.cache_key,
     params: row.params_json ? (JSON.parse(row.params_json) as RenderJobParams) : {},
-    manifest: row.manifest_json ? (JSON.parse(row.manifest_json) as RenderManifestV1) : null,
+    manifest,
   };
 }
 

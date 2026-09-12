@@ -35,6 +35,8 @@ export const renderJobSchema = z.object({
   outputFormat: z.enum(["flac", "wav"]),
   outputRootRelativePath: z.string().nullable(),
   outputFileName: z.string().nullable(),
+  listenRootRelativePath: z.string().nullable(),
+  listenFileName: z.string().nullable(),
   outputChecksumSha256: z.string().nullable(),
   transitionId: z.string().nullable(),
   errorCode: z.string().nullable(),
@@ -125,6 +127,8 @@ export const renderManifestV1Schema = z.object({
   outputChannels: z.number().int(),
   outputDurationMs: z.number().int(),
   outputChecksumSha256: z.string(),
+  listenRootRelativePath: z.string().optional(),
+  listenBitDepth: z.literal(16).optional(),
   integratedLufs: z.number().nullable(),
   truePeakDb: z.number().nullable(),
   loudnessTargetLufs: z.number(),
@@ -144,7 +148,9 @@ export const startSetRenderInputSchema = z.object({
   outputFormat: z
     .literal("flac")
     .optional()
-    .describe("24-bit 48 kHz lossless FLAC. Same PCM as the mix, compressed. Default flac."),
+    .describe(
+      "24-bit 48 kHz lossless FLAC master (job id name). A 16-bit listen FLAC is also written from the plan name. Default flac.",
+    ),
   edgeFadeMs: z
     .number()
     .int()

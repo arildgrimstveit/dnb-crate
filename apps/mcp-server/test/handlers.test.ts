@@ -325,7 +325,11 @@ describe("MCP tool handlers", () => {
     });
     expect(status.structuredContent).toMatchObject({
       ok: true,
-      data: { status: "succeeded", outputFormat: "flac" },
+      data: {
+        status: "succeeded",
+        outputFormat: "flac",
+        listenRootRelativePath: "renders/mcp-render.flac",
+      },
     });
 
     const manifest = await client.callTool({

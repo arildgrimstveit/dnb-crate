@@ -43,6 +43,7 @@ export type { SilenceSpan } from "./parse.ts";
 export { probeAudioFile } from "./probe.ts";
 export type { ProbeResult } from "./parse.ts";
 export { renderMix, type MixRequest, type MixResult, type MixSegment } from "./mix.ts";
+export { encodeListenFlac } from "./listen.ts";
 export {
   MIX_TAG_ARTIST,
   buildCueSheet,

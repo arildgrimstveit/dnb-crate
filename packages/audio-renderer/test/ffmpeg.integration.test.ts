@@ -4,7 +4,14 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { createNodeProcessRunner, detectFfmpeg, mixTagsFromTracklist, renderMix, requireFfmpeg } from "../src/index.ts";
+import {
+  createNodeProcessRunner,
+  detectFfmpeg,
+  encodeListenFlac,
+  mixTagsFromTracklist,
+  renderMix,
+  requireFfmpeg,
+} from "../src/index.ts";
 
 function buildSineWav(durationMs: number, frequencyHz: number, sampleRate = 44_100): Buffer {
   const frameCount = Math.max(1, Math.round((sampleRate * durationMs) / 1000));
@@ -278,6 +285,61 @@ describe("FFmpeg integration", () => {
     expect(stream?.codec_name).toBe("flac");
     expect(stream?.bits_per_raw_sample === "24" || stream?.sample_fmt === "s32").toBe(true);
     expect(result.invocation).toMatch(/-c:a flac/);
+  }, 60_000);
+
+  it("encodes a dithered 16-bit listen FLAC from the 24-bit master", async (ctx) => {
+    const binaries = await detectFfmpeg(runner, { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" });
+    if (!binaries) {
+      ctx.skip();
+      return;
+    }
+    requireFfmpeg(binaries);
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-listen-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    await mkdir(root, { recursive: true });
+    const a = path.join(root, "a.wav");
+    const b = path.join(root, "b.wav");
+    const master = path.join(root, "mix.flac");
+    const listen = path.join(root, "mix-listen.flac");
+    await writeFile(a, buildSineWav(4000, 220));
+    await writeFile(b, buildSineWav(4000, 440));
+    await renderMix(runner, binaries, {
+      segments: [
+        { filePath: a, sourceStartMs: 0, sourceEndMs: 4000, gainDb: 0 },
+        { filePath: b, sourceStartMs: 0, sourceEndMs: 4000, gainDb: 0 },
+      ],
+      overlapMs: [1000],
+      outputPath: master,
+      truePeakCeilingDb: -1,
+      loudnessTargetLufs: -14,
+    });
+    await encodeListenFlac(runner, binaries, master, listen);
+    const probe = await runner.run({
+      executable: binaries.ffprobePath,
+      args: [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-print_format",
+        "json",
+        "-show_streams",
+        listen,
+      ],
+    });
+    const parsed = JSON.parse(probe.stdout) as {
+      streams?: Array<{
+        codec_name?: string;
+        bits_per_raw_sample?: string;
+        sample_fmt?: string;
+        sample_rate?: string;
+      }>;
+    };
+    const stream = parsed.streams?.[0];
+    expect(stream?.codec_name).toBe("flac");
+    expect(stream?.sample_rate).toBe("48000");
+    expect(stream?.bits_per_raw_sample === "16" || stream?.sample_fmt === "s16").toBe(true);
   }, 60_000);
 
   it("strips first-track tags and writes the mix tracklist as FLAC chapters", async (ctx) => {

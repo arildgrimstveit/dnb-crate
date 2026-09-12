@@ -88,7 +88,15 @@ function summarize<T>(result: ToolResult<T>): string {
     typeof data.progress === "number"
   ) {
     const pct = Math.round(data.progress * 100);
-    return `Render job ${data.id}: ${data.status} (${pct}%).`;
+    const listen =
+      typeof data.listenRootRelativePath === "string"
+        ? ` Play ${data.listenRootRelativePath}.`
+        : "";
+    const master =
+      data.status === "succeeded" && typeof data.outputRootRelativePath === "string"
+        ? ` Master ${data.outputRootRelativePath}.`
+        : "";
+    return `Render job ${data.id}: ${data.status} (${pct}%).${listen}${master}`;
   }
   return JSON.stringify(result.data, null, 2);
 }

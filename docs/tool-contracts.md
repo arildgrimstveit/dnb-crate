@@ -185,12 +185,12 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 ## `start_set_render`
 
 - Input: `{ setPlanId, outputFormat?: "flac", edgeFadeMs?, allowLowConfidence?, allowExcessiveTempo? }`
-- Returns immediately with a job id. Poll `get_render_status`. Published output is 24-bit FLAC.
+- Returns immediately with a job id. Poll `get_render_status`. Full renders write a 24-bit master (`outputRootRelativePath`) and a 16-bit listen FLAC named from the plan (`listenRootRelativePath`).
 - Errors: `SET_PLAN_NOT_FOUND`, `INVALID_SET_PLAN`, `FFMPEG_UNAVAILABLE`. Strict plans also refuse if `readyForAudition` is false.
 
 ## `get_render_status` / `list_render_jobs`
 
-- Status includes `outputRootRelativePath` when succeeded (never an absolute path)
+- Status includes `outputRootRelativePath` (24-bit master) and `listenRootRelativePath` (16-bit named listen copy) when a full render succeeded. Never absolute paths.
 - Errors: `RENDER_JOB_NOT_FOUND`
 
 ## `cancel_render_job`

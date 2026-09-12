@@ -18,6 +18,8 @@ import {
   RENDER_CHECK_LEVEL_STEP_FAIL_LU,
   RENDER_CHECK_RESIDUAL_FAIL_MS,
   RENDERER_VERSION,
+  LISTEN_RENDER_BIT_DEPTH,
+  listenRenderRelPath,
   analyzerVersionLessThan,
   assertPlaybackRate,
   clampMixPresetParams,
@@ -55,6 +57,7 @@ import {
   requireAlignedFfmpeg,
   requireFfmpeg,
   renderMix,
+  encodeListenFlac,
   applyAlignmentOffset,
   planAlignmentOffsetMs,
   mixTagsFromTracklist,
@@ -1082,6 +1085,34 @@ export class RenderCoordinator {
             `Output duration ${mix.durationMs}ms differs from plan ${planned}ms by ${delta}ms (tolerance 1000ms).`,
           );
           manifest.warnings = warnings;
+        }
+        if (this.jobs.findById(job.id)?.status !== "cancelled") {
+          this.jobs.updateProgress(job.id, 0.96, "listen-encode");
+          const listenRel = listenRenderRelPath(stored.plan.name, job.id);
+          const listenAbs = path.resolve(this.config.outputRoot, listenRel);
+          if (!isPathInsideRoot(listenAbs, path.resolve(this.config.outputRoot))) {
+            warnings.push("Listen path escaped outputRoot; skipped the 16-bit copy.");
+            manifest.warnings = warnings;
+          } else {
+            try {
+              await encodeListenFlac(
+                this.runner,
+                binaries,
+                absOut,
+                listenAbs,
+                controller.signal,
+              );
+              manifest.listenRootRelativePath = listenRel.split(path.sep).join("/");
+              manifest.listenBitDepth = LISTEN_RENDER_BIT_DEPTH;
+            } catch (error) {
+              if (isAbortError(error) || this.jobs.findById(job.id)?.status === "cancelled") {
+                throw error;
+              }
+              const message = error instanceof Error ? error.message : String(error);
+              warnings.push(`Listen encode failed; 24-bit master is intact. ${message}`);
+              manifest.warnings = warnings;
+            }
+          }
         }
       }
       const still = this.jobs.findById(job.id);

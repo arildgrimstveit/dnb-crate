@@ -291,6 +291,12 @@ export {
   renderReadinessSchema,
   startSetRenderInputSchema,
 } from "./render-contracts.ts";
+export {
+  LISTEN_RENDER_BIT_DEPTH,
+  listenRenderFileName,
+  listenRenderRelPath,
+  slugifyRenderName,
+} from "./render-listen.ts";
 export type {
   CompatibleTrack,
   CreateSetPlanInput,

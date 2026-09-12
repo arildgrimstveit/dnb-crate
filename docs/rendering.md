@@ -1,6 +1,6 @@
 # Rendering
 
-The renderer prints a plan. It does not re-pick tracks. Output is a gapless **24-bit 48 kHz FLAC**. Source files are never modified. Files go under `outputRoot`.
+The renderer prints a plan. It does not re-pick tracks. A full render writes two FLACs under `outputRoot`: a **24-bit 48 kHz master** named with the job id, and a **16-bit 48 kHz listen** copy named from the plan. Source files are never modified.
 
 ## FFmpeg
 
@@ -24,7 +24,7 @@ Each entry gets `gainDb = clamp(medianLufs − trackLufs, −6, +3)`, then a fur
 | `bass_swap` | Mid/high crossfade; lows swap at the handover bar. |
 | `crossfade` | Single equal-power `acrossfade` (`hsin`). |
 
-Overlap is the planned phrase (8 / 16 / 32 bars at the pair tempo). Intermediate pairwise joins write float WAV; the published file is 24-bit FLAC.
+Overlap is the planned phrase (8 / 16 / 32 bars at the pair tempo). Intermediate pairwise joins write float WAV. The master is 24-bit FLAC (`renders/{jobId}.flac`). After that, a dithered 16-bit listen FLAC is written as `renders/{plan-name}.flac`. Checksums, `render:check`, and hour feedback stay on the master. Previews stay in `cache/previews/` and do not get a listen copy. Re-rendering a plan with the same name overwrites that listen file.
 
 ## Alignment and tempo
 
@@ -38,6 +38,6 @@ Output duration must match the plan within 1000 ms.
 
 ## Jobs
 
-`render:start` / `create_transition_preview` return a job id. Poll `get_render_status`. Read the manifest after `succeeded`.
+`render:start` / `create_transition_preview` return a job id. Poll `get_render_status`. After a full render succeeds, play `listenRootRelativePath` and keep `outputRootRelativePath` as the master. Read the manifest after `succeeded`.
 
 `render:check --id JOB` looks for interior silence, window-in-silence, stored-grid residual > 40 ms on aligned joins, planned LUFS steps > 3 LU, and hour duration error > 1 s.
