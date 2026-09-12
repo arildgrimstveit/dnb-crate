@@ -44,6 +44,7 @@ export type RenderJobParams = {
   barCount?: 8 | 16 | 32;
   allowLowConfidence?: boolean;
   allowExcessiveTempo?: boolean;
+  allowOverlongDuration?: boolean;
 };
 
 export type StoredRenderJob = RenderJob & {

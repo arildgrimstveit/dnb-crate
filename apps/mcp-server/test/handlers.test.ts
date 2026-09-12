@@ -41,7 +41,7 @@ describe("MCP tool handlers", () => {
     }
   });
 
-  it("lists Stage 1 tools and round-trips scan, search, resource read, and metadata update", async () => {
+  it("lists tools and round-trips scan, search, resource read, and metadata update", async () => {
     const workspace = await tempWorkspace();
     const runtime = createCatalogRuntime(workspace.config);
     closers.push(() => runtime.close());
@@ -77,6 +77,7 @@ describe("MCP tool handlers", () => {
         "create_transition_preview",
         "delete_set_plan",
         "find_compatible_tracks",
+        "get_transition_preferences",
         "get_analysis_report",
         "get_analysis_status",
         "get_enrichment_report",
@@ -90,9 +91,15 @@ describe("MCP tool handlers", () => {
         "get_track",
         "get_track_analysis",
         "get_track_sections",
+        "list_approved_recipes",
+        "list_hour_feedback",
+        "record_hour_feedback",
+        "list_transition_feedback",
         "list_render_jobs",
         "list_set_plans",
         "plan_transition",
+        "rate_transition",
+        "select_track_evidence",
         "scan_library",
         "search_tracks",
         "set_cue_points",
@@ -212,6 +219,7 @@ describe("MCP tool handlers", () => {
       name: "create_set_plan",
       arguments: {
         name: "MCP liquid",
+        qualityPolicy: "off", // Transport fixture has tags, not accepted beatgrid evidence.
         targetDurationMs: 600_000,
         startTrackId: start,
         endTrackId: ending,
@@ -265,6 +273,7 @@ describe("MCP tool handlers", () => {
       startTrackId: start,
       endTrackId: ending,
       seed: 1,
+      qualityPolicy: "off",
     });
     const firstEntry = created.plan.entries[0];
     expect(firstEntry?.transitionToNext?.id).toBeDefined();

@@ -1,15 +1,16 @@
 {
-  "name": "Peak hour v5",
+  "name": "Peak hour",
   "targetDurationMs": 3600000,
-  "targetBpm": 174,
-  "seed": 6,
+  "seed": 1,
   "artistRepeatSpacing": 2,
   "dropAnchored": true,
+  "qualityPolicy": "strict",
   "requestedArc": [
     { "atFraction": 0, "targetEnergy": 6 },
     { "atFraction": 0.65, "targetEnergy": 9 },
     { "atFraction": 1, "targetEnergy": 7 }
   ],
+  "preferredMoods": ["peak-time"],
   "descriptors": {
     "energy": { "minPct": 70 },
     "danceability": { "minPct": 60 }

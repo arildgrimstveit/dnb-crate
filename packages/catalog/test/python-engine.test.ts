@@ -89,6 +89,29 @@ describe("analysis merger and python adapter", () => {
     expect(merged.suggestedCues[0]?.positionMs).toBe(1500);
     expect(merged.sections[0]?.type).toBe("drop");
     expect(merged.downbeatConfidence).toBeGreaterThan(0);
+    expect(merged.descriptors?.tempoEvidence?.agreement).toBeDefined();
+    expect(merged.downbeatConfidence).toBe(merged.tempoStability);
+  });
+
+  it("does not require DSP phase agreement to keep sidecar downbeat confidence", () => {
+    const rhythm: AnalyzerResult = {
+      ...dspStub(),
+      analyzerName: "beat-this",
+      downbeatTimesMs: [690, 2069, 3448, 4827],
+      descriptors: null,
+    };
+    const dsp = dspStub();
+    const merged = mergeAnalyzerResults(rhythm, dsp);
+    expect(merged.descriptors?.tempoEvidence?.agreement).toBeLessThan(1);
+    expect(merged.downbeatConfidence).toBeGreaterThan(0.5);
+    expect(merged.downbeatConfidence).not.toBe(
+      Number(
+        (
+          (merged.descriptors?.tempoEvidence?.stability ?? 0) *
+          (merged.descriptors?.tempoEvidence?.agreement ?? 0)
+        ).toFixed(3),
+      ),
+    );
   });
 
   it("maps canned sidecar JSON through a fake process runner", async () => {

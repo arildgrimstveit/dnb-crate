@@ -1,6 +1,8 @@
 import type { CatalogService } from "@dnb-crate/catalog";
 import {
   APP_NAME,
+  recordHourFeedbackSchema,
+  listHourFeedbackSchema,
   APP_VERSION,
   analysisJobSchema,
   analysisReportDataSchema,
@@ -29,6 +31,8 @@ import {
   getSetPlanInputSchema,
   getTrackAnalysisInputSchema,
   getTrackSectionsDataSchema,
+  getTransitionPreferencesDataSchema,
+  getTransitionPreferencesInputSchema,
   getTrackSectionsInputSchema,
   getTrackDataSchema,
   getTrackInputSchema,
@@ -37,17 +41,25 @@ import {
   listEnrichmentJobsDataSchema,
   listRenderJobsDataSchema,
   listRenderJobsInputSchema,
+  listTransitionFeedbackDataSchema,
+  listTransitionFeedbackInputSchema,
+  listApprovedRecipesDataSchema,
+  listApprovedRecipesInputSchema,
   listSetPlansDataSchema,
   listSetPlansInputSchema,
   planTransitionDataSchema,
   planTransitionInputSchema,
   planningReadinessDataSchema,
+  rateTransitionDataSchema,
+  rateTransitionInputSchema,
   publicTrackSchema,
   renderJobSchema,
   renderManifestV1Schema,
   scanLibraryDataSchema,
   scanLibraryInputSchema,
   searchTracksDataSchema,
+  selectTrackEvidenceDataSchema,
+  selectTrackEvidenceInputSchema,
   searchTracksInputSchema,
   serverStatusDataSchema,
   setCuePointsDataSchema,
@@ -81,7 +93,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
       version: APP_VERSION,
       title: "DnB Crate",
       description:
-        "Local drum & bass crate: catalog, set planning, beat-grid analysis, and WAV rendering with equal-power, phrase-mix, and bass-swap templates. Identify tracks and plans by UUID.",
+        "Local drum & bass crate: catalog, set planning, beat-grid analysis, and 24-bit FLAC rendering with equal-power, phrase-mix, and bass-swap templates. Identify tracks and plans by UUID.",
     },
     { capabilities: { tools: {}, resources: {}, prompts: {} } },
   );
@@ -130,7 +142,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Search tracks",
       description:
-        "Search and filter catalogued tracks. Use for questions like “find my Technimatic tracks” or BPM/rating/mood filters. Results are bounded (max 50) and paginated with an opaque cursor. Do not use this to read raw audio or filesystem paths.",
+        "Search and filter catalogued tracks. Use for artist/title queries or BPM/rating/mood filters. Results are bounded (max 50) and paginated with an opaque cursor. Do not use this to read raw audio or filesystem paths.",
       inputSchema: searchTracksInputSchema,
       outputSchema: toolResultSchema(searchTracksDataSchema),
       annotations: { readOnlyHint: true, idempotentHint: true },
@@ -490,7 +502,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Create set plan",
       description:
-        "Generate and persist a deterministic ordered set plan from structured constraints (duration, energy arc, start/end tracks, moods, seed). Translate natural language into these fields first. Returns the plan, score explanations, and validation. Does not render audio. May return a partial plan if the library is too small.",
+        "Generate and persist a deterministic ordered set plan from structured constraints (requested duration, energy arc, start/end tracks, moods, seed, requiredTransitions). Pass targetDurationMinutes or targetDurationMs for the length the user asked for; default 60 minutes only when they omit a length. Translate natural language into these fields first. New plans use strict quality: unexplained risky/unknown/crossfade joins are refused unless a required exception or applicable accepted recipe covers the pair. Pass qualityPolicy off only when the user asks for a draft. Returns the plan, score explanations, validation, and quality report. Does not render audio. May return a partial plan if the library is too small.",
       inputSchema: createSetPlanInputSchema,
       outputSchema: toolResultSchema(createSetPlanDataSchema),
       annotations: { readOnlyHint: false, idempotentHint: false },
@@ -508,6 +520,87 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
           );
         }
         return toolSuccess(created, warnings);
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "rate_transition",
+    {
+      title: "Rate transition",
+      description:
+        "Append a listen rating for an exact recipe fingerprint or track pair. Never overwrites an older rating.",
+      inputSchema: rateTransitionInputSchema,
+      outputSchema: toolResultSchema(rateTransitionDataSchema),
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    (input) => {
+      try {
+        const rated = service.rateTransition(input);
+        return toolSuccess({ id: rated.id, recipeFingerprint: rated.recipeFingerprint, createdAt: rated.createdAt });
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_transition_feedback",
+    {
+      title: "List transition feedback",
+      description: "List stored transition ratings. Historical notes keep their original wording.",
+      inputSchema: listTransitionFeedbackInputSchema,
+      outputSchema: toolResultSchema(listTransitionFeedbackDataSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    },
+    (input) => {
+      try {
+        return toolSuccess(service.listTransitionFeedback(input));
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_transition_preferences",
+    {
+      title: "Get transition preferences",
+      description: "Summarize like/dislike counts and the deterministic planner bonus for a recipe or pair.",
+      inputSchema: getTransitionPreferencesInputSchema,
+      outputSchema: toolResultSchema(getTransitionPreferencesDataSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    },
+    (input) => {
+      try {
+        return toolSuccess(service.getTransitionPreferences(input));
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "select_track_evidence",
+    {
+      title: "Select track evidence",
+      description:
+        "Choose the rhythm, structure, or key engine for one track. Null keeps the DSP default. Does not re-analyze the crate.",
+      inputSchema: selectTrackEvidenceInputSchema,
+      outputSchema: toolResultSchema(selectTrackEvidenceDataSchema),
+      annotations: { readOnlyHint: false, idempotentHint: true },
+    },
+    (input) => {
+      try {
+        const selected = service.selectTrackEvidence(input);
+        return toolSuccess({
+          trackId: selected.trackId,
+          rhythmEngine: selected.rhythmEngine,
+          structureEngine: selected.structureEngine,
+          keyEngine: selected.keyEngine,
+        });
       } catch (error) {
         return toolFailure(error);
       }
@@ -538,7 +631,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Validate set plan",
       description:
-        "Return errors, warnings, duration delta, energy-arc diagnostics, and render-readiness (FFmpeg, fingerprints, trims). Use after create or update. Errors mean the plan is not structurally valid; renderReadiness.ready must be true before start_set_render.",
+        "Return errors, warnings, duration delta, energy-arc diagnostics, render-readiness, and the per-join quality report (harmonic class, fallback reasons, recipe status, readyForAudition). Use after create or update. Errors mean the plan is not structurally valid; qualityChecksPassed is independent of structural validity; renderReadiness.ready must be true before start_set_render.",
       inputSchema: validateSetPlanInputSchema,
       outputSchema: toolResultSchema(validateSetPlanDataSchema),
       annotations: { readOnlyHint: true, idempotentHint: true },
@@ -595,6 +688,48 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
   );
 
   server.registerTool(
+    "record_hour_feedback",
+    { title: "Record whole-hour feedback", description: "Record the user's explicit whole-hour verdict and original words against an exact full render/checksum. Never infer per-join ratings.", inputSchema: recordHourFeedbackSchema, annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true} },
+    (input) => { try { return toolSuccess(service.recordHourFeedback(input)); } catch (error) { return toolFailure(error); } },
+  );
+  server.registerTool(
+    "list_hour_feedback",
+    { title: "List whole-hour feedback", description: "Read artifact-specific whole-hour verdicts, newest first. Changed plans and new renders do not inherit these verdicts.", inputSchema: listHourFeedbackSchema, annotations: {readOnlyHint: true} },
+    ({renderJobId}) => { try { return toolSuccess({feedback: service.listHourFeedback(renderJobId)}); } catch (error) { return toolFailure(error); } },
+  );
+  server.registerTool(
+    "list_approved_recipes",
+    {
+      title: "List approved recipes",
+      description:
+        "List stored accepted/protected recipes so a named join can be resolved to track IDs and an optional recipeId for requiredTransitions.",
+      inputSchema: listApprovedRecipesInputSchema,
+      outputSchema: toolResultSchema(listApprovedRecipesDataSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    },
+    ({ outgoingTrackId, incomingTrackId }) => {
+      try {
+        const recipes = service.listApprovedRecipes(outgoingTrackId, incomingTrackId).map((row) => ({
+          id: row.id,
+          status: row.status,
+          outgoingTrackId: row.payload.outgoingTrackId,
+          incomingTrackId: row.payload.incomingTrackId,
+          outgoingTitle: row.outgoingTitle,
+          incomingTitle: row.incomingTitle,
+          note: row.note,
+          createdAt: row.createdAt,
+          type: row.payload.type,
+          barCount: row.payload.barCount,
+          phraseShape: row.payload.phraseShape,
+        }));
+        return toolSuccess({ recipes });
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "delete_set_plan",
     {
       title: "Delete set plan",
@@ -618,7 +753,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Create transition preview",
       description:
-        "Queue a 30–60 second WAV preview around one planned transition. Optional template phrase_mix or bass_swap (default: the plan’s type). Identical previews are cached by content hash. Low-confidence grids cannot enter aligned previews unless allowLowConfidence is true.",
+        "Queue a 30–60 second FLAC preview around one planned transition. Optional template phrase_mix or bass_swap (default: the plan’s type). Identical previews are cached by content hash. Low-confidence grids cannot enter aligned previews unless allowLowConfidence is true.",
       inputSchema: createTransitionPreviewInputSchema,
       outputSchema: toolResultSchema(renderJobSchema),
       annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false },
@@ -638,18 +773,19 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Start set render",
       description:
-        "Validate a saved set plan and queue a full WAV render. Phrase-mix and bass-swap use beat-aligned templates; crossfade remains equal-power. Returns a job id immediately. Poll get_render_status. WAV only. Pass allowLowConfidence / allowExcessiveTempo to override analysis and ±3% rate bounds.",
+        "Validate a saved set plan and queue a full 24-bit FLAC render. Phrase-mix and bass-swap use beat-aligned templates; crossfade remains equal-power. Returns a job id immediately. Poll get_render_status. Pass allowLowConfidence / allowExcessiveTempo to override analysis and ±3% rate bounds. Pass allowOverlongDuration when the only blockers are duration / the hour audition window.",
       inputSchema: startSetRenderInputSchema,
       outputSchema: toolResultSchema(renderJobSchema),
       annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false },
     },
-    async ({ setPlanId, edgeFadeMs, allowLowConfidence, allowExcessiveTempo }) => {
+    async ({ setPlanId, edgeFadeMs, allowLowConfidence, allowExcessiveTempo, allowOverlongDuration }) => {
       try {
         const started = await service.startSetRender({
           setPlanId,
           edgeFadeMs,
           allowLowConfidence,
           allowExcessiveTempo,
+          allowOverlongDuration,
         });
         return toolSuccess(started.job, started.warnings);
       } catch (error) {
@@ -887,19 +1023,18 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
           role: "user" as const,
           content: {
             type: "text" as const,
-            text: `The user wants a drum & bass set from their local crate.
+            text: `The user wants a drum & bass set from their local folder.
 
 Brief:
 ${request}
 
 Workflow:
-1. Call get_planning_readiness if metadata may be incomplete. Optionally start_track_analysis for selected UUIDs or scope stale/unanalyzed with engines ["dnb-crate-dsp"] and poll get_analysis_status. Inspect get_track_analysis / get_track_sections.
-2. Use search_tracks to resolve named tracks to UUIDs (never filesystem paths). Filter on energy, sub-bass, and brightness when the brief is sonic.
-3. Call create_set_plan with structured fields only: name, targetDurationMs, targetBpm, requestedArc, preferredMoods/Subgenres/Artists, descriptors {energy,danceability,valence,acousticness,melodicness,subBass,brightness} each {min,max} 0–1 and optional minPct/maxPct (crate p10/p50/p90), genres include/exclude, dropAnchored, startTrackId/endTrackId, artistRepeatSpacing, seed. preferredMoods match manual moods, or mood presets (liquid, peak-time, dark, …) when moods are empty. The planner scores join level/structure/alignment/harmony with one-step lookahead, chooses phrase_mix/bass_swap/landing from relative section energy, locks same-integer Peak chains at 174 (do not average a later 176 to 175), tempo-matches only when the pair is already off, and uses an 8s crossfade on tempo mismatch or a missing grid. Playable windows are drop-anchored mix-ins and phrase-boundary mix-outs for Peak and Liquid (depth, not intro-start pads). Example briefs: docs/examples/peak-hour-v5.brief.json and liquid-hour-v5.brief.json.
-4. Call validate_set_plan. If there are errors or important warnings, call update_set_plan with explicit entry edits.
-5. For a pair you want to override: plan_transition, then update_set_plan.applyTransition (keeps the outgoing start so the proposal applies). Use create_transition_preview or create_cue_preview to audition. Low-confidence grids must not be treated as facts unless the user sets allowLowConfidence.
-6. start_set_render. Poll get_render_status; read get_render_manifest when succeeded (includes downbeatOffsetMs, alignmentMode, and per-band automation).
-7. Summarize the tracklist with timeline times, why tracks were scored in, remaining warnings, and render job id.
+1. Call get_planning_readiness if metadata may be incomplete. Optionally start_track_analysis for unanalyzed/stale tracks with engines ["dnb-crate-dsp"] and poll get_analysis_status.
+2. Use search_tracks to resolve named tracks to UUIDs (never filesystem paths).
+3. Call create_set_plan with structured fields only: name, targetDurationMinutes or targetDurationMs, requestedArc, preferredMoods/Subgenres/Artists, descriptors, genres include/exclude, dropAnchored, artistRepeatSpacing, seed. Pass the user's requested length (20 minutes, 90 minutes, etc.). Default to 60 minutes only when they do not say. Default qualityPolicy is strict. Omit targetBpm so each overlap beatmatches at the pair tempo. Pass targetBpm only for an explicit mix-wide tempo lock. Do not pin historical pairs or recipes unless the user asks.
+4. Call validate_set_plan and read quality (qualityChecksPassed, readyForAudition, per-join harmonicClass and fallbackReason).
+5. start_set_render. Poll get_render_status; read get_render_manifest when succeeded.
+6. Summarize the tracklist with timeline times, remaining warnings, quality flags, and render job id.
 
 Do not invent BPM, key, energy, or cue points. Analysis is advisory. Provenance is manual > published > analyzed > tag. Playback-rate changes stay within ±3% unless allowExcessiveTempo.`,
           },

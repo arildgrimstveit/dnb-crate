@@ -6,6 +6,8 @@ import {
   DEFAULT_RENDER_SAMPLE_RATE_HZ,
   DomainError,
   FFMPEG_ARGV_SOFT_LIMIT,
+  overlapOnlyPlayableMs,
+  resolveRateRegions,
 } from "@dnb-crate/domain";
 
 import type { FfmpegBinaries } from "./detect.ts";
@@ -18,11 +20,13 @@ import {
   redactInvocation,
   type FilterTrim,
   type MixTransitionSpec,
+  type StretchScope,
 } from "./filter-graph.ts";
 import { sha256File } from "./hash.ts";
 import { buildFfmetadataFile, type MixOutputTags } from "./output-tags.ts";
 import { parseEbur128, parseOutTimeMs, parseSilenceSpans } from "./parse.ts";
 import { probeAudioFile } from "./probe.ts";
+import { prepareCliStretchedSegments, prepareBothJoinRegions } from "./rubberband-cli.ts";
 import type { ProcessRunner } from "./runner.ts";
 
 export type MixSegment = {
@@ -31,6 +35,8 @@ export type MixSegment = {
   sourceEndMs: number;
   gainDb: number;
   playbackRate?: number;
+  /** Solo isolate: stretch this many output milliseconds at the tail. */
+  stretchTailMs?: number;
 };
 
 export type MixRequest = {
@@ -46,6 +52,25 @@ export type MixRequest = {
   postProcess?: boolean;
   /** When false, skip the graph alimiter (intermediate pairwise joins). */
   applyLimiter?: boolean;
+  /** Intermediate hour joins use float so a hot sum cannot hard-clip in 24-bit. */
+  pcmCodec?: "pcm_s24le" | "pcm_f32le";
+  /** When false, keep the outgoing prefix in the 3-band graph. Hours play a dry prefix and acrossfade one bar onto a primed 3-band mix. */
+  isolatePrefix?: boolean;
+  /**
+   * `rubberband-r3` (default when `rubberbandCliPath` is set): standalone R3 CLI.
+   * `rubberband`: FFmpeg filter (`27` settings, flickers on Like a Memory).
+   * `atempo`: fallback.
+   */
+  tempoEngine?: "rubberband" | "rubberband-r3" | "atempo";
+  /** Standalone Rubber Band 4 CLI (`-3` / fine). When set, preferred over the FFmpeg filter. */
+  rubberbandCliPath?: string | null;
+  /**
+   * `overlap` (default): featured body stays at rate 1; Rubber Band only on the join.
+   * `all` is the pre-6.10 whole-window stretch.
+   */
+  stretchScope?: StretchScope;
+  /** v7: prepare every source's head and tail before pairwise accumulation. */
+  rateRegionsVersion?: 2;
   transitions?: MixTransitionSpec[];
   /** Mix-level tags for the published FLAC. Source-file tags are never copied. */
   outputMetadata?: MixOutputTags;
@@ -121,6 +146,7 @@ function toTrims(segments: MixSegment[]): FilterTrim[] {
     endSec: segment.sourceEndMs / 1000,
     gainDb: segment.gainDb,
     playbackRate: segment.playbackRate ?? 1,
+    stretchTailSec: segment.stretchTailMs != null ? segment.stretchTailMs / 1000 : undefined,
   }));
 }
 
@@ -155,9 +181,17 @@ export async function renderMix(
     }
     const rate =
       segment.playbackRate !== undefined && segment.playbackRate > 0 ? segment.playbackRate : 1;
-    const playableOut = playable / rate;
     const overlapLeft = i > 0 ? request.overlapMs[i - 1]! : 0;
     const overlapRight = i < request.overlapMs.length ? request.overlapMs[i]! : 0;
+    const playableOut =
+      request.rateRegionsVersion === 2
+        ? resolveRateRegions(playable, rate, overlapLeft, overlapRight).at(-1)!.outputEndMs
+        : overlapOnlyPlayableMs({
+            sourceMs: playable,
+            rate,
+            overlapToNextMs: i === 0 ? overlapRight : 0,
+            overlapFromPrevMs: overlapLeft,
+          });
     if (playableOut <= overlapLeft || (overlapRight > 0 && playableOut <= overlapRight)) {
       throw new DomainError(
         "INVALID_SET_PLAN",
@@ -166,30 +200,37 @@ export async function renderMix(
     }
   }
 
+  if (request.rateRegionsVersion === 2) {
+    if (!request.rubberbandCliPath) throw new Error("Head/body/tail rendering requires the accepted R3 CLI");
+    await mkdir(path.dirname(request.outputPath), { recursive: true });
+    const prepared = await prepareBothJoinRegions(runner, binaries, request.rubberbandCliPath, request, request.sampleRateHz ?? DEFAULT_RENDER_SAMPLE_RATE_HZ);
+    try {
+      const result = await renderMix(runner, binaries, { ...request, segments: prepared.segments, rateRegionsVersion: undefined, stretchScope: "all" });
+      const expected = request.segments.reduce((sum, segment, i) => sum + resolveRateRegions(segment.sourceEndMs - segment.sourceStartMs, segment.playbackRate ?? 1, request.overlapMs[i - 1] ?? 0, request.overlapMs[i] ?? 0).at(-1)!.outputEndMs, 0) - request.overlapMs.reduce((a, b) => a + b, 0);
+      return { ...result, expectedDurationMs: Math.round(expected), warnings: [...prepared.warnings, ...result.warnings], invocation: `${prepared.invocation} ; ${result.invocation}` };
+    } finally {
+      await Promise.all(prepared.tempPaths.map(removeIfPresent));
+    }
+  }
   if (needsPairwise(request) && request.segments.length > 2) {
     return await renderPairwise(runner, binaries, request);
   }
 
+  await mkdir(path.dirname(request.outputPath), { recursive: true });
   const sampleRateHz = request.sampleRateHz ?? DEFAULT_RENDER_SAMPLE_RATE_HZ;
   const overlapSeconds = request.overlapMs.map((ms) => ms / 1000);
-  const trims = toTrims(request.segments);
-  const expectedMs = expectedDurationMs(trims, overlapSeconds);
+  const stretchScope = request.stretchScope ?? "overlap";
+  const expectedMs = expectedDurationMs(toTrims(request.segments), overlapSeconds, stretchScope);
   const limiterAmplitude = limiterAmplitudeFromCeilingDb(request.truePeakCeilingDb);
   const edge = request.edgeFadeMs ?? 0;
   const warnings: string[] = [];
-  const filter = buildMixFilter({
-    trims,
-    overlapSeconds,
-    limiterAmplitude,
-    sampleRateHz,
-    edgeFadeSeconds: edge > 0 ? { fadeIn: edge / 1000, fadeOut: edge / 1000 } : undefined,
-    transitions: request.transitions,
-    hasAfadeUnity: binaries.hasAfadeUnity,
-    warnings,
-    applyLimiter: request.applyLimiter,
-  });
-
-  await mkdir(path.dirname(request.outputPath), { recursive: true });
+  const stretchTemps: string[] = [];
+  const useCli =
+    Boolean(request.rubberbandCliPath) &&
+    request.tempoEngine !== "atempo" &&
+    request.tempoEngine !== "rubberband";
+  let mixSegments = request.segments;
+  let cliInvocation = "";
   const partialPath = `${request.outputPath}.partial.wav`;
   const filterPath = `${request.outputPath}.filter.txt`;
   const useScript = binaries.hasFilterComplexScript;
@@ -203,10 +244,58 @@ export async function renderMix(
   };
 
   try {
+    if (useCli && request.rubberbandCliPath) {
+      const prepared = await prepareCliStretchedSegments(
+        runner,
+        binaries,
+        request.rubberbandCliPath,
+        {
+          segments: request.segments,
+          overlapMs: request.overlapMs,
+          outputPath: request.outputPath,
+          stretchScope,
+          abortSignal: request.abortSignal,
+        },
+        sampleRateHz,
+      );
+      mixSegments = prepared.segments;
+      stretchTemps.push(...prepared.tempPaths);
+      warnings.push(...prepared.warnings);
+      cliInvocation = prepared.invocation;
+    } else if (
+      request.tempoEngine !== "atempo" &&
+      !request.rubberbandCliPath &&
+      request.segments.some((segment) => (segment.playbackRate ?? 1) !== 1)
+    ) {
+      warnings.push(
+        "Standalone Rubber Band R3 CLI was not found; using the FFmpeg rubberband filter.",
+      );
+    }
+    const trims = toTrims(mixSegments);
+    const filter = buildMixFilter({
+      trims,
+      overlapSeconds,
+      limiterAmplitude,
+      sampleRateHz,
+      edgeFadeSeconds: edge > 0 ? { fadeIn: edge / 1000, fadeOut: edge / 1000 } : undefined,
+      transitions: request.transitions,
+      hasAfadeUnity: binaries.hasAfadeUnity,
+      warnings,
+      applyLimiter: request.applyLimiter,
+      isolatePrefix: request.isolatePrefix,
+      tempoEngine: useCli
+        ? "atempo"
+        : (request.tempoEngine === "rubberband-r3"
+          ? "rubberband"
+          : (request.tempoEngine ?? (binaries.hasRubberband ? "rubberband" : "atempo"))),
+      stretchScope: useCli ? "all" : stretchScope,
+    });
+    invocation = cliInvocation;
+
     if (useScript) {
       await writeFile(filterPath, filter, "utf8");
     }
-    const inputArgs = request.segments.flatMap((segment) => ["-i", segment.filePath]);
+    const inputArgs = mixSegments.flatMap((segment) => ["-i", segment.filePath]);
     const args = [
       "-nostdin",
       "-hide_banner",
@@ -223,7 +312,7 @@ export async function renderMix(
       "-ar",
       String(sampleRateHz),
       "-c:a",
-      "pcm_s24le",
+      request.pcmCodec ?? "pcm_s24le",
       "-vn",
       "-map_metadata",
       "-1",
@@ -232,7 +321,9 @@ export async function renderMix(
     if (estimateArgvChars(args) > FFMPEG_ARGV_SOFT_LIMIT && request.segments.length > 2) {
       return await renderPairwise(runner, binaries, request);
     }
-    invocation = redactInvocation(binaries.ffmpegPath, args);
+    invocation = cliInvocation
+      ? `${cliInvocation} ; ${redactInvocation(binaries.ffmpegPath, args)}`
+      : redactInvocation(binaries.ffmpegPath, args);
     const mixRun = await runner.run({
       executable: binaries.ffmpegPath,
       args,
@@ -441,6 +532,9 @@ export async function renderMix(
     throw error;
   } finally {
     await removeIfPresent(filterPath);
+    for (const tempPath of stretchTemps) {
+      await removeIfPresent(tempPath);
+    }
   }
 }
 
@@ -557,6 +651,7 @@ async function renderPairwise(
         edgeFadeMs: i === request.segments.length - 1 ? request.edgeFadeMs : 0,
         postProcess: i === request.segments.length - 1,
         applyLimiter: i === request.segments.length - 1,
+        pcmCodec: i === request.segments.length - 1 ? "pcm_s24le" : "pcm_f32le",
         onProgress: (fraction) => {
           const overall = (i - 1 + fraction) / (request.segments.length - 1);
           request.onProgress?.(overall);
@@ -588,6 +683,7 @@ async function renderPairwise(
       expectedDurationMs: expectedDurationMs(
         toTrims(request.segments),
         request.overlapMs.map((ms) => ms / 1000),
+        request.stretchScope ?? "overlap",
       ),
     };
   } finally {

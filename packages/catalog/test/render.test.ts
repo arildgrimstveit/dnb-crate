@@ -84,7 +84,7 @@ function saveTwoTrackPlan(
           durationMs: 1000,
           outgoingCuePointId: null,
           incomingCuePointId: null,
-          parameters: { purpose: "stage3-test" },
+          parameters: { purpose: "fixture" },
         },
       },
       {
@@ -137,6 +137,14 @@ describe("render jobs", () => {
     expect(checked.ok).toBe(true);
     expect(checked.interiorSilence).toEqual([]);
     expect(checked.joins).toHaveLength(1);
+    const review={renderJobId:done.id,outputChecksum:manifest.outputChecksumSha256,accepted:true,quote:"An accepted fixture hour"};
+    expect(()=>catalog.service.recordHourFeedback({...review,outputChecksum:"0".repeat(64)})).toThrow("checksum");
+    const feedback=catalog.service.recordHourFeedback(review);
+    expect(catalog.service.recordHourFeedback(review).id).toBe(feedback.id);
+    expect(catalog.service.reportSetPlanQuality(plan.id).userAccepted).toBe(true);
+    catalog.service.updateSetPlan({setPlanId:plan.id,setTrim:{entryId:plan.entries[0]!.id,sourceStartMs:100,sourceEndMs:8000}});
+    expect(catalog.service.reportSetPlanQuality(plan.id).userAccepted).toBe(false);
+    expect(catalog.service.listHourFeedback(done.id)[0]?.accepted).toBe(true);
   });
 
   it("rejects a changed fingerprint until rescan", async () => {
@@ -324,5 +332,48 @@ describe("render jobs", () => {
     expect(manifest.tracks[1]?.alignmentPeriodMs).toBeCloseTo(barMs, 5);
     expect(manifest.automation?.some((event) => event.target === "outgoing_mid")).toBe(true);
     expect(manifest.rendererVersion).toBe(RENDERER_VERSION);
+    const rating = catalog.service.rateTransition({ renderJobId: done.id, transitionId: manifest.tracks[0]!.transitionId!, note: "Exact heard join" });
+    expect(rating.recipeFingerprint).toMatch(/^v2:[a-f0-9]{64}$/);
+    expect(rating.outgoingTrackId).toBe(manifest.tracks[0]!.trackId);
+    expect(rating.overall).toBe("not_assessed");
+    expect(() => catalog.service.rateTransition({ renderJobId: done.id, transitionId: manifest.tracks[0]!.transitionId!, outgoingTrackId: "wrong" })).toThrow("disagree");
+    expect(manifest.joinEvidence).toHaveLength(1);
+    expect(manifest.joinEvidence?.[0]?.outgoingBeatsMs.length).toBeGreaterThan(0);
+    const checked = await catalog.service.checkRender(done.id);
+    expect(checked.joins[0]?.evidenceSource).toBe("frozen-manifest");
+    expect(checked.joins[0]?.residualKind).toBe("stored-grid-consistency");
+    catalog.analyses.upsert({
+      trackId: alpha.id,
+      analyzerName: DSP_ANALYZER_NAME,
+      analyzerVersion: DSP_ANALYZER_VERSION,
+      bpm: 174,
+      bpmConfidence: 0.9,
+      bpmRaw: 174,
+      beatTimesMs: [80, 425, 769, 1114],
+      downbeatTimesMs: [80, barMs + 80],
+      gridRejected: false,
+      gridRejectionReason: null,
+      musicalKey: "Fm",
+      keyConfidence: 0.7,
+      keyMode: "minor",
+      camelotKey: "4A",
+      tempoStability: 0.8,
+      downbeatConfidence: 0.8,
+      integratedLufs: null,
+      truePeakDb: null,
+      lowBandEnergy: null,
+      midBandEnergy: null,
+      highBandEnergy: null,
+      waveformSummary: null,
+      beatAnchorMs: null,
+      descriptors: null,
+      engineRuntimeMs: 1,
+      analyzedAt: now,
+      suggestedCues: [],
+      sections: [],
+    });
+    const again = await catalog.service.checkRender(done.id);
+    expect(again.joins[0]?.storedGridResidualMs).toBe(checked.joins[0]?.storedGridResidualMs);
+    expect(again.joins[0]?.evidenceSource).toBe("frozen-manifest");
   });
 });

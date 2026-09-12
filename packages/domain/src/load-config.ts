@@ -130,6 +130,9 @@ export function loadConfig(options: ConfigLoadOptions = {}): AppConfig {
   if (env.DNB_CRATE_FFPROBE_PATH) {
     merged.ffprobePath = env.DNB_CRATE_FFPROBE_PATH;
   }
+  if (env.DNB_CRATE_RUBBERBAND_PATH) {
+    merged.rubberbandPath = env.DNB_CRATE_RUBBERBAND_PATH;
+  }
   if (env.DNB_CRATE_SUPPORTED_EXTENSIONS) {
     try {
       const parsed: unknown = JSON.parse(env.DNB_CRATE_SUPPORTED_EXTENSIONS);
@@ -179,5 +182,8 @@ export function loadConfig(options: ConfigLoadOptions = {}): AppConfig {
     outputRoot: resolvePathValue(parsed.data.outputRoot, cwd),
     libraryRoots: parsed.data.libraryRoots.map((root) => resolvePathValue(root, cwd)),
     supportedExtensions: parsed.data.supportedExtensions.map((ext) => ext.toLowerCase()),
+    rubberbandPath: parsed.data.rubberbandPath
+      ? resolvePathValue(parsed.data.rubberbandPath, cwd)
+      : undefined,
   };
 }

@@ -28,7 +28,7 @@ export const startTrackAnalysisInputSchema = z
         "ids (default) uses trackIds; planningReady / unanalyzed / stale / all select from the catalog.",
       ),
     engines: z
-      .array(z.enum(["dnb-crate-dsp", "beat-this", "allin1"]))
+      .array(z.enum(["dnb-crate-dsp", "beat-this", "allin1", "keyfinder", "essentia-key"]))
       .min(1)
       .max(3)
       .optional()

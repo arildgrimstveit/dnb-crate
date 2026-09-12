@@ -58,6 +58,7 @@ describe("loadConfig", () => {
       env: {
         DNB_CRATE_LOG_LEVEL: "warn",
         DNB_CRATE_LIBRARY_ROOTS: JSON.stringify(["./records"]),
+        DNB_CRATE_RUBBERBAND_PATH: "./tools/rubberband.exe",
       },
     });
 
@@ -65,6 +66,7 @@ describe("loadConfig", () => {
     expect(config.databasePath).toBe(path.resolve(cwd, "data/db.sqlite"));
     expect(config.libraryRoots).toEqual([path.resolve(cwd, "records")]);
     expect(config.outputRoot).toBe(path.resolve(cwd, "output"));
+    expect(config.rubberbandPath).toBe(path.resolve(cwd, "tools/rubberband.exe"));
   });
 
   it("overlays AcoustID key and enrichment contact from the environment", () => {

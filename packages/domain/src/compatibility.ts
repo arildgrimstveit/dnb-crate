@@ -6,7 +6,7 @@ import {
 } from "./descriptor-filters.ts";
 import { normalizeGenre } from "./genres.ts";
 import { normalizePersonName } from "./identity.ts";
-import { camelotDistance, camelotNumberDistance } from "./keys.ts";
+import { camelotNumberDistance, harmonicMixScore, harmonicRelation } from "./keys.ts";
 import type { EnergyDirection, ScoreBreakdown, ScoreComponents } from "./planning.ts";
 import type { Track } from "./track.ts";
 
@@ -39,6 +39,7 @@ export type ScoreContext = {
   sourceGridOk?: boolean;
   candidateKeyConfidence?: number | null;
   sourceKeyConfidence?: number | null;
+  feedbackBonus?: number;
   candidateDropBars?: number | null;
   sourceQuietTail?: boolean;
   candidateGenres?: string[];
@@ -113,12 +114,8 @@ function harmonicScore(
   if (importance <= 0) {
     return 0;
   }
-  const distance = camelotNumberDistance(sourceKey, candidateKey) ?? camelotDistance(sourceKey, candidateKey);
-  if (distance === null) {
-    return 0;
-  }
-  const raw =
-    distance === 0 ? 1 : distance === 1 ? 0.85 : distance === 2 ? 0.45 : distance === 3 ? 0.15 : 0;
+  const relation = harmonicRelation(sourceKey, candidateKey);
+  const raw = harmonicMixScore(relation, camelotNumberDistance(sourceKey, candidateKey));
   return raw * clamp01(importance) * Math.min(clamp01(sourceConf), clamp01(candidateConf));
 }
 
@@ -283,6 +280,7 @@ export function scoreCandidate(
     joinAligned: joinAlignedRaw * weights.joinAligned,
     joinHarmonic: joinHarmonicRaw * weights.joinHarmonic,
     genrePrior: genrePriorRaw * weights.genrePrior,
+    feedback: (ctx.feedbackBonus ?? 0) * weights.feedback,
   };
 
   const total = Object.values(components).reduce((sum, value) => sum + value, 0);

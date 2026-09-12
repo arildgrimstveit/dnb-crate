@@ -7,6 +7,12 @@ import { migration005AnalysisV2 } from "./migrations/005_analysis_v2.ts";
 import { migration006PublishedProvenance } from "./migrations/006_published_provenance.ts";
 import { migration007GridSource } from "./migrations/007_grid_source.ts";
 import { migration008CrateV3 } from "./migrations/008_crate_v3.ts";
+import { migration009SelectedEvidence } from "./migrations/009_selected_evidence.ts";
+import { migration010Feedback } from "./migrations/010_feedback.ts";
+import { migration011ApprovedRecipes } from "./migrations/011_approved_recipes.ts";
+import { migration012PlanningConstraints } from "./migrations/012_planning_constraints.ts";
+import { migration013HourFeedback } from "./migrations/013_hour_feedback.ts";
+import { migration014HourFeedbackHistory } from "./migrations/014_hour_feedback_history.ts";
 
 export type Migration = {
   id: number;
@@ -24,6 +30,12 @@ const MIGRATIONS: Migration[] = [
   migration006PublishedProvenance,
   migration007GridSource,
   migration008CrateV3,
+  migration009SelectedEvidence,
+  migration010Feedback,
+  migration011ApprovedRecipes,
+  migration012PlanningConstraints,
+  migration013HourFeedback,
+  migration014HourFeedbackHistory,
 ];
 
 export function runMigrations(db: SqliteDatabase): void {

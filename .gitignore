@@ -38,6 +38,12 @@ private/
 
 # Optional Python sidecar
 tools/analyzer-py/.venv/
+# Local Rubber Band CLI (GPL utility, downloaded for stretch A/Bs)
+tools/rubberband-cli/
+# Local KeyFinder build (vcpkg + libkeyfinder + CLI)
+tools/vcpkg/
+tools/libkeyfinder/
+tools/keyfinder-cli/
 __pycache__/
 
 # Emitted JS next to TypeScript sources (tsx runs .ts)

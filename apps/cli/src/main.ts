@@ -5,7 +5,10 @@ import {
   APP_NAME,
   APP_VERSION,
   createSetPlanInputSchema,
+  listTransitionFeedbackInputSchema,
   loadConfig,
+  rateTransitionInputSchema,
+  selectTrackEvidenceInputSchema,
   type AnalysisEngineId,
   type Logger,
 } from "@dnb-crate/domain";
@@ -59,11 +62,14 @@ Commands:
   analysis:cue-preview --track-id UUID [--cue drop]
   transition:plan --from UUID --to UUID [--type phrase_mix|bass_swap|crossfade|any] [--bars 16|32]
   transition:validate --from UUID --to UUID --type phrase_mix|bass_swap|crossfade
-  plan:create --name TEXT [--duration-ms N] [--seed N] [--end-query TEXT]
+  plan:create --name TEXT [--duration-min N | --duration-ms N] [--seed N] [--end-query TEXT]
   plan:create --brief-json FILE
   plan:clone --id UUID --name TEXT [--replan]
   plan:list
   plan:get --id UUID
+  plan:quality --id UUID
+  hour:feedback --id RENDER_UUID --checksum SHA256 --accepted true|false --quote TEXT
+  hour:history [--id RENDER_UUID]
   plan:validate --id UUID
   render:start --plan-id UUID [--wait] [--edge-fade-ms N] [--allow-low-confidence] [--allow-excessive-tempo]
   render:preview --plan-id UUID --transition-id UUID [--wait] [--template crossfade|phrase_mix|bass_swap]
@@ -72,6 +78,9 @@ Commands:
   render:cancel --id UUID --confirm
   render:manifest --id UUID
   render:check --id UUID
+  feedback:rate --json FILE
+  feedback:list [--from UUID] [--to UUID] [--fingerprint TEXT]
+  analysis:select-evidence --track-id UUID [--rhythm ENGINE] [--key ENGINE] [--reason TEXT]
 
 ${APP_NAME} ${APP_VERSION}
 `;
@@ -358,7 +367,8 @@ async function main(): Promise<void> {
         if (!name) {
           throw new Error("plan:create requires --name or --brief-json");
         }
-        const durationRaw = option(args, "--duration-ms");
+        const durationMsRaw = option(args, "--duration-ms");
+        const durationMinRaw = option(args, "--duration-min");
         const seedRaw = option(args, "--seed");
         const endQuery = option(args, "--end-query");
         let endTrackId: string | undefined;
@@ -366,9 +376,13 @@ async function main(): Promise<void> {
           const hits = runtime.service.searchTracks({ query: endQuery, limit: 1 });
           endTrackId = hits.tracks[0]?.id;
         }
+        if (durationMsRaw !== undefined && durationMinRaw !== undefined) {
+          throw new Error("plan:create accepts --duration-min or --duration-ms, not both");
+        }
         const created = runtime.service.createSetPlan({
           name,
-          targetDurationMs: durationRaw === undefined ? undefined : Number(durationRaw),
+          targetDurationMs: durationMsRaw === undefined ? undefined : Number(durationMsRaw),
+          targetDurationMinutes: durationMinRaw === undefined ? undefined : Number(durationMinRaw),
           seed: seedRaw === undefined ? undefined : Number(seedRaw),
           endTrackId,
         });
@@ -399,7 +413,34 @@ async function main(): Promise<void> {
         if (!id) {
           throw new Error("plan:get requires --id");
         }
-        printJson({ ok: true, data: runtime.service.getSetPlan(id) });
+        printJson({
+          ok: true,
+          data: {
+            plan: runtime.service.getSetPlan(id),
+            quality: runtime.service.reportSetPlanQuality(id),
+          },
+        });
+        break;
+      }
+      case "plan:quality": {
+        const id = option(args, "--id");
+        if (!id) {
+          throw new Error("plan:quality requires --id");
+        }
+        printJson({ ok: true, data: runtime.service.reportSetPlanQuality(id) });
+        break;
+      }
+      case "hour:feedback": {
+        const renderJobId = option(args, "--id");
+        const outputChecksum = option(args, "--checksum");
+        const quote = option(args, "--quote");
+        const accepted = option(args, "--accepted");
+        if (!renderJobId || !outputChecksum || !quote || !["true", "false"].includes(accepted ?? "")) throw new Error("hour:feedback requires --id --checksum --quote --accepted true|false");
+        printJson({ok: true, data: runtime.service.recordHourFeedback({renderJobId, outputChecksum, quote, accepted: accepted === "true"})});
+        break;
+      }
+      case "hour:history": {
+        printJson({ok: true, data: runtime.service.listHourFeedback(option(args, "--id"))});
         break;
       }
       case "plan:validate": {
@@ -483,6 +524,49 @@ async function main(): Promise<void> {
           throw new Error("render:manifest requires --id");
         }
         printJson({ ok: true, data: runtime.service.getRenderManifest(id) });
+        break;
+      }
+      case "feedback:rate": {
+        const jsonPath = option(args, "--json");
+        if (!jsonPath) {
+          throw new Error("feedback:rate requires --json");
+        }
+        const parsed = rateTransitionInputSchema.safeParse(JSON.parse(readFileSync(jsonPath, "utf8")));
+        if (!parsed.success) {
+          throw new Error(
+            `feedback:rate --json is invalid: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`,
+          );
+        }
+        printJson({ ok: true, data: runtime.service.rateTransition(parsed.data) });
+        break;
+      }
+      case "feedback:list": {
+        const parsed = listTransitionFeedbackInputSchema.safeParse({
+          outgoingTrackId: option(args, "--from"),
+          incomingTrackId: option(args, "--to"),
+          recipeFingerprint: option(args, "--fingerprint"),
+        });
+        if (!parsed.success) {
+          throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
+        }
+        printJson({ ok: true, data: runtime.service.listTransitionFeedback(parsed.data) });
+        break;
+      }
+      case "analysis:select-evidence": {
+        const trackId = option(args, "--track-id");
+        if (!trackId) {
+          throw new Error("analysis:select-evidence requires --track-id");
+        }
+        const parsed = selectTrackEvidenceInputSchema.safeParse({
+          trackId,
+          rhythmEngine: option(args, "--rhythm") ?? null,
+          keyEngine: option(args, "--key") ?? null,
+          reason: option(args, "--reason"),
+        });
+        if (!parsed.success) {
+          throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
+        }
+        printJson({ ok: true, data: runtime.service.selectTrackEvidence(parsed.data) });
         break;
       }
       case "render:check": {

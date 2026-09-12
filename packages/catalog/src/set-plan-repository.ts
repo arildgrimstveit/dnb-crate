@@ -15,6 +15,10 @@ type PlanRow = {
   explanation_json: string;
   created_at: string;
   updated_at: string;
+  rate_regions_version: number | null;
+  handoff_policy: string | null;
+  quality_policy: string | null;
+  planning_constraints_json: string | null;
 };
 
 type EntryRow = {
@@ -52,8 +56,9 @@ export class SetPlanRepository {
         .prepare(
           `INSERT INTO set_plans (
             id, schema_version, name, target_duration_ms, target_bpm, requested_arc_json,
-            seed, explanation_json, created_at, updated_at
-          ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+            seed, explanation_json, created_at, updated_at, rate_regions_version, handoff_policy,
+            quality_policy, planning_constraints_json
+          ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             target_duration_ms = excluded.target_duration_ms,
@@ -61,7 +66,11 @@ export class SetPlanRepository {
             requested_arc_json = excluded.requested_arc_json,
             seed = excluded.seed,
             explanation_json = excluded.explanation_json,
-            updated_at = excluded.updated_at`,
+            updated_at = excluded.updated_at,
+            rate_regions_version = excluded.rate_regions_version,
+            handoff_policy = excluded.handoff_policy,
+            quality_policy = excluded.quality_policy,
+            planning_constraints_json = excluded.planning_constraints_json`,
         )
         .run(
           plan.id,
@@ -73,6 +82,10 @@ export class SetPlanRepository {
           JSON.stringify(explanation),
           createdAt,
           timestamp,
+          plan.rateRegionsVersion ?? null,
+          plan.handoffPolicy ?? null,
+          plan.qualityPolicy ?? null,
+          plan.planningConstraints ? JSON.stringify(plan.planningConstraints) : null,
         );
       const stmt = this.db.prepare(
         `INSERT INTO set_plan_entries (
@@ -124,6 +137,12 @@ export class SetPlanRepository {
         entries: entries.map(mapEntry),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        rateRegionsVersion: row.rate_regions_version === 2 || row.rate_regions_version === 1 ? row.rate_regions_version : undefined,
+        handoffPolicy: "dj-continuity-v1",
+        qualityPolicy: row.quality_policy === "strict" || row.quality_policy === "off" ? row.quality_policy : undefined,
+        planningConstraints: row.planning_constraints_json
+          ? (JSON.parse(row.planning_constraints_json) as SetPlanV1["planningConstraints"])
+          : undefined,
       },
     };
   }

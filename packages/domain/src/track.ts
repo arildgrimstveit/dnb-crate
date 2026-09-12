@@ -2,7 +2,13 @@ export type BpmSource = "tag" | "manual" | "analyzed" | "published";
 export type KeySource = "tag" | "manual" | "analyzed" | "published";
 export type FieldSource = "tag" | "published" | "manual";
 export type AnalysisStatus = "not_analyzed" | "pending" | "complete" | "failed";
-export type AnalysisEngineId = "dnb-crate-dsp" | "dnb-crate-envelope" | "beat-this" | "allin1";
+export type AnalysisEngineId =
+  | "dnb-crate-dsp"
+  | "dnb-crate-envelope"
+  | "beat-this"
+  | "allin1"
+  | "keyfinder"
+  | "essentia-key";
 
 export type Track = {
   id: string;

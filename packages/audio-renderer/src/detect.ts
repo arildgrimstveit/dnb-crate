@@ -11,6 +11,7 @@ export type FfmpegBinaries = {
   hasEbur128: boolean;
   hasAlimiter: boolean;
   hasAtempo: boolean;
+  hasRubberband: boolean;
   hasLowpass: boolean;
   hasHighpass: boolean;
   hasAsplit: boolean;
@@ -44,6 +45,7 @@ export function parseFilterList(text: string): {
   hasEbur128: boolean;
   hasAlimiter: boolean;
   hasAtempo: boolean;
+  hasRubberband: boolean;
   hasLowpass: boolean;
   hasHighpass: boolean;
   hasAsplit: boolean;
@@ -57,6 +59,7 @@ export function parseFilterList(text: string): {
     hasEbur128: lower.includes("ebur128"),
     hasAlimiter: lower.includes("alimiter"),
     hasAtempo: lower.includes("atempo"),
+    hasRubberband: lower.includes("rubberband"),
     hasLowpass: lower.includes("lowpass"),
     hasHighpass: lower.includes("highpass"),
     hasAsplit: lower.includes("asplit"),

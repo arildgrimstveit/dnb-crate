@@ -3,6 +3,7 @@ import { silentLogger } from "@dnb-crate/domain";
 import {
   createFakeFfmpegRunner,
   createNodeProcessRunner,
+  resolveRubberbandCli,
   type ProcessRunner,
 } from "@dnb-crate/audio-renderer";
 
@@ -15,12 +16,17 @@ import type { HttpClient } from "./enrichment/http-client.ts";
 import { EnrichmentJobRepository } from "./enrichment-job-repository.ts";
 import { EnrichmentRepository } from "./enrichment-repository.ts";
 import { TrackRepository } from "./repository.ts";
+import { FeedbackRepository } from "./feedback-repository.ts";
+import { HourFeedbackRepository } from "./hour-feedback-repository.ts";
+import { ApprovedRecipeRepository } from "./approved-recipe-repository.ts";
 import { CatalogService } from "./service.ts";
 import { RenderJobRepository } from "./render-job-repository.ts";
 import { RenderCoordinator } from "./render/coordinator.ts";
 import { SetPlanRepository } from "./set-plan-repository.ts";
 
 export type CatalogRuntimeOptions = {
+  /** Do not recover or start background jobs for planning/reporting commands. */
+  passive?: boolean;
   processRunner?: ProcessRunner;
   /** When true, skip FFmpeg detection at startup by injecting the in-process fake. */
   useFakeFfmpeg?: boolean;
@@ -63,6 +69,9 @@ export function createCatalogRuntime(
     analyses,
     runner,
     logger,
+    options.useFakeFfmpeg || options.processRunner
+      ? null
+      : resolveRubberbandCli(config.rubberbandPath),
   );
   const analysis = new AnalysisCoordinator(
     config,
@@ -87,12 +96,16 @@ export function createCatalogRuntime(
       intervals: options.enrichmentIntervals,
     },
   );
+  if (!options.passive) {
   renders.recoverInterrupted();
   analysis.recoverInterrupted();
   enrichment.recoverInterrupted();
   renders.kick();
   analysis.kick();
   enrichment.kick();
+  }
+  const feedback = new FeedbackRepository(db);
+  const recipes = new ApprovedRecipeRepository(db);
   const service = new CatalogService(
     config,
     repository,
@@ -101,8 +114,13 @@ export function createCatalogRuntime(
     analysis,
     analyses,
     enrichment,
+    feedback,
+    recipes,
     logger,
+    new HourFeedbackRepository(db),
   );
+  renders.validateFullPlan = (setPlanId, options) =>
+    service.assertPlanReadyForRender(setPlanId, options);
   return {
     db,
     repository,
@@ -125,12 +143,25 @@ export { runMigrations } from "./migrate.ts";
 export { TrackRepository } from "./repository.ts";
 export { CatalogService } from "./service.ts";
 export type { RenderCheckResult, RenderCheckJoin } from "./render/coordinator.ts";
+export {
+  diagnoseOverlapAudio,
+  diagnoseRenderedMix,
+} from "./render/audio-diagnostics.ts";
+export {
+  evaluateDurationError,
+  freezeJoinEvidence,
+  storedGridFromEvidence,
+  storedGridResidualMs,
+} from "./render/check-metrics.ts";
 export { SetPlanRepository } from "./set-plan-repository.ts";
 export { RenderJobRepository } from "./render-job-repository.ts";
 export { AnalysisRepository } from "./analysis-repository.ts";
+export { FeedbackRepository } from "./feedback-repository.ts";
+export { ApprovedRecipeRepository } from "./approved-recipe-repository.ts";
 export { AnalysisJobRepository } from "./analysis-job-repository.ts";
 export { draftSetPlan } from "./planning/planner.ts";
 export { validateSetPlan } from "./planning/validate.ts";
+export { reportSetPlanQuality } from "./planning/quality.ts";
 export { planTransition, validateTransition } from "./planning/transition-planner.ts";
 export { walkLibrary } from "./scanner.ts";
 export { isPathInsideRoot, isPathInsideAnyRoot, relativeToRoots } from "./paths.ts";

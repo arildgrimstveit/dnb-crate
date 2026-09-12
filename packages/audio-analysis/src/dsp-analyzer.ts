@@ -6,6 +6,8 @@ import {
   MIN_ANALYSIS_CONFIDENCE,
   normalizeDnbBpm,
   publishedBpmTolerance,
+  publishedReferenceCandidates,
+  resolvePublishedReferenceBpm,
   snapToNearestBeat,
   type TrackSection,
 } from "@dnb-crate/domain";
@@ -18,7 +20,7 @@ import { emptyDescriptors } from "./types.ts";
 
 const NFFT = 2048;
 const HOP = 512;
-/** Fitted 2026-09-02 on synthetic click/DnB/sine/noise. Crate review 2026-09-03 kept these weights (see docs/decisions.md). Re-run tools/scripts/calibrate-confidence.mts after onset/tempo changes. */
+/** Fitted on synthetic click/DnB/sine/noise. Re-run tools/scripts/calibrate-confidence.mts after onset/tempo changes. */
 const TEMPO_LOGISTIC_BIAS = -1.6;
 const TEMPO_LOGISTIC_W_PROMINENCE = 1.0;
 const TEMPO_LOGISTIC_W_STABILITY = 3.2;
@@ -495,6 +497,46 @@ function tryRatioFold(
     gridRejectionReason: nextReason,
     tempoEvidence: nextEvidence,
   };
+}
+
+function outOfRangePartnerBeats(
+  onset: number[],
+  hopMs: number,
+  bpm: number,
+  minBpm: number,
+  maxBpm: number,
+): boolean {
+  const current = scoreReferenceTempo(onset, hopMs, bpm);
+  for (const partner of [bpm * (2 / 3), bpm * (3 / 2)]) {
+    if (partner >= minBpm - 1e-6 && partner <= maxBpm + 1e-6) {
+      continue;
+    }
+    const scored = scoreReferenceTempo(onset, hopMs, partner);
+    if (scored.confidence > current.confidence + 1e-6) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function uniqueTempos(values: number[]): number[] {
+  const found = new Map<number, number>();
+  for (const value of values) {
+    if (!(value > 0) || !Number.isFinite(value)) {
+      continue;
+    }
+    const key = Number(value.toFixed(3));
+    if (!found.has(key)) {
+      found.set(key, value);
+    }
+  }
+  return [...found.values()];
+}
+
+function publishedAgreesWithFree(publishedBpm: number, freeBpm: number): boolean {
+  return publishedReferenceCandidates(publishedBpm).some(
+    (candidate) => Math.abs(candidate - freeBpm) <= publishedBpmTolerance(candidate),
+  );
 }
 
 function trackBeats(
@@ -1079,25 +1121,88 @@ export const dspAnalyzer: AudioAnalyzer = {
       bpmConfidence = Math.max(bpmConfidence, MIN_ANALYSIS_CONFIDENCE);
       gridSource = "analyzed";
     }
-    const referenceBpm = options.referenceBpm;
-    const tolerance =
-      referenceBpm != null && referenceBpm > 0 ? publishedBpmTolerance(referenceBpm) : 0.5;
+    const freeRejected = gridRejected;
+    const freeBpm = bpm;
+    const freeConfidence = bpmConfidence;
+    const publishedTag = options.referenceBpm;
+    const halfFold =
+      publishedTag != null && publishedTag > 0
+        ? resolvePublishedReferenceBpm(publishedTag, minBpm, maxBpm)
+        : null;
+    const lockCandidates =
+      publishedTag != null && publishedTag > 0
+        ? uniqueTempos([
+            ...publishedReferenceCandidates(publishedTag, minBpm, maxBpm),
+            halfFold?.bpm ?? publishedTag,
+            publishedTag,
+          ])
+        : [];
+    const primaryLock = halfFold?.bpm ?? publishedTag ?? null;
+    const primaryTolerance =
+      primaryLock != null && primaryLock > 0 ? publishedBpmTolerance(primaryLock) : 0.5;
     const disagrees =
-      referenceBpm != null && bpm != null && Math.abs(bpm - referenceBpm) > tolerance;
-    if (referenceBpm != null && referenceBpm > 0 && (gridRejected || disagrees)) {
-      const ref = scoreReferenceTempo(tempoOnset, tempoHopMs, referenceBpm);
-      const refConf = Number(ref.confidence.toFixed(3));
-      if (refConf >= MIN_ANALYSIS_CONFIDENCE) {
-        bpm = referenceBpm;
+      primaryLock != null && bpm != null && Math.abs(bpm - primaryLock) > primaryTolerance;
+    const keepPassingFree =
+      !freeRejected &&
+      freeBpm != null &&
+      freeBpm >= minBpm &&
+      freeBpm <= maxBpm &&
+      (freeConfidence ?? 0) >= MIN_ANALYSIS_CONFIDENCE;
+    const keepAgreedNearMiss =
+      freeBpm != null &&
+      freeBpm >= minBpm &&
+      freeBpm <= maxBpm &&
+      (freeConfidence ?? 0) >= 0.45 &&
+      publishedTag != null &&
+      publishedAgreesWithFree(publishedTag, freeBpm);
+    const ratioConfused = (gridRejectionReason ?? "").includes("2/3–3/2");
+    if (publishedTag != null && publishedTag > 0 && (gridRejected || disagrees)) {
+      const scoredLocks = lockCandidates.map((candidate) => ({
+        bpm: candidate,
+        ...scoreReferenceTempo(tempoOnset, tempoHopMs, candidate),
+      }));
+      const inRangeLocks = scoredLocks
+        .filter(
+          (row) =>
+            row.bpm >= minBpm - 1e-6 &&
+            row.bpm <= maxBpm + 1e-6 &&
+            !outOfRangePartnerBeats(tempoOnset, tempoHopMs, row.bpm, minBpm, maxBpm),
+        )
+        .sort((a, b) => b.confidence - a.confidence);
+      const bestLock = inRangeLocks[0] ?? scoredLocks.sort((a, b) => b.confidence - a.confidence)[0];
+      const refConf = Number((bestLock?.confidence ?? 0).toFixed(3));
+      const lockBpm = bestLock?.bpm ?? primaryLock;
+      if (
+        bestLock &&
+        refConf >= MIN_ANALYSIS_CONFIDENCE &&
+        !keepPassingFree &&
+        !keepAgreedNearMiss &&
+        !ratioConfused
+      ) {
+        bpm = lockBpm;
         bpmConfidence = refConf;
-        gridOffsetMs = ref.offsetMs;
+        gridOffsetMs = bestLock.offsetMs;
         gridRejected = false;
         gridRejectionReason = null;
         gridSource = "reference";
-        tempoEvidence = attachAgreement(ref.tempoEvidence, bpm);
+        tempoEvidence = attachAgreement(bestLock.tempoEvidence, bpm);
+      } else if (keepAgreedNearMiss || keepPassingFree) {
+        gridRejected = false;
+        gridRejectionReason = null;
+        bpm = freeBpm;
+        bpmConfidence = keepAgreedNearMiss
+          ? Math.max(freeConfidence ?? 0, MIN_ANALYSIS_CONFIDENCE)
+          : freeConfidence;
+        gridSource = "analyzed";
       } else {
         gridRejected = true;
-        gridRejectionReason = `Reference tempo ${referenceBpm} does not fit onsets (confidence ${refConf.toFixed(2)})`;
+        const label =
+          lockBpm != null && halfFold?.foldedFrom != null
+            ? `${halfFold.foldedFrom}→${lockBpm}`
+            : lockBpm != null && publishedTag !== lockBpm
+              ? `${publishedTag}→${lockBpm}`
+              : String(lockBpm ?? publishedTag);
+        gridRejectionReason = `Reference tempo ${label} does not fit onsets (confidence ${refConf.toFixed(2)})`;
         bpm = null;
       }
     }

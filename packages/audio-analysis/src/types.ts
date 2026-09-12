@@ -47,7 +47,7 @@ export type AnalyzeOptions = {
   beatAnchorMs?: number | null;
   dnbBpmMin?: number;
   dnbBpmMax?: number;
-  /** Published/manual canonical BPM. Fits phase only; never writes canonical values. */
+  /** Published/manual BPM. Folded into 160–190 before the lock; never writes canonical values. */
   referenceBpm?: number | null;
 };
 

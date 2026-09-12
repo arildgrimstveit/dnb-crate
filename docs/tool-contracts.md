@@ -1,4 +1,4 @@
-# Tool contracts (Stage 1–4)
+# Tool contracts
 
 All tools return the application envelope:
 
@@ -125,10 +125,11 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `create_set_plan`
 
-- Input: name, optional duration/BPM/arc/required/excluded/preferences/start/end/seed, `descriptors` 0–1 ranges, `genres` include/exclude
-- Output: `{ plan, explanation, validation, partial }`
+- Input: name, optional `targetDurationMinutes` or `targetDurationMs` (default 60 minutes; 1 minute–8 hours), BPM/arc/required/excluded/preferences/start/end/seed, `descriptors` 0–1 ranges, `genres` include/exclude, `qualityPolicy`, `requiredTransitions`
+- Output: `{ plan, explanation, validation, partial, quality }`
 - Errors: `TRACK_NOT_FOUND` when a required/start/end id is not eligible
 - Hard-rejects `NO_ANALYSIS`, `DESCRIPTOR_OUT_OF_RANGE`, `GENRE_EXCLUDED`, `DUPLICATE_RECORDING`
+- New plans default to `qualityPolicy: "strict"`. Joins always use continuity windows, supported sequential, and timing version 2.
 
 ## `get_set_plan` / `list_set_plans`
 
@@ -149,7 +150,31 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 ## `validate_set_plan`
 
 - Errors: `SET_PLAN_NOT_FOUND`
-- Output also includes optional `renderReadiness` (FFmpeg presence, fingerprint mismatches, unreadable files, trims shorter than the planned crossfade)
+- Output also includes optional `renderReadiness` (FFmpeg presence, fingerprint mismatches, unreadable files, trims shorter than the planned crossfade) and the per-join `quality` report (`readyForAudition`, harmonic class, fallback reasons, recipe status)
+
+## `list_approved_recipes`
+
+- Input: optional `outgoingTrackId`, `incomingTrackId`
+- Output: accepted/protected recipes with titles, type, bars, and shape
+
+## `record_hour_feedback`
+
+- Input: `{ renderJobId, outputChecksum, quote, accepted }`
+- Append-only. Scoped to that full render and plan content hash. Repeating the latest identical verdict is idempotent
+
+## `list_hour_feedback`
+
+- Input: optional `renderJobId`
+- Newest first. Changed plans and new renders do not inherit verdicts
+
+## `rate_transition` / `list_transition_feedback` / `get_transition_preferences`
+
+- Append-only pair/recipe listen ratings and the deterministic planner bonus
+
+## `select_track_evidence`
+
+- Input: `{ trackId, rhythmEngine?, structureEngine?, keyEngine?, reason? }`
+- Null keeps the DSP default. Does not re-analyse the crate
 
 ## `create_transition_preview`
 
@@ -160,8 +185,8 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 ## `start_set_render`
 
 - Input: `{ setPlanId, outputFormat?: "flac", edgeFadeMs?, allowLowConfidence?, allowExcessiveTempo? }`
-- Returns immediately with a job id. Poll `get_render_status`.
-- Errors: `SET_PLAN_NOT_FOUND`, `INVALID_SET_PLAN`, `FFMPEG_UNAVAILABLE`
+- Returns immediately with a job id. Poll `get_render_status`. Published output is 24-bit FLAC.
+- Errors: `SET_PLAN_NOT_FOUND`, `INVALID_SET_PLAN`, `FFMPEG_UNAVAILABLE`. Strict plans also refuse if `readyForAudition` is false.
 
 ## `get_render_status` / `list_render_jobs`
 

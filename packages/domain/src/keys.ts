@@ -195,6 +195,92 @@ export function keyAgreement(
   return "clash";
 }
 
+export type HarmonicRelation = "same" | "relative" | "adjacent_same_mode" | "other" | "unknown";
+
+export const MIN_HARMONIC_CONFIDENCE = 0.5;
+
+/** Shared Camelot mixing relation. Unknown is not compatible. */
+export function harmonicRelation(left: string | null, right: string | null): HarmonicRelation {
+  if (!left || !right) {
+    return "unknown";
+  }
+  const a = normalizeKey(left);
+  const b = normalizeKey(right);
+  if (!a || !b) {
+    return "unknown";
+  }
+  if (a.camelotKey === b.camelotKey) {
+    return "same";
+  }
+  const pa = parseCamelot(a.camelotKey);
+  const pb = parseCamelot(b.camelotKey);
+  if (!pa || !pb) {
+    return "unknown";
+  }
+  const numberDist = Math.min((pa.number - pb.number + 12) % 12, (pb.number - pa.number + 12) % 12);
+  if (numberDist === 0) {
+    return "relative";
+  }
+  if (numberDist === 1 && pa.letter === pb.letter) {
+    return "adjacent_same_mode";
+  }
+  return "other";
+}
+
+export function isConservativeHarmonic(relation: HarmonicRelation): boolean {
+  return relation === "same" || relation === "relative" || relation === "adjacent_same_mode";
+}
+
+export function harmonicClass(relation: HarmonicRelation): "compatible" | "risky" | "unknown" {
+  if (relation === "unknown") {
+    return "unknown";
+  }
+  return isConservativeHarmonic(relation) ? "compatible" : "risky";
+}
+
+export function harmonicMixScore(relation: HarmonicRelation, numberDistance: number | null): number {
+  if (relation === "same") {
+    return 1;
+  }
+  if (relation === "relative" || relation === "adjacent_same_mode") {
+    return 0.85;
+  }
+  if (relation === "unknown" || numberDistance == null) {
+    return 0;
+  }
+  if (numberDistance === 1) {
+    return 0.45;
+  }
+  if (numberDistance === 2) {
+    return 0.15;
+  }
+  return 0;
+}
+
+export function isConfidentKeyClash(input: {
+  leftKey: string | null;
+  rightKey: string | null;
+  leftConfidence: number | null;
+  rightConfidence: number | null;
+  plannedBars?: number | null;
+}): boolean {
+  if ((input.leftConfidence ?? 0) < MIN_HARMONIC_CONFIDENCE) {
+    return false;
+  }
+  if ((input.rightConfidence ?? 0) < MIN_HARMONIC_CONFIDENCE) {
+    return false;
+  }
+  const relation = harmonicRelation(input.leftKey, input.rightKey);
+  const numberDist = camelotNumberDistance(input.leftKey, input.rightKey);
+  if (relation !== "other" || numberDist == null || numberDist < 3) {
+    return false;
+  }
+  if (input.plannedBars != null && input.plannedBars < 16) {
+    return false;
+  }
+  return true;
+}
+
 export function camelotDistance(left: string | null, right: string | null): number | null {
   if (left === null || right === null) {
     return null;

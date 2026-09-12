@@ -176,7 +176,7 @@ describe("downbeat alignment", () => {
     expect(Math.abs(aligned.offsetMs - phase)).toBeLessThan(5);
   });
 
-  it("recomputes overlap so outgoing-end fallback does not leave a stale mix-out", () => {
+  it("moves overlap start when outgoing-end fallback corrects phase", () => {
     const overlapMs = 8_000;
     const outgoingEndMs = 180_000;
     const applied = applyAlignmentOffset({
@@ -192,9 +192,31 @@ describe("downbeat alignment", () => {
     expect(applied.movedOutgoingEnd).toBe(true);
     expect(applied.incomingStartMs).toBe(0);
     expect(applied.outgoingEndMs).toBe(180_020);
-    expect(applied.overlapMs).toBe(8_020);
+    expect(applied.overlapMs).toBe(8_000);
     const oldStart = outgoingEndMs - overlapMs;
     const newStart = applied.outgoingEndMs - (applied.overlapMs ?? 0);
-    expect(newStart).toBe(oldStart);
+    expect(newStart).toBe(oldStart + 20);
+  });
+
+  it("compares source phrase periods at unequal rates in output time", () => {
+    const phraseMs = 32 * 60_000 / 174;
+    const aligned = downbeatAlignmentOffsetMs({
+      outgoingDownbeatsMs: [0], incomingDownbeatsMs: [0],
+      outgoingOverlapStartMs: phraseMs * 10,
+      incomingOverlapStartMs: phraseMs * 10 * 1.02,
+      outgoingRate: 1, incomingRate: 1.02, bpm: 174,
+      outgoingPhraseOriginMs: 0, incomingPhraseOriginMs: 0,
+    });
+    expect(aligned.offsetMs).toBe(0);
+  });
+
+  it("converts incoming-source correction before moving the outgoing source", () => {
+    const applied = applyAlignmentOffset({
+      incomingStartMs: 0, incomingEndMs: 180_000,
+      outgoingEndMs: 150_000, offsetMs: -102, periodMs: 1379,
+      incomingRate: 1.02, outgoingRate: 0.98, overlapMs: 8000,
+    });
+    expect(applied.outgoingEndMs).toBe(150_098);
+    expect(applied.overlapMs).toBe(8000);
   });
 });

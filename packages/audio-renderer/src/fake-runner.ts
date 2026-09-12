@@ -117,7 +117,7 @@ export function createFakeFfmpegRunner(
           exitCode: 0,
           signal: null,
           stdout:
-            " ... acrossfade\n ... ebur128\n ... alimiter\n ... aformat\n ... atrim\n ... atempo\n ... lowpass\n ... highpass\n ... asplit\n ... amix\n ... afade\n ... adelay\n",
+            " ... acrossfade\n ... ebur128\n ... alimiter\n ... aformat\n ... atrim\n ... atempo\n ... rubberband\n ... lowpass\n ... highpass\n ... asplit\n ... amix\n ... afade\n ... adelay\n",
           stderr: "",
         };
       }

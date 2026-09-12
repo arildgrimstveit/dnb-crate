@@ -418,6 +418,7 @@ const scoreBreakdownSchema = z.object({
     joinAligned: z.number(),
     joinHarmonic: z.number(),
     genrePrior: z.number(),
+    feedback: z.number().optional(),
   }),
   reasons: z.array(z.string()),
 });
@@ -472,6 +473,32 @@ export const setPlanV1Schema = z.object({
   entries: z.array(setPlanEntrySchema),
   createdAt: z.string(),
   updatedAt: z.string(),
+  rateRegionsVersion: z.union([z.literal(1), z.literal(2)]).optional(),
+  handoffPolicy: z.literal("dj-continuity-v1").optional(),
+  qualityPolicy: z.enum(["strict", "off"]).optional(),
+  planningConstraints: z
+    .object({
+      requiredTransitions: z
+        .array(
+          z.object({
+            outgoingTrackId: trackIdSchema,
+            incomingTrackId: trackIdSchema,
+            recipeId: z.string().uuid().optional(),
+            strength: z.enum(["required", "preferred"]),
+            reuse: z.enum(["pair", "recipe"]),
+            allowQualityException: z.boolean().optional(),
+          }),
+        )
+        .max(40)
+        .optional(),
+      artistRepeatSpacing: z.number().int().min(0).max(10).optional(),
+      startTrackId: trackIdSchema.optional(),
+      endTrackId: trackIdSchema.optional(),
+      requiredTrackIds: z.array(trackIdSchema).optional(),
+      excludedTrackIds: z.array(trackIdSchema).optional(),
+      excludedArtists: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 
 export const createSetPlanInputSchema = z.object({
@@ -482,8 +509,27 @@ export const createSetPlanInputSchema = z.object({
     .min(60_000)
     .max(8 * 60 * 60 * 1000)
     .optional()
-    .describe("Default 3600000 (one hour)"),
-  targetBpm: z.number().positive().max(400).nullable().optional(),
+    .describe(
+      "Requested mix length in milliseconds. Default 3600000 (one hour) when neither this nor targetDurationMinutes is set. Any length from 1 minute to 8 hours.",
+    ),
+  targetDurationMinutes: z
+    .number()
+    .int()
+    .min(1)
+    .max(8 * 60)
+    .optional()
+    .describe(
+      "Requested mix length in minutes. Wins over targetDurationMs when both are set. Default 60 when neither duration field is set.",
+    ),
+  targetBpm: z
+    .number()
+    .positive()
+    .max(400)
+    .nullable()
+    .optional()
+    .describe(
+      "Optional mix-wide tempo lock. Omit so each overlap beatmatches at the pair tempo (outgoing-native when the incoming grid fits). Not a mood default — Peak, Liquid, and other briefs omit this.",
+    ),
   bpmMin: z.number().positive().max(400).optional(),
   bpmMax: z.number().positive().max(400).optional(),
   requestedArc: z
@@ -508,6 +554,10 @@ export const createSetPlanInputSchema = z.object({
     .describe("Minimum other tracks between the same artist. Default 1 (no back-to-back)."),
   harmonicImportance: z.number().min(0).max(1).optional(),
   explorationWeight: z.number().min(0).max(1).optional(),
+  variety: z.object({
+    referencePlanIds: z.array(z.string().uuid()).max(20),
+    strength: z.number().min(0).max(1).optional(),
+  }).optional().describe("Prefer fresh recordings and directed pairs relative to these explicit prior mixes. Soft cost; never bypasses quality or required tracks/pairs. Strength defaults to 0.7. Search drafts are not automatically listening history."),
   startTrackId: trackIdSchema.optional(),
   endTrackId: trackIdSchema.optional(),
   seed: z.number().int().optional().describe("Reproducibility seed. Default 1."),
@@ -519,6 +569,33 @@ export const createSetPlanInputSchema = z.object({
     .boolean()
     .optional()
     .describe("Anchor mix-in so the incoming drop lands at overlap end. Default true."),
+  qualityPolicy: z
+    .enum(["strict", "off"])
+    .optional()
+    .describe(
+      "strict (default for new plans) forbids unexplained risky/unknown/crossfade joins. Pass off only for fixtures or an explicit draft. MCP must not set off unless the user asks for a draft.",
+    ),
+  requiredTransitions: z
+    .array(
+      z.object({
+        outgoingTrackId: trackIdSchema,
+        incomingTrackId: trackIdSchema,
+        recipeId: z
+          .string()
+          .uuid()
+          .optional()
+          .describe("Pin a specific approved recipe when several exist"),
+        strength: z.enum(["required", "preferred"]),
+        reuse: z.enum(["pair", "recipe"]),
+        allowQualityException: z
+          .boolean()
+          .optional()
+          .describe("Only way a required pair may be risky or an unaligned crossfade"),
+      }),
+    )
+    .max(40)
+    .optional()
+    .describe("Reserve incoming tracks and force A→B (and A→B→C) when the outgoing is chosen."),
 });
 
 export const getSetPlanInputSchema = z.object({
@@ -616,6 +693,110 @@ export const validationIssueSchema = z.object({
   trackId: z.string().optional(),
 });
 
+export const joinKeyEvidenceSchema = z.object({
+  musicalKey: z.string().nullable(),
+  camelotKey: z.string().nullable(),
+  source: z.string().nullable(),
+  confidence: z.number(),
+  analyzerName: z.string().nullable(),
+});
+
+export const joinQualityReportSchema = z.object({
+  order: z.number().int(),
+  outgoingTrackId: z.string(),
+  incomingTrackId: z.string(),
+  outgoingTitle: z.string(),
+  incomingTitle: z.string(),
+  outgoingKey: joinKeyEvidenceSchema,
+  incomingKey: joinKeyEvidenceSchema,
+  harmonicRelation: z.enum(["same", "relative", "adjacent_same_mode", "other", "unknown"]),
+  harmonicClass: z.enum(["compatible", "risky", "unknown"]),
+  outgoingSourceStartMs: z.number().int(),
+  outgoingSourceEndMs: z.number().int(),
+  incomingSourceStartMs: z.number().int(),
+  incomingSourceEndMs: z.number().int(),
+  barCount: z.number().int().nullable(),
+  overlapMs: z.number().int(),
+  continuity: z.object({ evidence: z.string(), energyFloor: z.number().nullable(),
+    valleyBars: z.number().nullable(), coexistenceBars: z.number().nullable() }).optional(),
+  phraseShape: z.string().nullable(),
+  sequentialHandoff: z.string().nullable(),
+  intent: z.string().nullable(),
+  type: z.enum(["crossfade", "phrase_mix", "bass_swap", "double_drop"]),
+  fallbackReason: z.string().nullable(),
+  nativeOutgoingBpm: z.number().nullable(),
+  nativeIncomingBpm: z.number().nullable(),
+  joinTargetBpm: z.number().nullable(),
+  planTargetBpm: z.number().nullable(),
+  outgoingRate: z.number(),
+  incomingRate: z.number(),
+  rateRegionsVersion: z.number().nullable(),
+  gridOkOutgoing: z.boolean(),
+  gridOkIncoming: z.boolean(),
+  gridEngineOutgoing: z.string().nullable(),
+  gridEngineIncoming: z.string().nullable(),
+  recipeStatus: z.enum(["applied", "stale", "none", "protected-exception", "adapted"]),
+  constraintSatisfaction: z.enum([
+    "satisfied",
+    "preferred-dropped",
+    "unsatisfied",
+    "adapted",
+    "exception",
+    "none",
+  ]),
+  unexplainedQualityIssue: z.boolean(),
+});
+
+export const planQualityReportSchema = z.object({
+  joins: z.array(joinQualityReportSchema),
+  typeCounts: z.object({
+    crossfade: z.number().int(),
+    phrase_mix: z.number().int(),
+    bass_swap: z.number().int(),
+    double_drop: z.number().int(),
+  }),
+  harmonicCounts: z.object({
+    compatible: z.number().int(),
+    risky: z.number().int(),
+    unknown: z.number().int(),
+  }),
+  durationMs: z.number().int(),
+  durationDeltaMs: z.number().int(),
+  targetDurationMs: z.number().int(),
+  hourAuditionWindow: z
+    .object({
+      minMs: z.number().int(),
+      maxMs: z.number().int(),
+      inWindow: z.boolean(),
+    })
+    .nullable(),
+  artistRepeatSpacingRequested: z.number().int(),
+  artistGaps: z.array(
+    z.object({
+      artist: z.string(),
+      leftOrder: z.number().int(),
+      rightOrder: z.number().int(),
+      gap: z.number().int(),
+    }),
+  ),
+  artistSpacingViolations: z.array(
+    z.object({
+      artist: z.string(),
+      leftOrder: z.number().int(),
+      rightOrder: z.number().int(),
+      gap: z.number().int(),
+    }),
+  ),
+  partial: z.boolean(),
+  partialReasons: z.array(z.string()),
+  unsatisfiedRequiredTransitions: z.array(z.string()).optional(),
+  structurallyValid: z.boolean(),
+  qualityChecksPassed: z.boolean(),
+  readyForAudition: z.boolean(),
+  userAccepted: z.boolean(),
+  qualityPolicy: z.enum(["strict", "off"]).nullable(),
+});
+
 export const validateSetPlanDataSchema = z.object({
   valid: z.boolean(),
   errors: z.array(validationIssueSchema),
@@ -644,9 +825,14 @@ export const validateSetPlanDataSchema = z.object({
       issues: z.array(validationIssueSchema),
     })
     .optional(),
+  quality: planQualityReportSchema.optional(),
 });
 
 export const planExplanationSchema = z.object({
+  openerSearch: z.array(z.object({ openerTrackId: z.string().nullable(), durationMs: z.number() })).optional(),
+  variety: z.object({ referencePlanIds: z.array(z.string()), strength: z.number(),
+    trackIds: z.array(z.string()), pairs: z.array(z.object({ outgoingTrackId: z.string(), incomingTrackId: z.string() })),
+    repeatedTracks: z.number().int(), repeatedPairs: z.number().int() }).optional(),
   seed: z.number(),
   selected: z.array(
     z.object({
@@ -655,6 +841,18 @@ export const planExplanationSchema = z.object({
       artist: z.string().nullable(),
       order: z.number().int(),
       score: scoreBreakdownSchema,
+      lookahead: z.number().optional(),
+      requiredProgress: z.number().optional(),
+      buckets: z
+        .object({
+          moodFit: z.number(),
+          joinQuality: z.number(),
+          keyCoverage: z.number(),
+          timeFit: z.number(),
+          lookahead: z.number(),
+          feedback: z.number(),
+        })
+        .optional(),
     }),
   ),
   rejected: z.array(
@@ -670,6 +868,31 @@ export const planExplanationSchema = z.object({
       totalJoins: z.number().int(),
     })
     .optional(),
+  originalDescriptors: z.unknown().optional(),
+  resolvedDescriptors: z.unknown().optional(),
+  relaxationSteps: z.number().int().optional(),
+  chainRetry: z
+    .object({
+      durationMs: z.number(),
+      partialReasons: z.array(z.string()),
+      missingRequiredTransitions: z.array(z.string()),
+      trackIds: z.array(z.string()),
+      repairSearch: z.unknown().optional(),
+      priorRepairSearch: z.unknown().optional(),
+    })
+    .optional(),
+  repairSearch: z
+    .object({
+      rejectionCounts: z.record(z.string(), z.number().int()),
+      evaluations: z.number().int(),
+      invalid: z.number().int(),
+      limit: z.number().int(),
+      status: z.string(),
+      missingRequired: z.number().int(),
+      durationDistanceMs: z.number().nullable(),
+      musicalScore: z.number().nullable().optional(),
+    })
+    .optional(),
 });
 
 export const createSetPlanDataSchema = z.object({
@@ -677,6 +900,7 @@ export const createSetPlanDataSchema = z.object({
   explanation: planExplanationSchema,
   validation: validateSetPlanDataSchema,
   partial: z.boolean(),
+  quality: planQualityReportSchema,
 });
 
 export const listSetPlansDataSchema = z.object({
@@ -720,6 +944,29 @@ export const setCuePointsDataSchema = z.object({
 
 export const getTrackDataSchema = publicTrackSchema.extend({
   cuePoints: z.array(cuePointSchema),
+});
+
+export const listApprovedRecipesInputSchema = z.object({
+  outgoingTrackId: trackIdSchema.optional(),
+  incomingTrackId: trackIdSchema.optional(),
+});
+
+export const listApprovedRecipesDataSchema = z.object({
+  recipes: z.array(
+    z.object({
+      id: z.string(),
+      status: z.string(),
+      outgoingTrackId: z.string(),
+      incomingTrackId: z.string(),
+      outgoingTitle: z.string().nullable(),
+      incomingTitle: z.string().nullable(),
+      note: z.string().nullable(),
+      createdAt: z.string(),
+      type: z.string(),
+      barCount: z.number(),
+      phraseShape: z.string(),
+    }),
+  ),
 });
 
 export const buildDnbSetPromptArgsSchema = z.object({

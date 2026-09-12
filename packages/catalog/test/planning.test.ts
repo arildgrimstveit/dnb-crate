@@ -1,12 +1,19 @@
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createCatalogRuntime } from "../src/index.ts";
-import { DSP_ANALYZER_NAME, type AppConfig, type SonicDescriptors } from "@dnb-crate/domain";
+import {
+  DSP_ANALYZER_NAME,
+  type AppConfig,
+  type CreateSetPlanInput,
+  type SonicDescriptors,
+} from "@dnb-crate/domain";
+import { relaxDescriptorFilters } from "../src/planning/planner.ts";
 import { validateSetPlan } from "../src/planning/validate.ts";
-import { analysisToTimeline, buildEntries, chooseTransition, type TimelineAnalysis, type TimelineTrack } from "../src/planning/timeline.ts";
+import { analysisToTimeline, buildEntries, chooseTransition, levelMatchGainDb, musicalWindow, planDurationMs, playableOutputMs, type TimelineAnalysis, type TimelineTrack } from "../src/planning/timeline.ts";
 import { planTransition } from "../src/planning/transition-planner.ts";
 import type { SetPlanV1, Track, TrackSection } from "@dnb-crate/domain";
 
@@ -35,6 +42,13 @@ function runtime() {
   const created = createCatalogRuntime(testConfig(root));
   cleanups.push(() => created.close());
   return created;
+}
+
+function createPlan(
+  catalog: ReturnType<typeof runtime>,
+  input: CreateSetPlanInput,
+) {
+  return catalog.service.createSetPlan({ ...input, qualityPolicy: input.qualityPolicy ?? "off" });
 }
 
 function seedTrack(
@@ -79,6 +93,38 @@ function seedTrack(
   return id;
 }
 
+function testSonicDescriptors(
+  descriptors: Partial<SonicDescriptors> & { energy?: number | null } = {},
+): SonicDescriptors {
+  return {
+    integratedLufs: null,
+    shortTermLufsMean: null,
+    shortTermLufsMax: null,
+    truePeakDb: null,
+    subBassRatio: descriptors.subBassRatio ?? 0.5,
+    brightness: descriptors.brightness ?? 0.1,
+    onsetDensity: null,
+    dynamicRange: null,
+    dropIntensity: null,
+    suggestedEnergy:
+      descriptors.suggestedEnergy ??
+      (descriptors.energy != null ? Math.round(1 + 9 * descriptors.energy) : 6),
+    energy: descriptors.energy ?? null,
+    danceability: descriptors.danceability ?? null,
+    acousticness: descriptors.acousticness ?? null,
+    melodicness: descriptors.melodicness ?? null,
+    valence: descriptors.valence ?? null,
+    waveformSummary: [],
+    lowBandEnergy: null,
+    midBandEnergy: null,
+    highBandEnergy: null,
+    chromaVector: null,
+    tempoEvidence: null,
+    audioStartMs: descriptors.audioStartMs,
+    audioEndMs: descriptors.audioEndMs,
+  };
+}
+
 function stubDescriptors(
   catalog: ReturnType<typeof runtime>,
   trackId: string,
@@ -117,29 +163,7 @@ function stubDescriptors(
     highBandEnergy: null,
     waveformSummary: null,
     beatAnchorMs: null,
-    descriptors: {
-      integratedLufs: null,
-      shortTermLufsMean: null,
-      shortTermLufsMax: null,
-      truePeakDb: null,
-      subBassRatio: descriptors.subBassRatio ?? 0.5,
-      brightness: descriptors.brightness ?? 0.1,
-      onsetDensity: null,
-      dynamicRange: null,
-      dropIntensity: null,
-      suggestedEnergy: descriptors.suggestedEnergy ?? (descriptors.energy != null ? Math.round(1 + 9 * descriptors.energy) : 6),
-      energy: descriptors.energy ?? null,
-      danceability: descriptors.danceability ?? null,
-      acousticness: descriptors.acousticness ?? null,
-      melodicness: descriptors.melodicness ?? null,
-      valence: descriptors.valence ?? null,
-      waveformSummary: [],
-      lowBandEnergy: null,
-      midBandEnergy: null,
-      highBandEnergy: null,
-      chromaVector: null,
-      tempoEvidence: null,
-    },
+    descriptors: testSonicDescriptors(descriptors),
     engineRuntimeMs: 1,
     analyzedAt: new Date().toISOString(),
     suggestedCues: [],
@@ -148,6 +172,25 @@ function stubDescriptors(
 }
 
 describe("set planning", () => {
+  it("diversifies against explicit mixes, persists the history and keeps hard requests", () => {
+    const catalog = runtime();
+    for (let i = 0; i < 12; i += 1) seedTrack(catalog, {
+      title: `Variety ${i}`, artist: `Artist ${i}`, bpm: 174, camelot: "8A", energy: 5,
+    });
+    const brief = { name: "Variety", targetDurationMs: 270_000, seed: 12, explorationWeight: 0 };
+    const first = createPlan(catalog, brief);
+    const nextBrief = { ...brief, variety: { referencePlanIds: [first.plan.id], strength: 1 } };
+    const next = createPlan(catalog, nextBrief);
+    const repeat = createPlan(catalog, nextBrief);
+    expect(next.plan.entries.map((entry) => entry.trackId)).toEqual(repeat.plan.entries.map((entry) => entry.trackId));
+    expect(next.explanation.variety?.repeatedTracks).toBe(0);
+    expect(catalog.setPlans.findById(next.plan.id)?.explanation.variety).toEqual(next.explanation.variety);
+    expect(catalog.setPlans.findById(next.plan.id)?.plan.handoffPolicy).toBe("dj-continuity-v1");
+    const required = createPlan(catalog, { ...nextBrief, startTrackId: first.plan.entries[0]!.trackId });
+    expect(required.plan.entries[0]?.trackId).toBe(first.plan.entries[0]!.trackId);
+    expect(required.explanation.variety?.repeatedTracks).toBeGreaterThan(0);
+    expect(() => createPlan(catalog, { ...brief, variety: { referencePlanIds: [crypto.randomUUID()] } })).toThrow();
+  });
   it("builds a deterministic plan that honors start, end, and seed", () => {
     const catalog = runtime();
     const start = seedTrack(catalog, {
@@ -168,7 +211,7 @@ describe("set planning", () => {
       energy: 6,
     });
 
-    const first = catalog.service.createSetPlan({
+    const first = createPlan(catalog, {
       name: "Liquid hour",
       targetDurationMs: 600_000,
       startTrackId: start,
@@ -177,7 +220,7 @@ describe("set planning", () => {
       artistRepeatSpacing: 1,
       seed: 1,
     });
-    const second = catalog.service.createSetPlan({
+    const second = createPlan(catalog, {
       name: "Liquid hour again",
       targetDurationMs: 600_000,
       startTrackId: start,
@@ -195,12 +238,26 @@ describe("set planning", () => {
     );
     expect(first.explanation.selected.length).toBe(first.plan.entries.length);
     expect(first.validation.diagnostics.energyByEntry.length).toBe(first.plan.entries.length);
+    expect(first.plan.handoffPolicy).toBe("dj-continuity-v1");
+    expect(first.plan.rateRegionsVersion).toBe(2);
+    expect(first.plan.targetBpm).toBeNull();
+  });
+
+  it("stores a minutes duration request on the plan", () => {
+    const catalog = runtime();
+    seedTrack(catalog, { title: "Only", artist: "Solo", bpm: 174, camelot: "11A", energy: 5 });
+    const created = createPlan(catalog, {
+      name: "Twenty",
+      targetDurationMinutes: 20,
+      seed: 1,
+    });
+    expect(created.plan.targetDurationMs).toBe(1_200_000);
   });
 
   it("returns a partial plan when the library cannot fill an hour", () => {
     const catalog = runtime();
     seedTrack(catalog, { title: "Only", artist: "Solo", bpm: 174, camelot: "11A", energy: 5 });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Too small",
       targetDurationMs: 3_600_000,
       seed: 1,
@@ -231,7 +288,7 @@ describe("set planning", () => {
     expect(updated.bpmSource).toBe("manual");
     const detail = catalog.service.getTrack(id);
     expect(detail.cuePoints).toHaveLength(1);
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "cues",
       targetDurationMs: 150_000,
       seed: 2,
@@ -255,7 +312,7 @@ describe("set planning", () => {
       camelot: "5A",
       energy: 9,
     });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "clashy",
       targetDurationMs: 300_000,
       startTrackId: a,
@@ -285,7 +342,7 @@ describe("set planning", () => {
       camelot: "12A",
       energy: 5,
     });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Draft",
       targetDurationMs: 300_000,
       startTrackId: a,
@@ -317,7 +374,7 @@ describe("set planning", () => {
       camelot: "12A",
       energy: 8,
     });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Original",
       targetDurationMs: 300_000,
       startTrackId: a,
@@ -359,7 +416,7 @@ describe("set planning", () => {
       ...catalog.analyses.findByTrackId(b)!,
       integratedLufs: -16,
     });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Levels",
       targetDurationMs: 300_000,
       startTrackId: a,
@@ -461,6 +518,31 @@ describe("planner tempo matching", () => {
     expect(entries[1]?.playbackRate).toBeCloseTo(174 / 176, 5);
   });
 
+  it("keeps a locked middle deck's absolute rate when solving the next pair", () => {
+    const a = gridTrack(176);
+    const b = gridTrack(172);
+    const chosen = chooseTransition(a, b, { outgoingEffectiveBpm: 174 });
+    expect(chosen.outgoingRate).toBeCloseTo(174 / 176, 10);
+    expect(chosen.incomingRate).toBeCloseTo(174 / 172, 10);
+  });
+
+  it("preserves explicit short source windows and records the actual join", () => {
+    const a = gridTrack(174);
+    const b = gridTrack(174, 5, { manualMixInMs: 120_000 });
+    const entries = buildEntries([a, b]);
+    expect(entries[1]!.sourceStartMs).toBe(120_000);
+    expect(entries[0]!.transitionToNext!.parameters.mixInMs).toBe(120_000);
+    expect(entries[0]!.transitionToNext!.parameters.recipeVersion).toBe(1);
+  });
+
+  it("extends a drop-anchored tail to 90s without moving mix-in", () => {
+    const track = gridTrack(174, 5, { audioEndMs: 240_000, mixOutMs: 160_000 });
+    track.durationMs = 240_000;
+    const window = musicalWindow(track, 44_000, 1, false, { mixInMs: 140_000, mixOutMs: 160_000 });
+    expect(window.sourceStartMs).toBe(140_000);
+    expect(window.sourceEndMs - window.sourceStartMs).toBeGreaterThanOrEqual(90_000);
+  });
+
   it("keeps a 174+174+176 chain at 174 and only stretches the 176", () => {
     const entries = buildEntries([gridTrack(174), gridTrack(174), gridTrack(176)]);
     expect(entries[0]?.playbackRate).toBe(1);
@@ -468,6 +550,43 @@ describe("planner tempo matching", () => {
     expect(entries[2]?.playbackRate).toBeCloseTo(174 / 176, 5);
     expect(entries[0]?.transitionToNext?.parameters.targetBpm).toBe(174);
     expect(entries[1]?.transitionToNext?.parameters.targetBpm).toBe(174);
+  });
+
+  it("floats a 175/175 pair instead of pulling it to 174", () => {
+    const entries = buildEntries([gridTrack(175), gridTrack(175)]);
+    expect(entries[0]?.playbackRate).toBe(1);
+    expect(entries[1]?.playbackRate).toBe(1);
+    expect(entries[0]?.transitionToNext?.parameters.targetBpm).toBe(175);
+  });
+
+  it("still locks 175/175 when the brief sets targetBpm", () => {
+    const entries = buildEntries([gridTrack(175), gridTrack(175)], undefined, undefined, {
+      targetBpm: 174,
+    });
+    expect(entries[0]?.playbackRate).toBeCloseTo(174 / 175, 5);
+    expect(entries[1]?.playbackRate).toBeCloseTo(174 / 175, 5);
+    expect(entries[0]?.transitionToNext?.parameters.targetBpm).toBe(174);
+  });
+
+  it("stretches from the analyzed grid BPM, not published canonical", () => {
+    const memory = gridTrack(176, 8, { bpm: 175, canonicalBpm: 176 });
+    const hayling = gridTrack(174, 8);
+    const chosen = chooseTransition(memory, hayling, { chainTargetBpm: 174 });
+    expect(chosen.targetBpm).toBe(174);
+    expect(chosen.outgoingRate).toBeCloseTo(174 / 175, 5);
+    expect(chosen.incomingRate).toBe(1);
+    const entries = buildEntries([memory, hayling, gridTrack(174)], undefined, undefined, {
+      targetBpm: 174,
+    });
+    expect(entries[0]?.playbackRate).toBeCloseTo(174 / 175, 5);
+    expect(entries[1]?.playbackRate).toBe(1);
+    expect(entries[2]?.playbackRate).toBe(1);
+    const rate = 174 / 175;
+    const overlap = entries[0]!.transitionToNext!.durationMs;
+    const source = entries[0]!.sourceEndMs - entries[0]!.sourceStartMs;
+    expect(playableOutputMs(entries[0]!)).toBeCloseTo(source - overlap * rate + overlap, 5);
+    expect(playableOutputMs(entries[0]!)).toBeLessThan(source / rate - 1);
+    expect(planDurationMs(entries)).toBeGreaterThan(0);
   });
 
   it("falls back to an 8s crossfade when 174/182 cannot lock within 3%", () => {
@@ -492,10 +611,34 @@ describe("planner tempo matching", () => {
     const chosen = chooseTransition(outgoing, incoming);
     expect(chosen.transition.type).toBe("crossfade");
     expect(chosen.transition.durationMs).toBe(8_000);
-    expect(chosen.transition.parameters.reason).toBe("tempo-out-of-range");
+    expect(chosen.transition.parameters.reason).toBe("outgoing-grid-rejected");
   });
 
-  it("picks bass_swap for a drop-headed incoming regardless of suggestedEnergy", () => {
+  it("uses outgoing-grid-rejected when BPMs match but grids are rejected", () => {
+    const outgoing = gridTrack(174, 5, { gridOk: false });
+    const incoming = gridTrack(174, 5, { gridOk: false });
+    const chosen = chooseTransition(outgoing, incoming);
+    expect(chosen.transition.type).toBe("crossfade");
+    expect(chosen.transition.parameters.reason).toBe("outgoing-grid-rejected");
+    expect(chosen.transition.durationMs).toBe(30_000);
+  });
+
+  it("uses incoming-grid-rejected when only the incoming grid fails", () => {
+    const outgoing = gridTrack(174, 5);
+    const incoming = gridTrack(174, 5, { gridOk: false });
+    const chosen = chooseTransition(outgoing, incoming);
+    expect(chosen.transition.parameters.reason).toBe("incoming-grid-rejected");
+  });
+
+  it("uses missing-bpm when canonical tempo is absent", () => {
+    const outgoing = gridTrack(174, 5, { bpm: null, canonicalBpm: null });
+    outgoing.bpm = null;
+    const incoming = gridTrack(174, 5);
+    const chosen = chooseTransition(outgoing, incoming);
+    expect(chosen.transition.parameters.reason).toBe("missing-bpm");
+  });
+
+  it("uses a phrase mix for a drop-headed incoming regardless of suggestedEnergy", () => {
     const outgoing = gridTrack(174, 9, {
       suggestedEnergy: 9,
       tailEnergy: 0.3,
@@ -514,6 +657,7 @@ describe("planner tempo matching", () => {
     const incoming = gridTrack(174, 2, {
       suggestedEnergy: 2,
       mixInMs: 16_000,
+      manualMixInMs: 16_000,
       headEnergy: 0.85,
       sections: [
         {
@@ -536,7 +680,8 @@ describe("planner tempo matching", () => {
         },
       ],
     });
-    expect(chooseTransition(outgoing, incoming).transition.type).toBe("bass_swap");
+    expect(chooseTransition(outgoing, incoming).transition.type).toBe("phrase_mix");
+    expect(chooseTransition(outgoing, incoming).transition.parameters.reason).toBe("continuity-window");
   });
 
   it("picks phrase_mix for a quiet intro even when both tracks are energy 9", () => {
@@ -584,7 +729,7 @@ describe("planner tempo matching", () => {
     expect(chooseTransition(outgoing, incoming).transition.type).toBe("phrase_mix");
   });
 
-  it("picks bass_swap when both tail and head are hot", () => {
+  it("uses a phrase mix when both tail and head are hot", () => {
     const outgoing = gridTrack(174, 4, {
       suggestedEnergy: 4,
       tailEnergy: 0.72,
@@ -616,7 +761,7 @@ describe("planner tempo matching", () => {
         },
       ],
     });
-    expect(chooseTransition(outgoing, incoming).transition.type).toBe("bass_swap");
+    expect(chooseTransition(outgoing, incoming).transition.type).toBe("phrase_mix");
   });
 
   it("keeps a 174/175/176 chain monotone and within 3%", () => {
@@ -638,6 +783,17 @@ describe("planner tempo matching", () => {
     const quiet = gridTrack(174, 5, { integratedLufs: -16 });
     const entries = buildEntries([loud, mid, quiet]);
     expect(entries.map((entry) => entry.gainDb)).toEqual([-4, 0, 3]);
+  });
+
+  it("does not LUFS-boost a track whose true peak is already over 0 dBTP", () => {
+    const hotQuiet = gridTrack(174, 5, { integratedLufs: -16, truePeakDb: 3 });
+    const mid = gridTrack(174, 5, { integratedLufs: -12, truePeakDb: -1 });
+    const entries = buildEntries([hotQuiet, mid]);
+    expect(entries[0]?.gainDb).toBe(-3);
+    expect(entries[0]?.transitionToNext?.parameters.levelMatchWarning).toBe("true-peak-headroom");
+    expect(levelMatchGainDb(-16, -12, 3)).toEqual({ gainDb: -3, warning: "true-peak-headroom" });
+    expect(levelMatchGainDb(-16, -12, 0.8)).toEqual({ gainDb: -0.8, warning: "true-peak-headroom" });
+    expect(levelMatchGainDb(-13, -12, -2)).toEqual({ gainDb: 1, warning: null });
   });
 
   it("leaves gain at 0 and warns when LUFS is missing", () => {
@@ -722,7 +878,7 @@ describe("planner tempo matching", () => {
     expect(timeline?.tailEnergy).toBe(0.4);
   });
 
-  it("builds windows from outro/intro and extends the start to keep 90s playable", () => {
+  it("builds windows from outro/intro and keeps the planned mix-in", () => {
     const section = (
       type: TrackSection["type"],
       startMs: number,
@@ -771,10 +927,427 @@ describe("planner tempo matching", () => {
     const overlap = entries[0]!.transitionToNext!.durationMs;
     expect(entries[0]!.sourceEndMs).toBe(Math.min(200_000 + overlap, 240_000));
     expect(entries[1]!.sourceStartMs).toBe(16_000);
-    expect(entries[0]!.sourceEndMs - entries[0]!.sourceStartMs).toBeGreaterThanOrEqual(90_000);
-    expect(entries[0]!.sourceStartMs).toBeLessThan(150_000);
+    expect(entries[0]!.sourceStartMs).toBe(150_000);
     expect(entries[0]!.transitionToNext?.parameters.mixOutMs).toBe(200_000);
     expect(entries[0]!.transitionToNext?.parameters.mixInMs).toBe(16_000);
+  });
+
+  function phraseGrid(
+    bpm: number,
+    camelot: string | null,
+    extra: Partial<TimelineAnalysis> = {},
+  ): TimelineTrack {
+    const bar = (4 * 60_000) / bpm;
+    const section = (
+      type: TrackSection["type"],
+      startBar: number,
+      endBar: number,
+      sectionEnergy: number,
+    ): TrackSection => ({
+      type,
+      startMs: Math.round(startBar * bar),
+      endMs: Math.round(endBar * bar),
+      startBar,
+      endBar,
+      confidence: 0.8,
+      sectionEnergy,
+    });
+    const endBar = 80;
+    return {
+      id: crypto.randomUUID(),
+      durationMs: Math.round(endBar * bar),
+      energy: 6,
+      bpm,
+      camelotKey: camelot,
+      analysis: {
+        gridOk: true,
+        bpm,
+        canonicalBpm: bpm,
+        bpmHint: null,
+        bpmHintConfidence: null,
+        suggestedEnergy: 6,
+        introStartMs: 0,
+        outroStartMs: Math.round(72 * bar),
+        outroEndMs: Math.round(endBar * bar),
+        introLenMs: Math.round(16 * bar),
+        outroLenMs: Math.round(8 * bar),
+        sections: [
+          section("intro", 0, 16, 0.2),
+          section("build", 16, 48, 0.25),
+          section("drop", 48, 80, 0.9),
+        ],
+        downbeatTimesMs: Array.from({ length: endBar * 4 + 1 }, (_, i) => Math.round((i * bar) / 4)),
+        downbeatConfidence: 1,
+        audioStartMs: 0,
+        audioEndMs: Math.round(endBar * bar),
+        mixInMs: 0,
+        mixOutMs: Math.round(48 * bar),
+        headEnergy: 0.2,
+        tailEnergy: 0.9,
+        integratedLufs: null,
+        keyConfidence: null,
+        ...extra,
+      },
+    };
+  }
+
+  it("stamps lift intent on a quiet complementary join and prefers 16 bars", () => {
+    const bar = (4 * 60_000) / 174;
+    const outgoing = phraseGrid(174, "8A", {
+      sections: [
+        {
+          type: "drop",
+          startMs: Math.round(16 * bar),
+          endMs: Math.round(48 * bar),
+          startBar: 16,
+          endBar: 48,
+          confidence: 0.8,
+          sectionEnergy: 0.9,
+        },
+        {
+          type: "outro",
+          startMs: Math.round(48 * bar),
+          endMs: Math.round(72 * bar),
+          startBar: 48,
+          endBar: 72,
+          confidence: 0.8,
+          sectionEnergy: 0.2,
+        },
+      ],
+    });
+    const incoming = phraseGrid(174, "9A");
+    const chosen = chooseTransition(outgoing, incoming, { dropAnchored: true });
+    expect(chosen.transition.parameters.intent).toBe("lift");
+    expect(chosen.transition.parameters.barCount).toBe(16);
+    expect(chosen.transition.parameters.lowHandoverBar).toBe(8);
+    expect(chosen.window?.exitKind).toBe("quietTail");
+  });
+
+  it("stamps sustain on a sequential kit-on join", () => {
+    const bar = (4 * 60_000) / 174;
+    const outgoing = phraseGrid(174, "8A", {
+      sections: [
+        {
+          type: "drop",
+          startMs: Math.round(16 * bar),
+          endMs: Math.round(48 * bar),
+          startBar: 16,
+          endBar: 48,
+          confidence: 0.8,
+          sectionEnergy: 0.9,
+        },
+        {
+          type: "outro",
+          startMs: Math.round(48 * bar),
+          endMs: Math.round(72 * bar),
+          startBar: 48,
+          endBar: 72,
+          confidence: 0.8,
+          sectionEnergy: 0.2,
+        },
+      ],
+    });
+    const incoming = phraseGrid(174, "9A", {
+      sections: [
+        {
+          type: "intro",
+          startMs: 0,
+          endMs: Math.round(16 * bar),
+          startBar: 0,
+          endBar: 16,
+          confidence: 0.8,
+          sectionEnergy: 0.2,
+        },
+        {
+          type: "build",
+          startMs: Math.round(16 * bar),
+          endMs: Math.round(48 * bar),
+          startBar: 16,
+          endBar: 48,
+          confidence: 0.8,
+          sectionEnergy: 0.7,
+        },
+        {
+          type: "drop",
+          startMs: Math.round(48 * bar),
+          endMs: Math.round(80 * bar),
+          startBar: 48,
+          endBar: 80,
+          confidence: 0.8,
+          sectionEnergy: 0.9,
+        },
+      ],
+    });
+    const chosen = chooseTransition(outgoing, incoming, { dropAnchored: true });
+    expect(["landing", "sequential"]).toContain(chosen.transition.parameters.phraseShape);
+    expect(chosen.transition.parameters.intent).toBe("sustain");
+    expect(chosen.transition.parameters.barCount).toBeGreaterThanOrEqual(16);
+  });
+
+  it("keeps a drop landing as sustain", () => {
+    const outgoing = phraseGrid(174, "8A", {
+      sections: [
+        {
+          type: "drop",
+          startMs: Math.round(16 * ((4 * 60_000) / 174)),
+          endMs: Math.round(80 * ((4 * 60_000) / 174)),
+          startBar: 16,
+          endBar: 80,
+          confidence: 0.8,
+          sectionEnergy: 0.9,
+        },
+      ],
+    });
+    const incoming = phraseGrid(174, "9A");
+    const chosen = chooseTransition(outgoing, incoming, { dropAnchored: true });
+    expect(chosen.window?.exitKind).toBe("dropLanding");
+    expect(chosen.transition.parameters.phraseShape).toBe("landing");
+    expect(chosen.transition.parameters.barCount).toBeGreaterThanOrEqual(16);
+    expect(chosen.transition.parameters.intent).toBe("sustain");
+  });
+
+  it("does not shorten a DJ key-clash join to 8 bars", () => {
+    const outgoing = phraseGrid(174, "8A", {
+      sections: [
+        {
+          type: "drop",
+          startMs: Math.round(16 * ((4 * 60_000) / 174)),
+          endMs: Math.round(80 * ((4 * 60_000) / 174)),
+          startBar: 16,
+          endBar: 80,
+          confidence: 0.8,
+          sectionEnergy: 0.9,
+        },
+      ],
+    });
+    const incoming = phraseGrid(174, "11A");
+    const chosen = chooseTransition(outgoing, incoming);
+    expect(chosen.transition.parameters.keyClash).toBe(true);
+    expect(chosen.transition.parameters.barCount).toBeGreaterThanOrEqual(16);
+  });
+
+  it("does not shorten a relative or adjacent-same-mode join", () => {
+    const outgoing = phraseGrid(174, "5A");
+    const relative = chooseTransition(outgoing, phraseGrid(174, "5B"));
+    expect(relative.transition.parameters.keyClash).toBeUndefined();
+    expect(relative.transition.parameters.barCount).not.toBe(8);
+    const adjacent = chooseTransition(outgoing, phraseGrid(174, "6A"));
+    expect(adjacent.transition.parameters.keyClash).toBeUndefined();
+  });
+
+  it("does not move a drop-anchored incoming start to satisfy the 90 s minimum", () => {
+    const bar = (4 * 60_000) / 174;
+    const outgoing = phraseGrid(174, "8A", {
+      sections: [
+        {
+          type: "drop",
+          startMs: Math.round(16 * bar),
+          endMs: Math.round(80 * bar),
+          startBar: 16,
+          endBar: 80,
+          confidence: 0.8,
+          sectionEnergy: 0.9,
+        },
+      ],
+    });
+    const incoming = phraseGrid(174, "9A");
+    incoming.durationMs = 120_000;
+    incoming.analysis!.audioEndMs = 120_000;
+    incoming.analysis!.sections = [
+      {
+        type: "intro",
+        startMs: 0,
+        endMs: 80_000,
+        startBar: 0,
+        endBar: 58,
+        confidence: 0.8,
+        sectionEnergy: 0.2,
+      },
+      {
+        type: "drop",
+        startMs: 100_000,
+        endMs: 120_000,
+        startBar: 72,
+        endBar: 87,
+        confidence: 0.8,
+        sectionEnergy: 0.9,
+      },
+    ];
+    const entries = buildEntries([outgoing, incoming]);
+    expect(entries[1]!.sourceStartMs).toBeGreaterThan(40_000);
+    expect(entries[1]!.sourceStartMs).toBeCloseTo(entries[0]!.transitionToNext!.parameters.mixInMs as number, 0);
+  });
+
+  it("preserves an explicit complementary shape on rebuild", () => {
+    const a = phraseGrid(174, "8A");
+    const b = phraseGrid(174, "9A");
+    const first = buildEntries([a, b]);
+    const prior = new Map([
+      [
+        a.id,
+        {
+          ...first[0]!,
+          transitionToNext: {
+            ...first[0]!.transitionToNext!,
+            parameters: { ...first[0]!.transitionToNext!.parameters, phraseShape: "complementary" },
+          },
+        },
+      ],
+      [b.id, first[1]!],
+    ]);
+    const again = buildEntries([a, b], undefined, prior);
+    expect(again[0]!.transitionToNext!.parameters.phraseShape).toBe("complementary");
+  });
+
+  it("uses the same mix-in and rates for a standalone proposal and a set-plan join", () => {
+    const outgoing = phraseGrid(174, "8A", {
+      sections: [
+        {
+          type: "drop",
+          startMs: Math.round(16 * ((4 * 60_000) / 174)),
+          endMs: Math.round(80 * ((4 * 60_000) / 174)),
+          startBar: 16,
+          endBar: 80,
+          confidence: 0.8,
+          sectionEnergy: 0.9,
+        },
+      ],
+    });
+    const incoming = phraseGrid(176, "9A");
+    const chosen = chooseTransition(outgoing, incoming);
+    const planned = planTransition(
+      {
+        track: {
+          id: outgoing.id,
+          filePath: "out.wav",
+          fileFingerprint: "out",
+          artist: "A",
+          title: "Out",
+          album: null,
+          durationMs: outgoing.durationMs,
+          sampleRateHz: 44100,
+          channels: 2,
+          bpm: outgoing.bpm,
+          bpmSource: "manual",
+          musicalKey: "Am",
+          camelotKey: outgoing.camelotKey,
+          keySource: "manual",
+          energy: 6,
+          rating: 4,
+          subgenres: [],
+          moods: [],
+          tags: [],
+          notes: null,
+          analysisStatus: "complete",
+          fileMissing: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        analysis: {
+          trackId: outgoing.id,
+          analyzerName: "dnb-crate-dsp",
+          analyzerVersion: "3.2.0",
+          bpm: 174,
+          bpmConfidence: 0.9,
+          bpmRaw: 174,
+          beatTimesMs: outgoing.analysis!.downbeatTimesMs,
+          downbeatTimesMs: outgoing.analysis!.downbeatTimesMs,
+          gridRejected: false,
+          gridRejectionReason: null,
+          musicalKey: "Am",
+          keyConfidence: 0.8,
+          keyMode: "minor",
+          camelotKey: "8A",
+          tempoStability: 0.8,
+          downbeatConfidence: 1,
+          integratedLufs: null,
+          truePeakDb: null,
+          lowBandEnergy: null,
+          midBandEnergy: null,
+          highBandEnergy: null,
+          waveformSummary: null,
+          beatAnchorMs: null,
+          descriptors: testSonicDescriptors({
+            suggestedEnergy: 6,
+            audioStartMs: 0,
+            audioEndMs: outgoing.durationMs,
+          }),
+          engineRuntimeMs: 1,
+          analyzedAt: new Date().toISOString(),
+          suggestedCues: [],
+          sections: outgoing.analysis!.sections,
+        },
+        cues: [],
+      },
+      {
+        track: {
+          id: incoming.id,
+          filePath: "in.wav",
+          fileFingerprint: "in",
+          artist: "B",
+          title: "In",
+          album: null,
+          durationMs: incoming.durationMs,
+          sampleRateHz: 44100,
+          channels: 2,
+          bpm: incoming.bpm,
+          bpmSource: "manual",
+          musicalKey: "Em",
+          camelotKey: incoming.camelotKey,
+          keySource: "manual",
+          energy: 6,
+          rating: 4,
+          subgenres: [],
+          moods: [],
+          tags: [],
+          notes: null,
+          analysisStatus: "complete",
+          fileMissing: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        analysis: {
+          trackId: incoming.id,
+          analyzerName: "dnb-crate-dsp",
+          analyzerVersion: "3.2.0",
+          bpm: 176,
+          bpmConfidence: 0.9,
+          bpmRaw: 176,
+          beatTimesMs: incoming.analysis!.downbeatTimesMs,
+          downbeatTimesMs: incoming.analysis!.downbeatTimesMs,
+          gridRejected: false,
+          gridRejectionReason: null,
+          musicalKey: "Em",
+          keyConfidence: 0.8,
+          keyMode: "minor",
+          camelotKey: "9A",
+          tempoStability: 0.8,
+          downbeatConfidence: 1,
+          integratedLufs: null,
+          truePeakDb: null,
+          lowBandEnergy: null,
+          midBandEnergy: null,
+          highBandEnergy: null,
+          waveformSummary: null,
+          beatAnchorMs: null,
+          descriptors: testSonicDescriptors({
+            suggestedEnergy: 6,
+            audioStartMs: 0,
+            audioEndMs: incoming.durationMs,
+          }),
+          engineRuntimeMs: 1,
+          analyzedAt: new Date().toISOString(),
+          suggestedCues: [],
+          sections: incoming.analysis!.sections,
+        },
+        cues: [],
+      },
+      { outgoingTrackId: outgoing.id, incomingTrackId: incoming.id, preferredType: "phrase_mix" },
+    );
+    const proposal = planned.proposals[0]!;
+    expect(proposal.incomingCuePositionMs).toBe(chosen.window!.mixInMs);
+    expect(proposal.outgoingPlaybackRate).toBeCloseTo(chosen.outgoingRate, 8);
+    expect(proposal.incomingPlaybackRate).toBeCloseTo(chosen.incomingRate, 8);
   });
 });
 
@@ -977,7 +1550,7 @@ describe("applyTransition and silence windows", () => {
       energy: 5,
       durationMs: 240_000,
     });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Apply",
       targetDurationMs: 600_000,
       requiredTrackIds: [a, b, c],
@@ -1084,7 +1657,7 @@ describe("descriptor filters and mood presets", () => {
     const high = seedTrack(catalog, { title: "High", artist: "B", bpm: 174, camelot: "9A", energy: 5 });
     stubDescriptors(catalog, low, { energy: 0.4 });
     stubDescriptors(catalog, high, { energy: 0.85 });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Peak only",
       targetDurationMs: 300_000,
       descriptors: { energy: { min: 0.7 } },
@@ -1118,7 +1691,7 @@ describe("descriptor filters and mood presets", () => {
     });
     stubDescriptors(catalog, liquid, { energy: 0.5, melodicness: 0.7, danceability: 0.65 });
     stubDescriptors(catalog, peak, { energy: 0.85, melodicness: 0.2, danceability: 0.8 });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Preset liquid",
       targetDurationMs: 180_000,
       startTrackId: liquid,
@@ -1136,7 +1709,7 @@ describe("descriptor filters and mood presets", () => {
       moods: ["liquid"],
     });
     stubDescriptors(catalog, manual, { energy: 0.85, melodicness: 0.1 });
-    const withManual = catalog.service.createSetPlan({
+    const withManual = createPlan(catalog, {
       name: "Manual wins",
       targetDurationMs: 180_000,
       startTrackId: manual,
@@ -1157,7 +1730,7 @@ describe("descriptor filters and mood presets", () => {
       energy: null,
     });
     stubDescriptors(catalog, id, { energy: 0.8 });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Arc energy",
       targetDurationMs: 150_000,
       startTrackId: id,
@@ -1177,7 +1750,7 @@ describe("descriptor filters and mood presets", () => {
     catalog.db
       .prepare("UPDATE tracks SET recording_key = ? WHERE id IN (?, ?)")
       .run("mbid:same-recording", a, b);
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Dedupe",
       targetDurationMs: 400_000,
       seed: 1,
@@ -1205,7 +1778,7 @@ describe("descriptor filters and mood presets", () => {
       camelot: "9A",
       energy: 7,
     });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Spacing",
       targetDurationMs: 300_000,
       startTrackId: a,
@@ -1234,7 +1807,7 @@ describe("descriptor filters and mood presets", () => {
       energy: 6,
       genres: ["idm"],
     });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "No IDM",
       targetDurationMs: 300_000,
       genres: { exclude: ["idm"] },
@@ -1262,7 +1835,7 @@ describe("descriptor filters and mood presets", () => {
       bpmRaw: 174,
       bpmConfidence: 0.55,
     });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Hint pool",
       targetDurationMs: 300_000,
       bpmMin: 170,
@@ -1286,7 +1859,7 @@ describe("descriptor filters and mood presets", () => {
     stubDescriptors(catalog, start, { energy: 0.7 }, { integratedLufs: -8 });
     stubDescriptors(catalog, close, { energy: 0.7 }, { integratedLufs: -7 });
     stubDescriptors(catalog, far, { energy: 0.7 }, { integratedLufs: -13 });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Level",
       targetDurationMs: 300_000,
       startTrackId: start,
@@ -1341,7 +1914,7 @@ describe("descriptor filters and mood presets", () => {
     const next = seedTrack(catalog, { title: "B", artist: "Y", bpm: 174, camelot: "8A", energy: 6 });
     stubDescriptors(catalog, start, { energy: 0.7 });
     stubDescriptors(catalog, next, { energy: 0.7 });
-    const created = catalog.service.createSetPlan({
+    const created = createPlan(catalog, {
       name: "Coverage",
       targetDurationMs: 300_000,
       startTrackId: start,
@@ -1350,6 +1923,168 @@ describe("descriptor filters and mood presets", () => {
     });
     expect(created.explanation.harmonicCoverage?.totalJoins).toBeGreaterThanOrEqual(1);
     expect(created.explanation.harmonicCoverage?.knownJoins).toBeGreaterThanOrEqual(1);
+  });
+
+  it("relaxes descriptor filters from the original brief, not cumulatively", () => {
+    const original = { energy: { min: 0.92, max: 1 } };
+    const step1 = relaxDescriptorFilters(original, 1);
+    const step2 = relaxDescriptorFilters(original, 2);
+    const step3 = relaxDescriptorFilters(original, 3);
+    expect(step1?.energy?.min).toBeCloseTo(0.84, 5);
+    expect(step2?.energy?.min).toBeCloseTo(0.76, 5);
+    expect(step3?.energy?.min).toBeCloseTo(0.68, 5);
+    expect(step3?.energy?.max).toBeCloseTo(1.24, 5);
+    const wronglyCumulative = relaxDescriptorFilters(step2, 3);
+    expect(wronglyCumulative?.energy?.min).toBeLessThan(step3!.energy!.min! - 1e-9);
+  });
+
+  it("does not promote praised pairs on a fresh plan", () => {
+    const catalog = runtime();
+    const start = seedTrack(catalog, {
+      title: "FeedbackStart",
+      artist: "A",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
+    const liked = seedTrack(catalog, {
+      title: "LikedNext",
+      artist: "B",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
+    seedTrack(catalog, {
+      title: "OtherNext",
+      artist: "C",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+    });
+    catalog.service.rateTransition({
+      outgoingTrackId: start,
+      incomingTrackId: liked,
+      type: "phrase_mix",
+      overall: 1,
+    });
+    const fresh = createPlan(catalog, {
+      name: "Fresh feedback",
+      targetDurationMs: 280_000,
+      startTrackId: start,
+      requiredTrackIds: [liked],
+      seed: 1,
+    });
+    expect(fresh.explanation.selected.every((entry) => entry.score.components.feedback <= 0)).toBe(true);
+  });
+
+  it("drops a non-required tail when the hour overshoots and refuses an overshoot extra", () => {
+    const catalog = runtime();
+    for (let i = 0; i < 16; i += 1) {
+      const id = seedTrack(catalog, {
+        title: `Long ${i}`,
+        artist: `Artist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 6,
+        durationMs: 280_000,
+      });
+      stubDescriptors(catalog, id, { energy: 0.7 });
+    }
+    const oversize = createPlan(catalog, {
+      name: "Oversize drop",
+      targetDurationMs: 650_000,
+      seed: 1,
+    });
+    const oversizeMs = oversize.plan.entries.reduce(
+      (max, entry) => Math.max(max, entry.timelineStartMs + (entry.sourceEndMs - entry.sourceStartMs)),
+      0,
+    );
+    expect(oversizeMs).toBeLessThanOrEqual(650_000 + 90_000);
+    expect(oversize.plan.entries.length).toBeLessThanOrEqual(2);
+
+    const shortCatalog = runtime();
+    const start = seedTrack(shortCatalog, {
+      title: "ShortStart",
+      artist: "S",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+      durationMs: 150_000,
+    });
+    const ending = seedTrack(shortCatalog, {
+      title: "ShortEnd",
+      artist: "E",
+      bpm: 174,
+      camelot: "8A",
+      energy: 6,
+      durationMs: 150_000,
+    });
+    stubDescriptors(shortCatalog, start, { energy: 0.7 });
+    stubDescriptors(shortCatalog, ending, { energy: 0.7 });
+    for (let i = 0; i < 14; i += 1) {
+      const id = seedTrack(shortCatalog, {
+        title: `Fat ${i}`,
+        artist: `Fat ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 6,
+        durationMs: 400_000,
+      });
+      stubDescriptors(shortCatalog, id, { energy: 0.7 });
+    }
+    const refused = createPlan(shortCatalog, {
+      name: "Refuse fat extra",
+      targetDurationMs: 500_000,
+      startTrackId: start,
+      endTrackId: ending,
+      seed: 1,
+    });
+    expect(refused.plan.entries.map((entry) => entry.trackId)).toEqual([start, ending]);
+    expect(refused.partial).toBe(false);
+  });
+
+  it("keeps Peak and Liquid example briefs deterministic on a fixed fixture", () => {
+    const peakBrief = JSON.parse(
+      readFileSync(path.join(process.cwd(), "docs/examples/peak-hour.example.brief.json"), "utf8"),
+    ) as CreateSetPlanInput;
+    const liquidBrief = JSON.parse(
+      readFileSync(path.join(process.cwd(), "docs/examples/liquid-hour.example.brief.json"), "utf8"),
+    ) as CreateSetPlanInput;
+    const catalog = runtime();
+    for (let i = 0; i < 48; i += 1) {
+      const id = seedTrack(catalog, {
+        title: `Fixture ${i}`,
+        artist: `Act ${i % 12}`,
+        bpm: 174,
+        camelot: `${(i % 12) + 1}A`,
+        energy: 4 + (i % 6),
+        durationMs: 180_000,
+        genres: i % 11 === 0 ? ["idm"] : ["drum and bass"],
+      });
+      stubDescriptors(catalog, id, {
+        energy: 0.25 + (i % 10) * 0.07,
+        danceability: 0.4 + (i % 8) * 0.06,
+        melodicness: 0.2 + (i % 9) * 0.08,
+      });
+    }
+    const peakA = createPlan(catalog, { ...peakBrief, targetDurationMs: 900_000 });
+    const peakB = createPlan(catalog, { ...peakBrief, targetDurationMs: 900_000 });
+    const liquidA = createPlan(catalog, { ...liquidBrief, targetDurationMs: 900_000 });
+    const liquidB = createPlan(catalog, { ...liquidBrief, targetDurationMs: 900_000 });
+    expect(peakA.plan.entries.map((entry) => entry.trackId)).toEqual(
+      peakB.plan.entries.map((entry) => entry.trackId),
+    );
+    expect(liquidA.plan.entries.map((entry) => entry.trackId)).toEqual(
+      liquidB.plan.entries.map((entry) => entry.trackId),
+    );
+    expect(peakA.explanation.selected[0]?.buckets).toMatchObject({
+      moodFit: expect.any(Number),
+      joinQuality: expect.any(Number),
+      keyCoverage: expect.any(Number),
+      timeFit: expect.any(Number),
+      lookahead: expect.any(Number),
+      feedback: expect.any(Number),
+    });
   });
 });
 

@@ -1,4 +1,5 @@
 import {
+  ATEMPO_DRIFT_BUDGET_MS,
   ATEMPO_SKIP_THRESHOLD,
   DNB_BPM_MAX,
   DNB_BPM_MIN,
@@ -31,11 +32,99 @@ export function playbackRateForBpm(sourceBpm: number, targetBpm: number): number
   return snapPlaybackRate(targetBpm / sourceBpm);
 }
 
+/**
+ * Tempo the beat grid is actually on. Published canonical can disagree
+ * (Like a Memory: analyzed 175, published 176) — atempo must use the grid.
+ */
+export function sourceBpmForRate(
+  gridBpm: number | null | undefined,
+  fallbackBpm: number | null | undefined,
+): number | null {
+  if (gridBpm != null && Number.isFinite(gridBpm) && gridBpm > 0) {
+    return gridBpm;
+  }
+  if (fallbackBpm != null && Number.isFinite(fallbackBpm) && fallbackBpm > 0) {
+    return fallbackBpm;
+  }
+  return null;
+}
+
 export function snapPlaybackRate(
   rate: number,
   epsilon = ATEMPO_SKIP_THRESHOLD,
 ): number {
   return Math.abs(rate - 1) < epsilon ? 1 : rate;
+}
+
+export function sourceToOutputMs(sourceDeltaMs: number, rate: number): number {
+  const safe = rate > 0 ? rate : 1;
+  return sourceDeltaMs / safe;
+}
+
+export function outputToSourceMs(outputDeltaMs: number, rate: number): number {
+  const safe = rate > 0 ? rate : 1;
+  return outputDeltaMs * safe;
+}
+
+export function playbackRateDriftMs(rate: number, durationMs: number): number {
+  if (!(rate > 0) || !Number.isFinite(rate) || !Number.isFinite(durationMs)) {
+    return 0;
+  }
+  return Math.abs(rate - 1) * durationMs;
+}
+
+export function shouldSkipAtempo(
+  rate: number,
+  durationMs: number,
+  budgetMs = ATEMPO_DRIFT_BUDGET_MS,
+): boolean {
+  if (!(rate > 0) || !Number.isFinite(rate)) {
+    return true;
+  }
+  if (Math.abs(rate - 1) < ATEMPO_SKIP_THRESHOLD) {
+    return true;
+  }
+  return playbackRateDriftMs(rate, durationMs) < budgetMs;
+}
+
+export function effectivePlaybackRate(
+  rate: number | undefined,
+  sourceDurationMs: number,
+  budgetMs = ATEMPO_DRIFT_BUDGET_MS,
+): number {
+  if (rate === undefined || !(rate > 0)) {
+    return 1;
+  }
+  return shouldSkipAtempo(rate, sourceDurationMs, budgetMs) ? 1 : rate;
+}
+
+/**
+ * Featured body stays at rate 1. Only the join head/tail is stretched.
+ * Drift skip uses the overlap, not the whole window (175→174 over 16 bars still stretches).
+ */
+export function overlapOnlyPlayableMs(input: {
+  sourceMs: number;
+  rate: number;
+  overlapToNextMs?: number | null;
+  overlapFromPrevMs?: number | null;
+}): number {
+  const source = Math.max(0, input.sourceMs);
+  const rate = input.rate > 0 ? input.rate : 1;
+  const right = Math.max(0, input.overlapToNextMs ?? 0);
+  const left = Math.max(0, input.overlapFromPrevMs ?? 0);
+  const stretchMs = Math.max(left, right);
+  if (stretchMs <= 0) {
+    return source / (shouldSkipAtempo(rate, source) ? 1 : rate);
+  }
+  if (shouldSkipAtempo(rate, stretchMs)) {
+    return source;
+  }
+  const rightSrc = right > 0 ? outputToSourceMs(right, rate) : 0;
+  const leftSrc = left > 0 ? outputToSourceMs(left, rate) : 0;
+  if (leftSrc + rightSrc >= source) {
+    return source / rate;
+  }
+  return left + Math.max(0, source - leftSrc - rightSrc) + right;
 }
 
 export function foldedIntegerBpm(bpm: number): number | null {
@@ -124,6 +213,65 @@ export function publishedBpmTolerance(referenceBpm: number): number {
   return Number.isInteger(referenceBpm)
     ? PUBLISHED_BPM_INTEGER_TOLERANCE
     : PUBLISHED_BPM_FRACTION_TOLERANCE;
+}
+
+/**
+ * Published/manual BPM used as the analyzer lock. Half-time tags (87, 86.49)
+ * fold into 160–190; a tag that cannot fold (150) is returned unchanged so a
+ * failing lock can still be scored, then discarded if a free grid already passed.
+ */
+export function resolvePublishedReferenceBpm(
+  publishedBpm: number,
+  minBpm = DNB_BPM_MIN,
+  maxBpm = DNB_BPM_MAX,
+): { bpm: number; foldedFrom: number | null } {
+  const folded = normalizeDnbBpm(publishedBpm, minBpm, maxBpm);
+  if (folded) {
+    return { bpm: folded.bpm, foldedFrom: folded.foldedFrom };
+  }
+  return { bpm: publishedBpm, foldedFrom: null };
+}
+
+/** Half/double, 3:2, 5:4 (140↔175), 4:3 (130↔173), 5:3 (105↔175), 6:5 (145↔174). */
+const PUBLISHED_REFERENCE_RATIOS = [
+  1,
+  2,
+  1 / 2,
+  3 / 2,
+  2 / 3,
+  5 / 4,
+  4 / 5,
+  4 / 3,
+  3 / 4,
+  5 / 3,
+  3 / 5,
+  6 / 5,
+  5 / 6,
+];
+
+/**
+ * In-range tempos a published/manual/prior-analyzed tag might actually mean.
+ * The analyzer scores these; it does not pick one blindly.
+ */
+export function publishedReferenceCandidates(
+  publishedBpm: number,
+  minBpm = DNB_BPM_MIN,
+  maxBpm = DNB_BPM_MAX,
+): number[] {
+  if (!(publishedBpm > 0) || !Number.isFinite(publishedBpm)) {
+    return [];
+  }
+  const found = new Map<number, number>();
+  for (const ratio of PUBLISHED_REFERENCE_RATIOS) {
+    const value = publishedBpm * ratio;
+    if (value >= minBpm - 1e-6 && value <= maxBpm + 1e-6) {
+      const key = Number(value.toFixed(3));
+      if (!found.has(key)) {
+        found.set(key, value);
+      }
+    }
+  }
+  return [...found.values()];
 }
 
 export function analyzerVersionLessThan(have: string, current: string): boolean {

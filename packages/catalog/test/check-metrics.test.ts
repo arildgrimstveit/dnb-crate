@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   alignmentResidualMs,
+  evaluateDurationError,
   firstDropMs,
+  freezeJoinEvidence,
   joinCamelotDistance,
   plannedLevelStepLu,
+  storedGridFromEvidence,
 } from "../src/render/check-metrics.ts";
 
 describe("render:check v2 metrics", () => {
@@ -60,5 +63,60 @@ describe("render:check v2 metrics", () => {
     expect(firstDropMs([{ type: "intro", startMs: 0 }, { type: "drop", startMs: 64_000 }])).toBe(
       64_000,
     );
+  });
+
+  it("does not compute a stored-grid residual without frozen beats", () => {
+    expect(
+      storedGridFromEvidence(undefined, 10_000, 0, 1, 1, 0, 345),
+    ).toEqual({ residualMs: null, source: "missing", kind: "stored-grid-consistency" });
+  });
+
+  it("uses frozen beats and ignores a later catalog mutation", () => {
+    const beats = Array.from({ length: 32 }, (_, i) => 10_000 + i * 345);
+    const frozen = freezeJoinEvidence({
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      outgoingAnalysisVersion: "3.2.0",
+      incomingAnalysisVersion: "3.2.0",
+      outgoingBeatsMs: beats,
+      incomingBeatsMs: Array.from({ length: 32 }, (_, i) => i * 345),
+      outgoingSourceStartMs: 10_000,
+      outgoingSourceEndMs: 30_000,
+      incomingSourceStartMs: 0,
+      incomingSourceEndMs: 20_000,
+      outgoingCamelotKey: "8A",
+      incomingCamelotKey: "8A",
+      outgoingAudioEndMs: 40_000,
+      outgoingTailEnergy: 0.4,
+      incomingHeadEnergy: 0.3,
+      incomingDropMs: 8_000,
+      recipeVersion: 1,
+      intent: null,
+    });
+    const liveBeats = beats.map((time) => time + 80);
+    expect(frozen.outgoingBeatsMs.includes(10_000 + 80)).toBe(false);
+    const residual = storedGridFromEvidence(frozen, 10_000, 0, 1, 1, 0, 345);
+    expect(residual.source).toBe("frozen-manifest");
+    expect(Math.abs(residual.residualMs ?? 99)).toBeLessThan(20);
+    const mutated = storedGridFromEvidence(
+      { ...frozen, outgoingBeatsMs: liveBeats },
+      10_000,
+      0,
+      1,
+      1,
+      0,
+      345,
+    );
+    expect(Math.abs(mutated.residualMs ?? 0)).toBe(80);
+  });
+
+  it("fails a full-hour duration error over 1 s and only warns a preview or short fixture", () => {
+    expect(evaluateDurationError(3_513_513, 3_515_154, "full")).toEqual({
+      errorMs: -1_641,
+      status: "fail",
+    });
+    expect(evaluateDurationError(58_000, 60_000, "preview").status).toBe("warning");
+    expect(evaluateDurationError(1_000, 90_000, "full").status).toBe("warning");
+    expect(evaluateDurationError(3_515_400, 3_515_154, "full").status).toBe("pass");
   });
 });

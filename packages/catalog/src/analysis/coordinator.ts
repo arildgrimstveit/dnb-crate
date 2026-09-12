@@ -8,6 +8,7 @@ import {
   DEFAULT_ANALYSIS_ENGINE,
   DomainError,
   isDomainError,
+  MIN_ANALYSIS_CONFIDENCE,
   reconstructGrid,
   resolveCanonicalBpm,
   type AnalysisEngineId,
@@ -115,6 +116,8 @@ export class AnalysisCoordinator {
     if (existing) {
       this.analyses.upsert({
         ...existing,
+        bpm: canonical.bpm,
+        bpmConfidence: Math.max(existing.bpmConfidence ?? 0, MIN_ANALYSIS_CONFIDENCE),
         beatTimesMs: grid.beatTimesMs,
         downbeatTimesMs: grid.downbeatTimesMs,
         beatAnchorMs: positionMs,
@@ -246,11 +249,12 @@ export class AnalysisCoordinator {
     }
     const pcm = await (preloaded ?? loadPcmForAnalysis(track.filePath, this.runner, binaries));
     const anchor = this.analyses.getBeatAnchorMs(trackId);
-    const existing = this.analyses.findByTrackId(trackId);
-    const canonical = resolveCanonicalBpm(track, existing);
     const referenceBpm =
-      (track.bpmSource === "published" || track.bpmSource === "manual") && canonical.bpm != null
-        ? canonical.bpm
+      track.bpm != null &&
+      (track.bpmSource === "published" ||
+        track.bpmSource === "manual" ||
+        track.bpmSource === "analyzed")
+        ? track.bpm
         : undefined;
     const dsp = dspAnalyzer.analyze(pcm, {
       durationMs: track.durationMs,

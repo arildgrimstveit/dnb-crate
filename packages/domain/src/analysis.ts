@@ -307,6 +307,24 @@ export function resolveCanonicalKey(
   return { musicalKey: null, source: null };
 }
 
+/** Confidence of the resolved canonical key. Unknown is 0; manual/published are 1. */
+export function resolveCanonicalKeyConfidence(
+  track: { musicalKey: string | null; keySource: KeySource | null },
+  analysis: { musicalKey: string | null; keyConfidence: number | null } | null,
+): number {
+  const resolved = resolveCanonicalKey(track, analysis);
+  if (!resolved.musicalKey) {
+    return 0;
+  }
+  if (resolved.source === "manual" || resolved.source === "published") {
+    return 1;
+  }
+  if (resolved.source === "analyzed") {
+    return analysis?.keyConfidence ?? 0;
+  }
+  return 0;
+}
+
 export function buildBeatGridSummary(analysis: TrackAnalysis): BeatGridSummary {
   return {
     bpm: analysis.bpm,

@@ -6,6 +6,7 @@ import {
   buildBassSwapFilter,
   buildPhraseMixFilter,
   expectedDurationMs,
+  RATE_SPLICE_XFADE_SEC,
   limiterAmplitudeFromCeilingDb,
   mixFilterArgs,
   parseEbur128,
@@ -14,9 +15,18 @@ import {
   parseOutTimeMs,
   parseVersionLine,
   redactInvocation,
+  rubberbandTempoFilter,
 } from "../src/index.ts";
 
 describe("filter graph", () => {
+  it("retains small tempo corrections across long phrases", () => {
+    const rate = 174 / 174.3;
+    const filter = buildAcrossfadeFilter({
+      trims: [{ startSec: 0, endSec: 90, gainDb: 0, playbackRate: rate }, { startSec: 0, endSec: 90, gainDb: 0 }],
+      overlapSeconds: [44.138], limiterAmplitude: 0.89, sampleRateHz: 48_000,
+    });
+    expect(filter).toContain(`atempo=${rate.toFixed(6)}`);
+  });
   it("builds equal-power acrossfade with hsin curves and no file paths", () => {
     const filter = buildAcrossfadeFilter({
       trims: [
@@ -67,14 +77,77 @@ describe("filter graph", () => {
       sampleRateHz: 48_000,
     });
     expect(tiny).not.toContain("atempo");
-    const expected = expectedDurationMs(
-      [
-        { startSec: 0, endSec: 8, gainDb: 0, playbackRate: 1.03 },
-        { startSec: 0, endSec: 8, gainDb: 0, playbackRate: 0.97 },
-      ],
-      [2],
+    const trims = [
+      { startSec: 0, endSec: 8, gainDb: 0, playbackRate: 1.03 },
+      { startSec: 0, endSec: 8, gainDb: 0, playbackRate: 0.97 },
+    ];
+    expect(expectedDurationMs(trims, [2], "all")).toBe(
+      Math.round((8 / 1.03 + 8 / 0.97 - 2) * 1000),
     );
-    expect(expected).toBe(Math.round((8 / 1.03 + 8 / 0.97 - 2) * 1000));
+    expect(expectedDurationMs(trims, [2], "overlap")).toBe(14_000);
+  });
+
+  it("stretches only the overlap and acrossfades the rate splice", () => {
+    const rate = 174 / 175;
+    const overlap = (16 * 4 * 60) / 174;
+    const source = 90;
+    const filter = buildAcrossfadeFilter({
+      trims: [
+        { startSec: 0, endSec: source, gainDb: 0, playbackRate: rate },
+        { startSec: 0, endSec: source, gainDb: 0 },
+      ],
+      overlapSeconds: [overlap],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+      tempoEngine: "rubberband",
+    });
+    expect(filter).toContain(rubberbandTempoFilter(rate));
+    expect(filter).toContain("[r0]asplit=2[rb0][rt0]");
+    expect(filter).toContain(`acrossfade=d=${RATE_SPLICE_XFADE_SEC}`);
+    const whole = buildAcrossfadeFilter({
+      trims: [
+        { startSec: 0, endSec: source, gainDb: 0, playbackRate: rate },
+        { startSec: 0, endSec: source, gainDb: 0 },
+      ],
+      overlapSeconds: [overlap],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+      tempoEngine: "rubberband",
+      stretchScope: "all",
+    });
+    expect(whole).toContain(rubberbandTempoFilter(rate));
+    expect(whole).not.toContain("[r0]asplit=2");
+  });
+
+  it("uses listen-accepted Rubber Band settings instead of atempo", () => {
+    const rate = 174 / 175;
+    const filter = buildAcrossfadeFilter({
+      trims: [
+        { startSec: 0, endSec: 44, gainDb: 0, playbackRate: rate },
+        { startSec: 0, endSec: 44, gainDb: 0 },
+      ],
+      overlapSeconds: [8],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+      tempoEngine: "rubberband",
+    });
+    expect(filter).toContain(rubberbandTempoFilter(rate));
+    expect(filter).toContain("pitchq=quality");
+    expect(filter).toContain("channels=together");
+    expect(filter).not.toContain("atempo=");
+    expect(filter).not.toContain("transients=smooth");
+    expect(filter).not.toContain("window=long");
+    const skipped = buildAcrossfadeFilter({
+      trims: [
+        { startSec: 0, endSec: 8, gainDb: 0, playbackRate: 1.001 },
+        { startSec: 0, endSec: 8, gainDb: 0 },
+      ],
+      overlapSeconds: [2],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+      tempoEngine: "rubberband",
+    });
+    expect(skipped).not.toContain("rubberband=");
   });
 
   it("builds a 3-band bass_swap graph with unity fades and no file paths", () => {
@@ -101,7 +174,11 @@ describe("filter graph", () => {
     expect(filter).toContain("highpass=f=180");
     expect(filter).toContain("highpass=f=2500");
     expect(filter).toContain("silence=0.063");
-    expect(filter).toContain("st=11.034");
+    expect(filter).toContain("st=28.965");
+    expect(filter).toContain("adelay=17931|17931");
+    expect(filter).toContain("acrossfade=d=0.040000:o=1:c1=tri:c2=tri");
+    expect(filter).toContain("[s0]asplit=2[dry][wet]");
+    expect(filter).toContain("atrim=start=17.891034");
     expect(filter).toContain("amix=inputs=6");
     expect(filter).not.toMatch(/[A-Za-z]:\\/);
     expect(filter).not.toContain(".wav");
@@ -118,12 +195,50 @@ describe("filter graph", () => {
       sampleRateHz: 48_000,
       hasAfadeUnity: true,
     });
-    expect(filter).toContain("[s0]atrim=start=0:end=12.000000");
-    expect(filter).toContain("[tail]asplit=3");
-    expect(filter).toContain("concat=n=2:v=0:a=1");
+    expect(filter).toContain("[s0]asplit=2[dry][wet]");
+    expect(filter).toContain("[dry]atrim=start=0:end=12.000000");
+    expect(filter).toContain("[wet]asplit=3");
+    expect(filter).toContain("atrim=start=11.960000");
+    expect(filter).toContain("acrossfade=d=0.040000:o=1:c1=tri:c2=tri");
+    expect(filter).not.toContain("concat=n=2");
+    expect(filter).toContain("adelay=12000|12000");
     expect(filter).not.toContain("[s0]asplit=3");
     expect(filter).toContain("[mixed]alimiter=");
     expect(filter).not.toContain("[joined]alimiter=");
+    expect(filter).toContain("[joined]atrim=start=0:end=32.000000");
+  });
+
+  it("does not isolate a prefix shorter than the run-in dry floor", () => {
+    const filter = buildPhraseMixFilter({
+      trims: [
+        { startSec: 0, endSec: 8.2, gainDb: 0, playbackRate: 1 },
+        { startSec: 0, endSec: 8, gainDb: 0, playbackRate: 1 },
+      ],
+      overlapSeconds: [8],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+      hasAfadeUnity: true,
+    });
+    expect(filter).not.toContain("concat=n=2");
+    expect(filter).toContain("[s0]asplit=3");
+  });
+
+  it("keeps a short preview prefix inside the 3-band graph", () => {
+    const filter = buildPhraseMixFilter({
+      trims: [
+        { startSec: 229.31, endSec: 264.827, gainDb: 0, playbackRate: 1 },
+        { startSec: 187.584, endSec: 223.101, gainDb: 0, playbackRate: 1 },
+      ],
+      overlapSeconds: [11.034],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+      hasAfadeUnity: true,
+      isolatePrefix: false,
+    });
+    expect(filter).not.toContain("concat=n=2");
+    expect(filter).toContain("[s0]asplit=3");
+    expect(filter).toContain("adelay=");
+    expect(filter).toContain("[joined]atrim=start=0:end=60.000000");
   });
 
   it("builds a phrase-mix graph as a 3-band split", () => {

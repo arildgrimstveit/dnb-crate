@@ -41,6 +41,9 @@ export type RenderReadiness = {
 };
 
 export type RenderManifestTrack = {
+  appliedRecipeId?: string;
+  appliedRecipeFingerprint?: string;
+  recipeReuseMode?: string;
   trackId: string;
   sourceFingerprint: string;
   entryId: string;
@@ -60,6 +63,10 @@ export type RenderManifestTrack = {
   alignmentMode?: "bar" | "beat" | "phrase" | null;
   barCount?: number | null;
   phraseShape?: string | null;
+  sequentialHandoff?: "legacy" | "early" | "supported" | null;
+  landingFadeBars?: 2 | 4 | 8 | null;
+  landingCarryBars?: 2 | 3.5 | 4 | 4.5 | null;
+  landingIncomingFadeBars?: 8 | 16 | 32 | null;
   exitKind?: string | null;
   mixOutMs?: number | null;
   mixInMs?: number | null;
@@ -69,7 +76,25 @@ export type RenderManifestTrack = {
   camelotDistance?: number | null;
 };
 
+export type FrozenJoinEvidence = {
+  outgoingTrackId: string;
+  incomingTrackId: string;
+  outgoingAnalysisVersion: string | null;
+  incomingAnalysisVersion: string | null;
+  outgoingBeatsMs: number[];
+  incomingBeatsMs: number[];
+  outgoingCamelotKey: string | null;
+  incomingCamelotKey: string | null;
+  outgoingAudioEndMs: number | null;
+  outgoingTailEnergy: number | null;
+  incomingHeadEnergy: number | null;
+  incomingDropMs: number | null;
+  recipeVersion: number | null;
+  intent: "sustain" | "lift" | "breather" | null;
+};
+
 export type RenderManifestV1 = {
+  rateRegionsVersion?: 2;
   schemaVersion: 1;
   rendererVersion: string;
   applicationVersion: string;
@@ -90,6 +115,7 @@ export type RenderManifestV1 = {
   ffprobeVersion: string;
   invocation: string;
   tracks: RenderManifestTrack[];
+  joinEvidence?: FrozenJoinEvidence[];
   automation?: AutomationEvent[];
   warnings: string[];
   createdAt: string;

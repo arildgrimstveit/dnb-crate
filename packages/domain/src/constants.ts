@@ -1,9 +1,11 @@
 export const APP_NAME = "dnb-crate-mcp";
 export const APP_VERSION = "0.5.0";
-export const RENDERER_VERSION = "6.5.0";
+export const RENDERER_VERSION = "6.13.6";
+/** Stored label for the only join engine: continuity windows, supported sequential, timing v2. */
+export const DJ_HANDOFF_POLICY = "dj-continuity-v1" as const;
 export const DEFAULT_RENDER_OUTPUT_FORMAT = "flac" as const;
 export const DEFAULT_RENDER_OUTPUT_EXTENSION = ".flac";
-/** @deprecated Prefer DSP_ANALYZER_NAME; kept for migrated Stage 4 rows. */
+/** @deprecated Prefer DSP_ANALYZER_NAME; kept for migrated envelope rows. */
 export const ANALYZER_NAME = "dnb-crate-envelope";
 export const ANALYZER_VERSION = "1.0.0";
 export const DSP_ANALYZER_NAME = "dnb-crate-dsp";
@@ -13,6 +15,8 @@ export const ANALYSIS_ENGINE_IDS = [
   "dnb-crate-envelope",
   "beat-this",
   "allin1",
+  "keyfinder",
+  "essentia-key",
 ] as const;
 export const DEFAULT_ANALYSIS_ENGINE = "dnb-crate-dsp" as const;
 export const ANALYSIS_SAMPLE_RATE_HZ = 22_050;
@@ -33,10 +37,23 @@ export const SCAN_WARNING_LIMIT = 50;
 export const FINGERPRINT_WINDOW_BYTES = 64 * 1024;
 
 export const DEFAULT_TARGET_DURATION_MS = 60 * 60 * 1000;
+export const MIN_TARGET_DURATION_MS = 60_000;
+export const MAX_TARGET_DURATION_MS = 8 * 60 * 60 * 1000;
 export const DEFAULT_TRANSITION_OVERLAP_MS = 30_000;
 export const SHORT_CROSSFADE_MS = 8_000;
 export const MIN_PLAYABLE_DURATION_MS = 90_000;
 export const DURATION_TOLERANCE_MS = 90_000;
+export const DURATION_QUALITY_WINDOW_MS = 5 * 60 * 1000;
+
+export function resolveTargetDurationMs(input: {
+  targetDurationMs?: number;
+  targetDurationMinutes?: number;
+}): number {
+  if (input.targetDurationMinutes != null) {
+    return input.targetDurationMinutes * 60_000;
+  }
+  return input.targetDurationMs ?? DEFAULT_TARGET_DURATION_MS;
+}
 export const DEFAULT_ARTIST_REPEAT_SPACING = 1;
 export const MAX_BPM_JUMP = 6;
 export const MAX_CAMELOT_DISTANCE_OK = 2;
@@ -63,6 +80,7 @@ export const DEFAULT_SCORE_WEIGHTS = {
   joinAligned: 10,
   joinHarmonic: 8,
   genrePrior: 4,
+  feedback: 6,
 } as const;
 
 export const MIN_KEY_CONFIDENCE = 0.5;
@@ -81,6 +99,8 @@ export const DEFAULT_RENDER_EDGE_FADE_MS = 0;
 export const MAX_RENDER_EDGE_FADE_MS = 5_000;
 export const RENDER_DURATION_TOLERANCE_MS = 1_000;
 export const RENDER_CHECK_RESIDUAL_FAIL_MS = 40;
+export const RENDER_CHECK_AUDIO_CONFIDENT_MS = 20;
+export const RENDER_CHECK_AUDIO_REVIEW_MS = 40;
 export const RENDER_CHECK_LEVEL_STEP_FAIL_LU = 3;
 export const LEVEL_MATCH_GAIN_MIN_DB = -6;
 export const LEVEL_MATCH_GAIN_MAX_DB = 3;
@@ -92,8 +112,10 @@ export const CROSSFADE_CURVE = "hsin";
 export const DNB_BPM_MIN = 160;
 export const DNB_BPM_MAX = 190;
 export const MAX_TEMPO_DEVIATION = 0.03;
-/** Skip atempo when |rate − 1| is below this (~0.35 BPM at 174). */
-export const ATEMPO_SKIP_THRESHOLD = 0.002;
+/** Skip atempo only for floating-point identity when no duration is available. */
+export const ATEMPO_SKIP_THRESHOLD = 1e-12;
+/** Accumulated |rate−1|·duration below this may skip atempo (10 ms landmark budget). */
+export const ATEMPO_DRIFT_BUDGET_MS = 10;
 export const MIN_ANALYSIS_CONFIDENCE = 0.6;
 export const MIN_BPM_HINT_CONFIDENCE = 0.3;
 export const PUBLISHED_BPM_INTEGER_TOLERANCE = 1.0;

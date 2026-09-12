@@ -103,6 +103,15 @@ function mapAnalysis(row: AnalysisRow, sections: TrackSection[] = []): StoredTra
 
 const PREFERRED_ORDER = ["dnb-crate-dsp", "beat-this", "allin1", "dnb-crate-envelope"];
 
+export type TrackEvidenceSelection = {
+  trackId: string;
+  rhythmEngine: string | null;
+  structureEngine: string | null;
+  keyEngine: string | null;
+  selectedAt: string;
+  reason: string | null;
+};
+
 export class AnalysisRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
@@ -124,12 +133,97 @@ export class AnalysisRepository {
     if (all.length === 0) {
       return null;
     }
+    const selected = this.getSelection(trackId)?.rhythmEngine;
+    if (selected) {
+      const match = all.find((row) => row.analyzerName === selected);
+      if (match) {
+        return match;
+      }
+    }
     const ranked = [...all].sort((a, b) => {
       const ai = PREFERRED_ORDER.indexOf(a.analyzerName);
       const bi = PREFERRED_ORDER.indexOf(b.analyzerName);
       return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
     });
     return ranked[0] ?? null;
+  }
+
+  getSelection(trackId: string): TrackEvidenceSelection | null {
+    const row = this.db
+      .prepare(
+        `SELECT track_id, rhythm_engine, structure_engine, key_engine, selected_at, reason
+         FROM track_evidence_selection WHERE track_id = ?`,
+      )
+      .get(trackId) as
+      | {
+          track_id: string;
+          rhythm_engine: string | null;
+          structure_engine: string | null;
+          key_engine: string | null;
+          selected_at: string;
+          reason: string | null;
+        }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      trackId: row.track_id,
+      rhythmEngine: row.rhythm_engine,
+      structureEngine: row.structure_engine,
+      keyEngine: row.key_engine,
+      selectedAt: row.selected_at,
+      reason: row.reason,
+    };
+  }
+
+  setSelection(
+    trackId: string,
+    input: {
+      rhythmEngine?: string | null;
+      structureEngine?: string | null;
+      keyEngine?: string | null;
+      reason?: string;
+    },
+  ): TrackEvidenceSelection {
+    const existing = this.getSelection(trackId);
+    const next = {
+      rhythmEngine: input.rhythmEngine === undefined ? existing?.rhythmEngine ?? null : input.rhythmEngine,
+      structureEngine:
+        input.structureEngine === undefined ? existing?.structureEngine ?? null : input.structureEngine,
+      keyEngine: input.keyEngine === undefined ? existing?.keyEngine ?? null : input.keyEngine,
+      selectedAt: new Date().toISOString(),
+      reason: input.reason ?? existing?.reason ?? null,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO track_evidence_selection (
+          track_id, rhythm_engine, structure_engine, key_engine, selected_at, reason
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(track_id) DO UPDATE SET
+          rhythm_engine = excluded.rhythm_engine,
+          structure_engine = excluded.structure_engine,
+          key_engine = excluded.key_engine,
+          selected_at = excluded.selected_at,
+          reason = excluded.reason`,
+      )
+      .run(
+        trackId,
+        next.rhythmEngine,
+        next.structureEngine,
+        next.keyEngine,
+        next.selectedAt,
+        next.reason,
+      );
+    return this.getSelection(trackId)!;
+  }
+
+  findKeyAnalysis(trackId: string): StoredTrackAnalysis | null {
+    const selected = this.getSelection(trackId)?.keyEngine;
+    if (selected) {
+      return this.findByTrackId(trackId, selected);
+    }
+    return this.findByTrackId(trackId);
   }
 
   listSections(trackId: string, analyzerName: string): TrackSection[] {
@@ -283,7 +377,8 @@ export class AnalysisRepository {
       return null;
     }
     const bpm = resolveCanonicalBpm(track, analysis);
-    const key = resolveCanonicalKey(track, analysis);
+    const keyAnalysis = this.findKeyAnalysis(track.id) ?? analysis;
+    const key = resolveCanonicalKey(track, keyAnalysis);
     const availableEngines = this.listByTrackId(track.id).map((row) => row.analyzerName);
     const hint = resolveBpmHint(analysis);
     const keyCandidates =

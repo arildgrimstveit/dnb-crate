@@ -1,3 +1,5 @@
+import { outputToSourceMs, sourceToOutputMs } from "@dnb-crate/domain";
+
 export function nearestTime(times: number[], target: number): number {
   if (times.length === 0) {
     return target;
@@ -57,17 +59,18 @@ export function downbeatAlignmentOffsetMs(input: {
   if (input.outgoingDownbeatsMs.length === 0 || input.incomingDownbeatsMs.length === 0) {
     return { offsetMs: 0, periodMs, mode };
   }
-  const nearestPhrase = (origin: number, target: number): number => {
-    const k = Math.round((target - origin) / phraseMs);
-    return origin + k * phraseMs;
+  const nearestPhrase = (origin: number, target: number, rate: number): number => {
+    const sourcePhraseMs = phraseMs * rate;
+    const k = Math.round((target - origin) / sourcePhraseMs);
+    return origin + k * sourcePhraseMs;
   };
   const outRef =
     phraseMode && input.outgoingPhraseOriginMs != null
-      ? nearestPhrase(input.outgoingPhraseOriginMs, input.outgoingOverlapStartMs)
+      ? nearestPhrase(input.outgoingPhraseOriginMs, input.outgoingOverlapStartMs, outgoingRate)
       : nearestTime(input.outgoingDownbeatsMs, input.outgoingOverlapStartMs);
   const inRef =
     phraseMode && input.incomingPhraseOriginMs != null
-      ? nearestPhrase(input.incomingPhraseOriginMs, input.incomingOverlapStartMs)
+      ? nearestPhrase(input.incomingPhraseOriginMs, input.incomingOverlapStartMs, incomingRate)
       : nearestTime(input.incomingDownbeatsMs, input.incomingOverlapStartMs);
   const outPhase = (outRef - input.outgoingOverlapStartMs) / outgoingRate;
   const inPhase = (inRef - input.incomingOverlapStartMs) / incomingRate;
@@ -92,10 +95,11 @@ export function planAlignmentOffsetMs(
         : 174;
   const beatPeriod = 60_000 / targetBpm;
   const halfBar = beatPeriod * 2;
+  const incomingRate = input.incomingRate && input.incomingRate > 0 ? input.incomingRate : 1;
   const canPhrase = input.outgoingPhraseOriginMs != null && input.incomingPhraseOriginMs != null;
   if (canPhrase) {
     const phrase = downbeatAlignmentOffsetMs(input);
-    if (Math.abs(phrase.offsetMs) <= halfBar) {
+    if (Math.abs(phrase.offsetMs) / incomingRate <= halfBar) {
       return phrase;
     }
     const bar = downbeatAlignmentOffsetMs({
@@ -105,7 +109,7 @@ export function planAlignmentOffsetMs(
       outgoingDownbeatConfidence: 1,
       incomingDownbeatConfidence: 1,
     });
-    if (Math.abs(bar.offsetMs) <= halfBar) {
+    if (Math.abs(bar.offsetMs) / incomingRate <= halfBar) {
       return bar;
     }
     return downbeatAlignmentOffsetMs({
@@ -140,6 +144,7 @@ export function applyAlignmentOffset(input: {
   movedOutgoingEnd: boolean;
 } {
   const outgoingRate = input.outgoingRate > 0 ? input.outgoingRate : 1;
+  const incomingRate = input.incomingRate > 0 ? input.incomingRate : 1;
   const incomingStart = input.incomingStartMs + input.offsetMs;
   if (incomingStart >= 0 && incomingStart < input.incomingEndMs - 1000) {
     return {
@@ -152,9 +157,11 @@ export function applyAlignmentOffset(input: {
   }
   return {
     incomingStartMs: input.incomingStartMs,
-    outgoingEndMs: input.outgoingEndMs - input.offsetMs * outgoingRate,
+    outgoingEndMs:
+      input.outgoingEndMs - outputToSourceMs(sourceToOutputMs(input.offsetMs, incomingRate), outgoingRate),
     appliedOffsetMs: input.offsetMs,
-    overlapMs: input.overlapMs != null ? Math.max(1, input.overlapMs - input.offsetMs) : undefined,
+    // Keep the output overlap fixed: changing it by the same amount cancels the phase correction.
+    overlapMs: input.overlapMs,
     movedOutgoingEnd: true,
   };
 }

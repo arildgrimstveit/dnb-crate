@@ -1,15 +1,62 @@
-# DnB Crate MCP
+# DnB Crate
 
-Local-first catalog for a private drum & bass library. An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server; the same domain services are also available from a CLI. The app indexes a local crate, analyzes tracks (BPM, grid, key, sections, descriptors), plans a deterministic one-hour set, and renders a gapless 24-bit FLAC with equal-power crossfades plus beat-aligned phrase mixes and bass swaps.
+Point this at a local drum & bass folder. It catalogs the files, measures grids and keys, plans a deterministic mix of the length you ask for, and renders a gapless 24-bit FLAC.
 
-The language model interprets requests. This application owns scanning, storage, search, and validation.
+An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server. The same services are on the CLI. The model interprets requests; this app owns scanning, storage, search, planning, and rendering.
+
+## Ask for a mix
+
+Talk to the MCP host (Cursor, Codex). Mood or energy plus a length is enough. The host maps that onto `create_set_plan` and can scan, analyze, plan, validate, and render. The planner picks the order and joins; it does not write audio. The renderer prints a gapless **24-bit 48 kHz FLAC**.
+
+Say whatever else you care about: preferred moods, subgenres, or artists; an energy arc; a start or closer by title; a seed; genres to include or exclude; descriptor floors. Named titles are resolved with `search_tracks` (your catalog only). If you omit a length, the plan is **60 minutes**. Allowed range is 1 minute–8 hours.
+
+The catalog must already be configured and migrated (`libraryRoots`, `db:migrate`). New or unanalyzed files need `scan_library` / `library:scan` and `start_track_analysis` / `analysis:run` before a full-length plan is likely. A crate that cannot fill the length returns a **partial** plan.
+
+Examples:
+
+- “30 minutes of liquid, keep it mid energy, seed 4.”
+- “Peak-time hour. Climb into the last third, then ease off.”
+- “Hour of liquid. Close on a title from this folder.”
+- “20-minute mix, rolling energy.”
+
+Those words become structured fields:
+
+| You say | `create_set_plan` |
+| --- | --- |
+| “20 minutes” / “an hour” | `targetDurationMinutes` or `targetDurationMs` |
+| “liquid”, “peak-time” | `preferredMoods` |
+| “liquid funk” | `preferredSubgenres` |
+| named artists | `preferredArtists` |
+| energy curve | `requestedArc` (energy 1–10 at fractions of the mix). Default 3 → 9 at 0.75 → 6 |
+| “start on X” / “close on Y” | `startTrackId` / `endTrackId` |
+| descriptor floors | `descriptors` (`min`/`max` 0–1, or `minPct`/`maxPct`) |
+| include/exclude genres | `genres.include` / `genres.exclude` |
+| “same mix again” | `seed` (default 1) |
+
+New plans: `qualityPolicy: "strict"`, omit `targetBpm` (each overlap beatmatches at the pair tempo), `dropAnchored` defaults true. Do not pin historical pairs or recipes unless you ask.
+
+Ready to render means the plan is valid, quality checks pass, and duration is within **5 minutes** of the request. The planner still aims within **90 s**. Analysis is advisory. Provenance is **manual > published > analyzed > tag**. The model must not invent BPM, key, energy, or cues.
+
+### CLI
+
+Same services, no host model. Duration and seed are flags. Moods, arc, descriptors, and genres need a brief JSON. Start from `docs/examples/liquid-hour.example.brief.json` or `docs/examples/peak-hour.example.brief.json`. Change duration, moods, descriptor floors, and seed. Do not copy title lists or exclude IDs from another library.
+
+```bash
+pnpm cli plan:create --brief-json docs/examples/liquid-hour.example.brief.json
+pnpm cli plan:create --name "20-minute mix" --duration-min 20 --seed 4
+pnpm cli plan:create --name "Named closer" --duration-min 60 --end-query "title words"
+```
+
+`--duration-min` or `--duration-ms`, not both. Then `plan:quality`, `render:start`, `render:check`.
 
 ## Prerequisites
 
-- Node.js 24+ (the version used at repo init was 24.16.0)
+- Node.js 24+
 - [pnpm](https://pnpm.io/) 11+
-- A folder of audio you own or may access (`.wav`, `.flac`, `.mp3`, `.m4a`, `.aiff`)
-- FFmpeg **and** ffprobe on `PATH` for rendering (see `docs/rendering.md` and `docs/analysis.md`). Status tools report whether they are present.
+- A folder of audio you own (`.wav`, `.flac`, `.mp3`, `.m4a`, `.aiff`)
+- FFmpeg and ffprobe on `PATH` (see `docs/rendering.md`)
+- Optional: Rubber Band 4 CLI under `tools/rubberband-cli/` for join-only R3 stretch
+- Optional: KeyFinder CLI under `tools/keyfinder-cli/` for musical keys (DSP chroma keys are unused)
 
 ## Setup
 
@@ -18,50 +65,33 @@ pnpm install
 copy dnb-crate.config.example.json dnb-crate.config.json
 ```
 
-Edit `dnb-crate.config.json` so `libraryRoots` points at your music folder and `outputRoot` points at a directory that is **not** inside that library. Both `dnb-crate.config.json` and `data/` are gitignored.
+Set `libraryRoots` to your music folder and `outputRoot` to a directory **outside** that folder. Config and `data/` are gitignored. Environment variables: `.env.example`.
 
-Alternatively, use environment variables (see `.env.example`).
-
-## CLI
+## Typical flow
 
 ```bash
 pnpm cli db:migrate
 pnpm cli library:scan
-pnpm cli library:scan --dry-run
-pnpm cli library:stats
-pnpm cli track:search --query "Technimatic" --limit 10
-pnpm cli analysis:start --track-id UUID --wait
-pnpm cli analysis:run --scope stale --wait --timeout-min 90
-pnpm cli analysis:gate
-pnpm cli analysis:get --track-id UUID
-pnpm cli analysis:compare --track-id UUID
-pnpm cli analysis:report
-pnpm cli analysis:cue-preview --track-id UUID --cue drop
-pnpm cli transition:plan --from UUID --to UUID --bars 32
-pnpm cli plan:create --name "Liquid hour" --duration-ms 3600000 --seed 1 --end-query "Nightfall"
-pnpm cli plan:create --brief-json docs/examples/peak-hour-v5.brief.json
-pnpm cli plan:list
-pnpm cli plan:get --id UUID
-pnpm cli plan:validate --id UUID
+pnpm cli analysis:run --scope unanalyzed --wait --timeout-min 90
+pnpm cli plan:create --brief-json docs/examples/liquid-hour.example.brief.json
+pnpm cli plan:quality --id UUID
 pnpm cli render:start --plan-id UUID --wait
 pnpm cli render:check --id JOB
-pnpm cli render:status --id UUID
-pnpm cli render:manifest --id UUID
 ```
 
-JSON is written to stdout. Diagnostics go to stderr.
+JSON goes to stdout. Diagnostics go to stderr.
+
+Other useful commands: `library:stats`, `track:search`, `analysis:get`, `transition:plan`, `plan:list`, `plan:validate`.
 
 ## MCP server (stdio)
 
-Stdout is reserved for JSON-RPC. Do not `console.log` in this process.
+Stdout is reserved for JSON-RPC.
 
 ```bash
 pnpm mcp
 ```
 
-### Cursor
-
-In your user MCP config (path varies by Cursor version), add a server without hardcoding someone else’s disk layout:
+Cursor MCP config (do not hardcode someone else’s disk layout):
 
 ```json
 {
@@ -80,57 +110,22 @@ In your user MCP config (path varies by Cursor version), add a server without ha
 
 Use `pnpm exec tsx` instead of `npx tsx` if you prefer the workspace binary.
 
-### MCP Inspector
-
 ```bash
 npx @modelcontextprotocol/inspector pnpm mcp
 ```
 
-Set the same `DNB_CRATE_*` environment variables in the Inspector session. Confirm `tools/list`, call `scan_library`, then `search_tracks`.
+Tool contracts: `docs/tool-contracts.md`. Prompt: `build-dnb-set` (see **Ask for a mix**).
 
-## Tools (33)
+## How it fits together
 
-| Tool                        | When to use                                                                          |
-| --------------------------- | ------------------------------------------------------------------------------------ |
-| `get_server_status`         | Health: database, root count, ffmpeg/ffprobe, enrichment flags. No secrets or paths. |
-| `scan_library`              | Re-index configured roots. Optional `dryRun`.                                        |
-| `search_tracks`             | Filter the catalog, including descriptor ranges and genres. Max 50, cursor pages.    |
-| `get_track`                 | One track UUID, including cue points.                                                |
-| `update_track_metadata`     | Energy, rating, moods, genres, album/label/date/isrc, plus manual BPM/key.           |
-| `get_library_stats`         | Counts, coverage, and descriptor percentiles.                                        |
-| `set_cue_points`            | Replace manual cue points; optional beat anchor.                                     |
-| `start_track_analysis`      | Queue analysis by ids or scope (`unanalyzed` / `stale` / `all`).                     |
-| `get_analysis_status`       | Poll analysis jobs.                                                                  |
-| `get_track_analysis`        | Beat grid, confidence, canonical vs analyzed BPM/key, descriptor pack.               |
-| `compare_track_analyses`    | Per-engine BPM/key/sections plus the five descriptor sliders.                        |
-| `get_track_sections`        | Intro/build/drop/breakdown/outro labels.                                             |
-| `get_analysis_report`       | Engine agreement vs published/manual BPM, plus keyAgreement vs labelled keys.        |
-| `create_cue_preview`        | 8-second WAV around a detected cue.                                                  |
-| `start_metadata_enrichment` | MusicBrainz / Deezer / AcoustID lookup. Optional `dryRun`. Never writes file tags.   |
-| `get_enrichment_status`     | Poll enrichment jobs.                                                                |
-| `get_enrichment_report`     | Match counts, needsReview, published BPM writes, disagreements, duplicates.          |
-| `get_planning_readiness`    | Which tracks lack BPM/key/energy/file. A `bpmHint` counts as BPM.                    |
-| `find_compatible_tracks`    | Rank candidates (BPM/Camelot/energy/tags/descriptors).                               |
-| `create_set_plan`           | Deterministic draft from structured constraints, including descriptor/genre filters and crate-percentile ranges. |
-| `get_set_plan`              | Load a saved plan.                                                                   |
-| `validate_set_plan`         | Errors vs warnings plus energy/duration diagnostics.                                 |
-| `update_set_plan`           | Explicit replace/trim/transition/rate/applyTransition/reorder edits.                 |
-| `list_set_plans`            | Bounded list.                                                                        |
-| `delete_set_plan`           | Requires `confirm: true`.                                                            |
-| `plan_transition`           | Rank phrase-mix / bass-swap / crossfade proposals for a pair.                        |
-| `validate_transition`       | Feasibility of a concrete template (grids, rates, cues).                             |
-| `create_transition_preview` | Queue a 30–60s FLAC preview; optional `phrase_mix` / `bass_swap` template.           |
-| `start_set_render`          | Queue a full 24-bit FLAC render. Returns a job id immediately.                       |
-| `get_render_status`         | Poll progress 0–1 and terminal state.                                                |
-| `list_render_jobs`          | Bounded list of preview/full jobs.                                                   |
-| `cancel_render_job`         | Requires `confirm: true`. Kills the FFmpeg process.                                  |
-| `get_render_manifest`       | Fingerprints, trims, LUFS, true peak, checksum after success.                        |
+| Part | Job |
+| --- | --- |
+| **Catalog** | Scan configured roots. Source files stay read-only. |
+| **Analyzer** | Measure BPM/grid, key, sections, loudness. Advisory until confidence clears the floor. |
+| **Planner** | Same catalog + brief + seed → same mix. Picks order and joins; does not write audio. |
+| **Renderer** | Prints the plan: beatmatched overlaps, 3-band fades, −14 LUFS, 24-bit FLAC. |
 
-Resources: `dnbcrate://tracks/{trackId}`, `dnbcrate://tracks/{trackId}/analysis`, `dnbcrate://set-plans/{setPlanId}`, `dnbcrate://renders/{renderJobId}/manifest`.
-
-Prompt: `build-dnb-set` (optional; the tool workflow works without it).
-
-Scoring details: `docs/scoring.md`. Analysis / templates: `docs/analysis.md`. Rendering / loudness / jobs: `docs/rendering.md`. Ear-check lessons for later mixes: `docs/mixing-lessons.md`. Example plan JSON: `docs/examples/peak-hour-v5.brief.json`, `docs/examples/liquid-hour-v5.brief.json`.
+Docs: [analysis](docs/analysis.md), [scoring](docs/scoring.md), [mixing](docs/mixing.md), [rendering](docs/rendering.md). Example briefs: `docs/examples/liquid-hour.example.brief.json`, `docs/examples/peak-hour.example.brief.json`.
 
 ## Tests
 
@@ -141,18 +136,15 @@ pnpm lint
 pnpm format:check
 ```
 
-Tests generate tiny sine-wave fixtures. They never read a private library.
+Tests use tiny sine-wave fixtures. They never read a private library.
 
 ## Layout
 
-- `packages/domain` — types, config, errors, key normalization
-- `packages/catalog` — SQLite, scanner, search, set plans, analysis jobs, render jobs
-- `packages/audio-analysis` — envelope BPM/grid analyzer, click-track fixtures
-- `packages/audio-renderer` — FFmpeg adapter, equal-power / phrase-mix / bass-swap, loudness
-- `apps/cli` — deterministic administration
+- `packages/domain` — types, config, keys, scoring contracts
+- `packages/catalog` — SQLite, scan, analysis jobs, planner, render jobs
+- `packages/audio-analysis` — DSP grid / descriptors
+- `packages/audio-renderer` — FFmpeg graphs
+- `apps/cli` — administration
 - `apps/mcp-server` — thin MCP adapters
-- `docs/` — decisions, progress, tool contracts, spec
 
-## Source-file safety
-
-Source music is read-only. Generated files go under `outputRoot`. Tools never accept arbitrary paths, SQL, or shell commands.
+Generated files go under `outputRoot`. Tools never accept arbitrary paths, SQL, or shell commands.

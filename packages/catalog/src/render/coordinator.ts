@@ -18,13 +18,19 @@ import {
   RENDER_CHECK_LEVEL_STEP_FAIL_LU,
   RENDER_CHECK_RESIDUAL_FAIL_MS,
   RENDERER_VERSION,
+  analyzerVersionLessThan,
   assertPlaybackRate,
   clampMixPresetParams,
   resolveRenderPhraseShape,
   expandPreset,
   normalizePhraseBars,
+  outputToSourceMs,
   isDomainError,
   sectionAtMs,
+  sequentialHandoffLabel,
+  resolvePlanRateRegionsVersion,
+  resolveRateRegions,
+  outputPositionToSourceMs,
   type AppConfig,
   type AutomationEvent,
   type Logger,
@@ -40,6 +46,7 @@ import {
   type ValidateSetPlanResult,
   type ValidationIssue,
   effectiveEnergy,
+  resolveCanonicalKeyConfidence,
 } from "@dnb-crate/domain";
 import {
   detectFfmpeg,
@@ -62,18 +69,20 @@ import {
 } from "@dnb-crate/audio-renderer";
 
 import {
-  alignmentResidualMs,
-  plannedLevelStepLu,
+  evaluateDurationError,
   firstDropMs,
+  freezeJoinEvidence,
   joinCamelotDistance,
   measureLevelStepLu,
   paramNumber,
   paramString,
+  plannedLevelStepLu,
+  storedGridFromEvidence,
 } from "./check-metrics.ts";
 import { fingerprintFile } from "../fingerprint.ts";
 import { isPathInsideAnyRoot, isPathInsideRoot } from "../paths.ts";
 import { sectionEnergyAt } from "../planning/cues.ts";
-import { planDurationMs, playableOutputMs } from "../planning/timeline.ts";
+import { planDurationMs, plannedMixDurationMs, playableOutputMs } from "../planning/timeline.ts";
 import { validateSetPlan } from "../planning/validate.ts";
 import type { TrackRepository } from "../repository.ts";
 import type { SetPlanRepository } from "../set-plan-repository.ts";
@@ -97,6 +106,10 @@ export type RenderCheckJoin = {
   incomingGainDb: number;
   camelotDistance: number | null;
   residualMs: number | null;
+  storedGridResidualMs: number | null;
+  residualKind: "stored-grid-consistency";
+  evidenceSource: "frozen-manifest" | "missing";
+  audioStatus: "unmeasured" | "pass" | "review" | "fail" | "advisory";
   levelStepLu: number | null;
   lowOverlapSec: number | null;
   outgoingRate: number;
@@ -112,8 +125,13 @@ export type RenderCheckResult = {
   renderJobId: string;
   outputPath: string;
   durationMs: number;
+  plannedDurationMs: number | null;
+  durationErrorMs: number | null;
+  durationStatus: "pass" | "warning" | "fail" | "unmeasured";
   interiorSilence: Array<{ startMs: number; endMs: number; durationMs: number }>;
   joins: RenderCheckJoin[];
+  failures: string[];
+  warnings: string[];
   ok: boolean;
 };
 
@@ -142,6 +160,12 @@ export type PreparedSegment = MixSegment & {
   mixInMs: number | null;
   exitKind: string | null;
   incomingDropMs: number | null;
+  beatTimesMs: number[];
+  camelotKey: string | null;
+  audioEndMs: number | null;
+  tailEnergy: number | null;
+  headEnergy: number | null;
+  recipeVersion: number | null;
 };
 
 type RenderSettings = {
@@ -153,9 +177,10 @@ type RenderSettings = {
   edgeFadeMs: number;
   ffmpegPath: string;
   ffprobePath: string;
+  rubberbandCliPath: string | null;
 };
 
-function settingsFrom(config: AppConfig): RenderSettings {
+function settingsFrom(config: AppConfig, rubberbandCliPath: string | null): RenderSettings {
   return {
     loudnessTargetLufs: config.loudnessTargetLufs ?? DEFAULT_LOUDNESS_TARGET_LUFS,
     truePeakCeilingDb: config.truePeakCeilingDb ?? DEFAULT_TRUE_PEAK_CEILING_DB,
@@ -165,6 +190,7 @@ function settingsFrom(config: AppConfig): RenderSettings {
     edgeFadeMs: config.renderEdgeFadeMs ?? DEFAULT_RENDER_EDGE_FADE_MS,
     ffmpegPath: config.ffmpegPath ?? "ffmpeg",
     ffprobePath: config.ffprobePath ?? "ffprobe",
+    rubberbandCliPath,
   };
 }
 
@@ -183,6 +209,8 @@ function toPublicJob(job: StoredRenderJob): RenderJob {
 }
 
 export class RenderCoordinator {
+  /** Revalidate queued full jobs against the actual plan before decoding sources. */
+  validateFullPlan?: (setPlanId: string, options?: { allowOverlongDuration?: boolean }) => void;
   private running = 0;
   private stopped = false;
   private binaries: FfmpegBinaries | null | undefined;
@@ -197,8 +225,9 @@ export class RenderCoordinator {
     private readonly analyses: AnalysisRepository,
     private readonly runner: ProcessRunner,
     private readonly logger: Logger,
+    rubberbandCliPath: string | null = null,
   ) {
-    this.settings = settingsFrom(config);
+    this.settings = settingsFrom(config, rubberbandCliPath);
   }
 
   recoverInterrupted(): number {
@@ -254,6 +283,7 @@ export class RenderCoordinator {
       loudnessTargetLufs: this.settings.loudnessTargetLufs,
       edgeFadeMs: 20,
       postProcess: false,
+      rubberbandCliPath: this.settings.rubberbandCliPath,
     });
     return { outputRelpath: input.relPath.split(path.sep).join("/") };
   }
@@ -273,7 +303,14 @@ export class RenderCoordinator {
     }
     const structural = validateSetPlan(stored.plan, tracksById, {
       audioEndMsByTrackId: this.audioEndMsByTrackId(),
+      firstDropStartMsByTrackId: this.firstDropStartMsByTrackId(),
       effectiveEnergyByTrackId,
+      keyConfidenceByTrackId: new Map(
+        [...tracksById.values()].map((track) => [
+          track.id,
+          resolveCanonicalKeyConfidence(track, this.analyses.findKeyAnalysis(track.id)),
+        ]),
+      ),
     });
     const renderReadiness = await this.assessReadiness(stored.plan, tracksById, options);
     return { ...structural, renderReadiness };
@@ -284,6 +321,7 @@ export class RenderCoordinator {
     edgeFadeMs?: number;
     allowLowConfidence?: boolean;
     allowExcessiveTempo?: boolean;
+    allowOverlongDuration?: boolean;
   }): Promise<{ job: RenderJob; warnings: string[] }> {
     const stored = this.requirePlan(input.setPlanId);
     const validation = await this.validatePlan(input.setPlanId, {
@@ -322,6 +360,7 @@ export class RenderCoordinator {
         edgeFadeMs: input.edgeFadeMs ?? this.settings.edgeFadeMs,
         allowLowConfidence: input.allowLowConfidence,
         allowExcessiveTempo: input.allowExcessiveTempo,
+        allowOverlongDuration: input.allowOverlongDuration,
       },
     });
     this.kick();
@@ -380,6 +419,7 @@ export class RenderCoordinator {
       template: input.template ?? pair.outgoing.transitionToNext?.type ?? "crossfade",
       barCount: input.barCount ?? null,
       transitionId: input.transitionId,
+      transition: pair.outgoing.transitionToNext,
       outgoing: {
         trackId: pair.outgoing.trackId,
         start: pair.outgoing.sourceStartMs,
@@ -491,58 +531,64 @@ export class RenderCoordinator {
         endMs: span.endMs as number,
         durationMs: (span.endMs as number) - span.startMs,
       }));
-    const plan = job.setPlanId ? this.plans.findById(job.setPlanId)?.plan : null;
-    const entries = plan?.entries.slice().sort((a, b) => a.order - b.order) ?? [];
+    const last = manifest.tracks.at(-1);
+    const plannedDurationMs = last
+      ? plannedMixDurationMs(
+          manifest.tracks,
+          analyzerVersionLessThan(manifest.rendererVersion, "6.10.0") ? "all" : "overlap",
+          manifest.rateRegionsVersion,
+        )
+      : null;
+    const duration = evaluateDurationError(durationMs, plannedDurationMs, manifest.kind);
     const joins: RenderCheckJoin[] = [];
     for (let i = 0; i < manifest.tracks.length - 1; i += 1) {
       const outgoing = manifest.tracks[i]!;
       const incoming = manifest.tracks[i + 1]!;
-      const outEntry = entries.find((entry) => entry.trackId === outgoing.trackId);
       const outTrack = this.tracks.findById(outgoing.trackId);
       const inTrack = this.tracks.findById(incoming.trackId);
-      const outAnalysis = this.analyses.findByTrackId(outgoing.trackId);
-      const inAnalysis = this.analyses.findByTrackId(incoming.trackId);
-      const audioEnd =
-        typeof outAnalysis?.descriptors?.audioEndMs === "number"
-          ? outAnalysis.descriptors.audioEndMs
-          : null;
+      const evidence = manifest.joinEvidence?.find(
+        (item) => item.outgoingTrackId === outgoing.trackId && item.incomingTrackId === incoming.trackId,
+      );
+      const audioEnd = evidence?.outgoingAudioEndMs ?? null;
       const overlap = outgoing.overlapToNextMs ?? 0;
-      const windowInSilence =
-        audioEnd !== null && outgoing.sourceEndMs > audioEnd + 250;
-      const params = outEntry?.transitionToNext?.parameters;
-      const barRaw = paramNumber(params, "barCount") ?? outgoing.barCount ?? null;
+      const windowInSilence = audioEnd !== null && outgoing.sourceEndMs > audioEnd + 250;
       const alignmentMode =
         incoming.alignmentMode === "bar" ||
         incoming.alignmentMode === "beat" ||
         incoming.alignmentMode === "phrase"
           ? incoming.alignmentMode
           : null;
+      const prevOverlap = i > 0 ? (manifest.tracks[i - 1]!.overlapToNextMs ?? 0) : 0;
+      const outgoingPlayable = analyzerVersionLessThan(manifest.rendererVersion, "6.10.0")
+        ? (outgoing.sourceEndMs - outgoing.sourceStartMs) /
+          (outgoing.playbackRate > 0 ? outgoing.playbackRate : 1)
+        : playableOutputMs(
+            {
+              sourceStartMs: outgoing.sourceStartMs,
+              sourceEndMs: outgoing.sourceEndMs,
+              playbackRate: outgoing.playbackRate,
+              overlapToNextMs: outgoing.overlapToNextMs,
+            },
+            prevOverlap,
+            manifest.rateRegionsVersion,
+          );
       const overlapAtMs =
         overlap > 0
-          ? Math.round(
-              outgoing.timelineStartMs +
-                playableOutputMs({
-                  sourceStartMs: outgoing.sourceStartMs,
-                  sourceEndMs: outgoing.sourceEndMs,
-                  playbackRate: outgoing.playbackRate,
-                }) -
-                overlap,
-            )
+          ? Math.round(outgoing.timelineStartMs + outgoingPlayable - overlap)
           : null;
       const outOverlapStart =
-        outgoing.sourceEndMs - overlap * (outgoing.playbackRate > 0 ? outgoing.playbackRate : 1);
-      const residualMs = alignmentResidualMs(
-        incoming.downbeatOffsetMs,
-        outAnalysis?.beatTimesMs ?? [],
-        inAnalysis?.beatTimesMs ?? [],
+        outgoing.sourceEndMs - outputToSourceMs(overlap, outgoing.playbackRate);
+      const storedGrid = storedGridFromEvidence(
+        evidence,
         outOverlapStart,
         incoming.sourceStartMs,
         outgoing.playbackRate,
         incoming.playbackRate,
+        incoming.downbeatOffsetMs,
         incoming.alignmentPeriodMs ?? null,
       );
-      const tailEnergy = sectionEnergyAt(outAnalysis?.sections, outOverlapStart) ?? 0;
-      const headEnergy = sectionEnergyAt(inAnalysis?.sections, incoming.sourceStartMs) ?? 0;
+      const tailEnergy = evidence?.outgoingTailEnergy ?? 0;
+      const headEnergy = evidence?.incomingHeadEnergy ?? 0;
       const lowOverlapSec =
         overlap > 0 && tailEnergy >= 0.25 && headEnergy >= 0.15
           ? Number((overlap / 1000).toFixed(2))
@@ -565,18 +611,25 @@ export class RenderCoordinator {
         outgoingTitle: outTrack?.title ?? outgoing.trackId,
         incomingTitle: inTrack?.title ?? incoming.trackId,
         template: outgoing.transitionTemplate,
-        barCount: barRaw,
-        phraseShape: paramString(params, "phraseShape") ?? outgoing.phraseShape ?? null,
-        exitKind: paramString(params, "exitKind") ?? outgoing.exitKind ?? null,
-        mixOutMs: paramNumber(params, "mixOutMs") ?? outgoing.mixOutMs ?? null,
-        mixInMs: paramNumber(params, "mixInMs") ?? outgoing.mixInMs ?? null,
-        incomingDropMs: firstDropMs(inAnalysis?.sections) ?? outgoing.incomingDropMs ?? null,
-        outgoingLufs: outAnalysis?.integratedLufs ?? outgoing.outgoingLufs ?? null,
-        incomingLufs: inAnalysis?.integratedLufs ?? outgoing.incomingLufs ?? null,
+        barCount: outgoing.barCount ?? null,
+        phraseShape: outgoing.phraseShape ?? null,
+        exitKind: outgoing.exitKind ?? null,
+        mixOutMs: outgoing.mixOutMs ?? null,
+        mixInMs: outgoing.mixInMs ?? null,
+        incomingDropMs: outgoing.incomingDropMs ?? evidence?.incomingDropMs ?? null,
+        outgoingLufs: outgoing.outgoingLufs ?? null,
+        incomingLufs: outgoing.incomingLufs ?? null,
         outgoingGainDb: outgoing.gainDb,
         incomingGainDb: incoming.gainDb,
-        camelotDistance: joinCamelotDistance(outTrack?.camelotKey ?? null, inTrack?.camelotKey ?? null),
-        residualMs,
+        camelotDistance:
+          evidence != null
+            ? joinCamelotDistance(evidence.outgoingCamelotKey, evidence.incomingCamelotKey)
+            : (outgoing.camelotDistance ?? null),
+        residualMs: storedGrid.residualMs,
+        storedGridResidualMs: storedGrid.residualMs,
+        residualKind: storedGrid.kind,
+        evidenceSource: storedGrid.source,
+        audioStatus: "unmeasured",
         levelStepLu,
         lowOverlapSec,
         outgoingRate: outgoing.playbackRate,
@@ -591,8 +644,9 @@ export class RenderCoordinator {
     const residualFail = joins.some(
       (join) =>
         (join.template === "phrase_mix" || join.template === "bass_swap") &&
-        join.residualMs != null &&
-        Math.abs(join.residualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS,
+        join.evidenceSource === "frozen-manifest" &&
+        join.storedGridResidualMs != null &&
+        Math.abs(join.storedGridResidualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS,
     );
     const levelFail = joins.some((join) => {
       const matched = plannedLevelStepLu(
@@ -604,19 +658,45 @@ export class RenderCoordinator {
       if (matched != null) {
         return Math.abs(matched) > RENDER_CHECK_LEVEL_STEP_FAIL_LU;
       }
-      return join.levelStepLu != null && Math.abs(join.levelStepLu) > RENDER_CHECK_LEVEL_STEP_FAIL_LU;
+      return false;
     });
+    const failures = [
+      ...interiorSilence.map((span) => `interior silence ${span.startMs}-${span.endMs}`),
+      ...joins.filter((join) => join.windowInSilence).map((join) => `join ${join.order} window in silence`),
+      ...(residualFail ? ["stored-grid residual above 40 ms"] : []),
+      ...(levelFail ? ["planned LUFS step above 3 LU"] : []),
+      ...(duration.status === "fail"
+        ? [`output/plan duration error ${duration.errorMs} ms`]
+        : []),
+    ];
+    const warningList = [
+      ...(duration.status === "warning"
+        ? [`output/plan duration error ${duration.errorMs} ms (preview)`]
+        : []),
+      ...joins
+        .filter((join) => join.evidenceSource === "missing")
+        .map((join) => `join ${join.order} stored-grid unmeasured (no frozen evidence)`),
+      ...joins
+        .filter((join) => join.audioStatus === "unmeasured")
+        .map((join) => `join ${join.order} independent audio unmeasured`),
+    ];
     return {
       renderJobId,
       outputPath,
       durationMs,
+      plannedDurationMs,
+      durationErrorMs: duration.errorMs,
+      durationStatus: duration.status,
       interiorSilence,
       joins,
+      failures,
+      warnings: warningList,
       ok:
         interiorSilence.length === 0 &&
         joins.every((join) => !join.windowInSilence) &&
         !residualFail &&
-        !levelFail,
+        !levelFail &&
+        duration.status !== "fail",
     };
   }
 
@@ -685,6 +765,11 @@ export class RenderCoordinator {
       }
       const binaries = requireFfmpeg(await this.detect());
       const stored = this.requirePlan(job.setPlanId);
+      if (job.kind === "full") {
+        this.validateFullPlan?.(job.setPlanId, {
+          allowOverlongDuration: job.params.allowOverlongDuration,
+        });
+      }
       const tracksById = new Map(this.tracks.listAll().map((track) => [track.id, track]));
       const warnings: string[] = [...job.warnings];
       let segments: PreparedSegment[];
@@ -701,7 +786,7 @@ export class RenderCoordinator {
           throw new DomainError("INVALID_SET_PLAN", "Preview transition is no longer on the plan");
         }
         const windowMs = job.params.windowMs ?? this.settings.previewWindowMs;
-        const sliced = slicePreview(pair, windowMs);
+        const sliced = slicePreview(pair, windowMs, resolvePlanRateRegionsVersion(stored.plan).version);
         const outgoingTrack = this.requireTrack(pair.outgoing.trackId, tracksById);
         const incomingTrack = this.requireTrack(pair.incoming.trackId, tracksById);
         const outgoingSeg = await this.hydrateSegment(
@@ -714,7 +799,7 @@ export class RenderCoordinator {
           pair.incoming,
           incomingTrack,
           sliced.incoming,
-          sliced.outgoing.sourceEndMs - sliced.outgoing.sourceStartMs - sliced.overlapMs,
+          (sliced.outgoing.sourceEndMs - sliced.outgoing.sourceStartMs) / pair.outgoing.playbackRate - sliced.overlapMs,
         );
         outgoingSeg.overlapToNextMs = sliced.overlapMs;
         incomingSeg.overlapToNextMs = null;
@@ -764,7 +849,7 @@ export class RenderCoordinator {
         }
         if (segment.requestedTransitionType === "double_drop") {
           warnings.push(
-            `double_drop on ${segment.title} is rendered as a bass_swap until Stage 5.`,
+            `double_drop on ${segment.title} is rendered as a bass_swap.`,
           );
         }
       }
@@ -782,7 +867,7 @@ export class RenderCoordinator {
           const outAnalysis = this.analyses.findByTrackId(outgoing.trackId);
           const inAnalysis = this.analyses.findByTrackId(incoming.trackId);
           const outMs =
-            outgoing.sourceEndMs - overlap * (outgoing.playbackRate > 0 ? outgoing.playbackRate : 1);
+            outgoing.sourceEndMs - outputToSourceMs(overlap, outgoing.playbackRate);
           const shape = resolveRenderPhraseShape(
             params?.phraseShape,
             outgoing.exitKind,
@@ -792,7 +877,7 @@ export class RenderCoordinator {
           params = { ...params, phraseShape: shape };
           if (shape === "sequential") {
             warnings.push(
-              `Sequential drum hand-over on ${outgoing.title} → ${incoming.title} (incoming kit held until mid-phrase).`,
+              `Sequential drum hand-over on ${outgoing.title} → ${incoming.title} (${sequentialHandoffLabel(params.sequentialHandoff)}).`,
             );
           }
         }
@@ -812,8 +897,10 @@ export class RenderCoordinator {
         if (mixTypes[i]?.type === "crossfade") {
           continue;
         }
+        // Resolved plans own source windows. Re-analysis at render time must not move their events.
+        const recipe = stored.plan.entries.find((entry) => entry.id === outgoing.entryId)?.transitionToNext;
         const outOverlapStart =
-          outgoing.sourceEndMs - overlap * (outgoing.playbackRate > 0 ? outgoing.playbackRate : 1);
+          outgoing.sourceEndMs - outputToSourceMs(overlap, outgoing.playbackRate);
         const outAnalysis = this.analyses.findByTrackId(outgoing.trackId);
         const inAnalysis = this.analyses.findByTrackId(incoming.trackId);
         const outDrop = outAnalysis?.sections.find((section) => section.type === "drop");
@@ -840,6 +927,19 @@ export class RenderCoordinator {
           outgoingPhraseOriginMs: phraseReady ? outDrop.startMs : null,
           incomingPhraseOriginMs: phraseReady ? inDrop.startMs : null,
         });
+        incoming.downbeatOffsetMs =
+          paramNumber(recipe?.parameters, "downbeatOffsetMs") ?? aligned.offsetMs;
+        incoming.alignmentPeriodMs =
+          paramNumber(recipe?.parameters, "alignmentPeriodMs") ?? aligned.periodMs;
+        incoming.alignmentMode =
+          recipe?.parameters.alignmentMode === "bar" ||
+          recipe?.parameters.alignmentMode === "beat" ||
+          recipe?.parameters.alignmentMode === "phrase"
+            ? recipe.parameters.alignmentMode
+            : aligned.mode;
+        if (recipe?.parameters.recipeVersion === 1) {
+          continue;
+        }
         const applied = applyAlignmentOffset({
           incomingStartMs: incoming.sourceStartMs,
           incomingEndMs: incoming.sourceEndMs,
@@ -851,8 +951,6 @@ export class RenderCoordinator {
           overlapMs: overlap,
         });
         incoming.downbeatOffsetMs = applied.appliedOffsetMs;
-        incoming.alignmentPeriodMs = aligned.periodMs;
-        incoming.alignmentMode = aligned.mode;
         incoming.sourceStartMs = applied.incomingStartMs;
         outgoing.sourceEndMs = applied.outgoingEndMs;
         if (applied.movedOutgoingEnd && applied.overlapMs != null) {
@@ -867,6 +965,15 @@ export class RenderCoordinator {
         throw new DomainError("PATH_OUTSIDE_LIBRARY_ROOT", "Refusing to write outside outputRoot");
       }
       this.jobs.updateProgress(job.id, 0.02, "mixing");
+      const timing = resolvePlanRateRegionsVersion(stored.plan);
+      if (timing.unknownVersions.length > 0) {
+        warnings.push(`Unknown rateRegionsVersion ${timing.unknownVersions.join(", ")} on plan ${stored.plan.id}`);
+      }
+      let rateRegionsVersion = timing.version === 2 ? 2 as const : undefined;
+      if (rateRegionsVersion === 2 && !this.settings.rubberbandCliPath) {
+        warnings.push("Join-only timing v2 needs Rubber Band R3; using overlap-only stretch.");
+        rateRegionsVersion = undefined;
+      }
       const mixTitle =
         job.kind === "preview" && segments.length >= 2
           ? `${trackCredit(segments[0]!.artist, segments[0]!.title)} → ${trackCredit(segments[1]!.artist, segments[1]!.title)}`
@@ -880,6 +987,9 @@ export class RenderCoordinator {
         truePeakCeilingDb: this.settings.truePeakCeilingDb,
         loudnessTargetLufs: this.settings.loudnessTargetLufs,
         edgeFadeMs,
+        isolatePrefix: job.kind !== "preview",
+        rubberbandCliPath: this.settings.rubberbandCliPath,
+        rateRegionsVersion,
         abortSignal: controller.signal,
         onProgress: (fraction) => {
           this.jobs.updateProgress(job.id, Math.min(0.95, 0.05 + fraction * 0.9), "mixing");
@@ -899,8 +1009,9 @@ export class RenderCoordinator {
       warnings.push(...mix.warnings);
       const checksum = mix.checksumSha256 || (await sha256File(absOut));
       const posixRel = relPath.split(path.sep).join("/");
-      const automation = collectAutomation(segments, mixTypes);
+      const automation = collectAutomation(segments, mixTypes, rateRegionsVersion);
       const manifest: RenderManifestV1 = {
+        rateRegionsVersion,
         schemaVersion: 1,
         rendererVersion: RENDERER_VERSION,
         applicationVersion: APP_VERSION,
@@ -920,8 +1031,9 @@ export class RenderCoordinator {
         ffmpegVersion: binaries.ffmpegVersion,
         ffprobeVersion: binaries.ffprobeVersion,
         invocation: mix.invocation,
-        tracks: segments.map((segment, index) =>
-          toManifestTrack(
+        tracks: segments.map((segment, index) => {
+          const params = job.kind === "preview" && (job.params.template != null || job.params.barCount != null) ? undefined : stored.plan.entries.find(entry => entry.id === segment.entryId)?.transitionToNext?.parameters;
+          return {...toManifestTrack(
             segment,
             mixTypes[index],
             segments[index + 1],
@@ -930,7 +1042,34 @@ export class RenderCoordinator {
             this.analyses.findByTrackId(segment.trackId),
             this.analyses.findByTrackId(segments[index + 1]?.trackId ?? ""),
           ),
-        ),
+          ...(typeof params?.appliedRecipeId === "string" ? {appliedRecipeId: params.appliedRecipeId} : {}),
+          ...(typeof params?.appliedRecipeFingerprint === "string" ? {appliedRecipeFingerprint: params.appliedRecipeFingerprint} : {}),
+          ...(typeof params?.recipeReuseMode === "string" ? {recipeReuseMode: params.recipeReuseMode} : {}),
+          };
+        }),
+        joinEvidence: segments.slice(0, -1).map((outgoing, index) => {
+          const incoming = segments[index + 1]!;
+          return freezeJoinEvidence({
+            outgoingTrackId: outgoing.trackId,
+            incomingTrackId: incoming.trackId,
+            outgoingAnalysisVersion: outgoing.analysisVersion,
+            incomingAnalysisVersion: incoming.analysisVersion,
+            outgoingBeatsMs: outgoing.beatTimesMs,
+            incomingBeatsMs: incoming.beatTimesMs,
+            outgoingSourceStartMs: outgoing.sourceStartMs,
+            outgoingSourceEndMs: outgoing.sourceEndMs,
+            incomingSourceStartMs: incoming.sourceStartMs,
+            incomingSourceEndMs: incoming.sourceEndMs,
+            outgoingCamelotKey: outgoing.camelotKey,
+            incomingCamelotKey: incoming.camelotKey,
+            outgoingAudioEndMs: outgoing.audioEndMs,
+            outgoingTailEnergy: outgoing.tailEnergy,
+            incomingHeadEnergy: incoming.headEnergy,
+            incomingDropMs: incoming.incomingDropMs,
+            recipeVersion: outgoing.recipeVersion,
+            intent: outgoing.mixParams?.intent ?? null,
+          });
+        }),
         automation,
         warnings,
         createdAt: new Date().toISOString(),
@@ -991,6 +1130,17 @@ export class RenderCoordinator {
     return map;
   }
 
+  private firstDropStartMsByTrackId(): Map<string, number> {
+    const map = new Map<string, number>();
+    for (const track of this.tracks.listAll()) {
+      const drop = this.analyses.findByTrackId(track.id)?.sections?.find((section) => section.type === "drop");
+      if (drop && Number.isFinite(drop.startMs)) {
+        map.set(track.id, drop.startMs);
+      }
+    }
+    return map;
+  }
+
   private async assessReadiness(
     plan: SetPlanV1,
     tracksById: Map<string, Track>,
@@ -1015,7 +1165,7 @@ export class RenderCoordinator {
       issues.push({
         code: "FFMPEG_UNAVAILABLE",
         message:
-          "FFmpeg is missing atempo/lowpass/highpass/asplit/amix/afade needed for aligned mixes.",
+          "FFmpeg is missing atempo/lowpass/highpass/asplit/amix/afade needed for aligned mixes. Rubber Band is used for stretch when present.",
       });
     }
     const resolvedRoots = this.config.libraryRoots.map((root) => path.resolve(root));
@@ -1072,10 +1222,13 @@ export class RenderCoordinator {
           });
         }
         const overlap = entry.transitionToNext?.durationMs ?? 0;
-        const playable = playableOutputMs(entry);
+        const entryIndex = plan.entries.indexOf(entry);
+        const fromPrev =
+          entryIndex > 0 ? (plan.entries[entryIndex - 1]!.transitionToNext?.durationMs ?? 0) : 0;
+        const playable = playableOutputMs(entry, fromPrev, resolvePlanRateRegionsVersion(plan).version);
         const audioEnd = this.analyses.findByTrackId(track.id)?.descriptors?.audioEndMs;
         if (typeof audioEnd === "number" && overlap > 0) {
-          const overlapSource = overlap * (entry.playbackRate > 0 ? entry.playbackRate : 1);
+          const overlapSource = outputToSourceMs(overlap, entry.playbackRate);
           const overlapStart = entry.sourceEndMs - overlapSource;
           if (overlapStart > audioEnd) {
             issues.push({
@@ -1188,6 +1341,16 @@ export class RenderCoordinator {
       mixInMs: paramNumber(entry.transitionToNext?.parameters, "mixInMs"),
       exitKind: paramString(entry.transitionToNext?.parameters, "exitKind"),
       incomingDropMs: firstDropMs(analysis?.sections),
+      beatTimesMs: analysis?.beatTimesMs ?? [],
+      camelotKey: track.camelotKey,
+      audioEndMs:
+        typeof analysis?.descriptors?.audioEndMs === "number" ? analysis.descriptors.audioEndMs : null,
+      tailEnergy: sectionEnergyAt(analysis?.sections, window.sourceEndMs),
+      headEnergy: sectionEnergyAt(analysis?.sections, window.sourceStartMs),
+      recipeVersion:
+        typeof entry.transitionToNext?.parameters.recipeVersion === "number"
+          ? entry.transitionToNext.parameters.recipeVersion
+          : null,
     };
   }
 
@@ -1266,30 +1429,72 @@ function findTransitionPair(
   return null;
 }
 
-function slicePreview(
+export function slicePreview(
   pair: { outgoing: SetPlanEntry; incoming: SetPlanEntry },
   windowMs: number,
+  rateRegionsVersion: 1 | 2 = 1,
 ): {
   outgoing: { sourceStartMs: number; sourceEndMs: number; gainDb: number };
   incoming: { sourceStartMs: number; sourceEndMs: number; gainDb: number };
   overlapMs: number;
 } {
   const overlap = Math.max(1, pair.outgoing.transitionToNext?.durationMs ?? 0);
-  const each = Math.round((windowMs + overlap) / 2);
-  const outPlayable = pair.outgoing.sourceEndMs - pair.outgoing.sourceStartMs;
-  const inPlayable = pair.incoming.sourceEndMs - pair.incoming.sourceStartMs;
+  const target = pair.outgoing.transitionToNext?.parameters.targetBpm;
+  const bpm = typeof target === "number" && target > 0 ? target : 174;
+  const each = Math.max((windowMs + overlap) / 2, overlap + 32 * 60_000 / bpm);
+  const outRate = pair.outgoing.playbackRate > 0 ? pair.outgoing.playbackRate : 1;
+  const inRate = pair.incoming.playbackRate > 0 ? pair.incoming.playbackRate : 1;
+  const overlapMs = overlap;
+  if (rateRegionsVersion === 2) {
+    const outRegions = resolveRateRegions(
+      pair.outgoing.sourceEndMs - pair.outgoing.sourceStartMs,
+      outRate,
+      0,
+      overlap,
+    );
+    const inRegions = resolveRateRegions(
+      pair.incoming.sourceEndMs - pair.incoming.sourceStartMs,
+      inRate,
+      overlap,
+      0,
+    );
+    const outPlayable = outRegions.at(-1)!.outputEndMs;
+    const inPlayable = inRegions.at(-1)!.outputEndMs;
+    const outLen = Math.min(each, outPlayable);
+    const inLen = Math.min(each, inPlayable);
+    if (outLen < overlap || inLen < overlap) {
+      throw new Error("Preview source windows cannot contain the complete transition");
+    }
+    return {
+      outgoing: {
+        sourceStartMs: pair.outgoing.sourceStartMs + outputPositionToSourceMs(outRegions, outPlayable - outLen),
+        sourceEndMs: pair.outgoing.sourceEndMs,
+        gainDb: pair.outgoing.gainDb,
+      },
+      incoming: {
+        sourceStartMs: pair.incoming.sourceStartMs,
+        sourceEndMs: pair.incoming.sourceStartMs + outputPositionToSourceMs(inRegions, inLen),
+        gainDb: pair.incoming.gainDb,
+      },
+      overlapMs,
+    };
+  }
+  const outPlayable = (pair.outgoing.sourceEndMs - pair.outgoing.sourceStartMs) / outRate;
+  const inPlayable = (pair.incoming.sourceEndMs - pair.incoming.sourceStartMs) / inRate;
   const outLen = Math.min(each, outPlayable);
   const inLen = Math.min(each, inPlayable);
-  const overlapMs = Math.min(overlap, Math.max(1, outLen - 1), Math.max(1, inLen - 1));
+  if (outLen < overlap || inLen < overlap) {
+    throw new Error("Preview source windows cannot contain the complete transition");
+  }
   return {
     outgoing: {
-      sourceStartMs: pair.outgoing.sourceEndMs - outLen,
+      sourceStartMs: pair.outgoing.sourceEndMs - outLen * outRate,
       sourceEndMs: pair.outgoing.sourceEndMs,
       gainDb: pair.outgoing.gainDb,
     },
     incoming: {
       sourceStartMs: pair.incoming.sourceStartMs,
-      sourceEndMs: pair.incoming.sourceStartMs + inLen,
+      sourceEndMs: pair.incoming.sourceStartMs + inLen * inRate,
       gainDb: pair.incoming.gainDb,
     },
     overlapMs,
@@ -1334,6 +1539,10 @@ function toManifestTrack(
     alignmentMode: incoming?.alignmentMode ?? segment.alignmentMode,
     barCount: segment.mixParams?.barCount ?? mix?.barCount ?? null,
     phraseShape: segment.mixParams?.phraseShape ?? null,
+    sequentialHandoff: segment.mixParams?.sequentialHandoff ?? "legacy",
+    landingFadeBars: segment.mixParams?.landingFadeBars ?? null,
+    landingCarryBars: segment.mixParams?.landingCarryBars ?? null,
+    landingIncomingFadeBars: segment.mixParams?.landingIncomingFadeBars ?? null,
     exitKind: segment.exitKind,
     mixOutMs: segment.mixOutMs,
     mixInMs: segment.mixInMs,
@@ -1369,11 +1578,24 @@ function mixParamsFromEntry(entry: SetPlanEntry): Partial<MixPresetParams> | nul
     rampMs: num("rampMs"),
     lowAttenuationDb: num("lowAttenuationDb"),
     midDipDb: num("midDipDb"),
+    mixInMs: num("mixInMs"),
+    incomingDropMs: num("incomingDropMs"),
+    sequentialHandoff: raw.sequentialHandoff === "early" || raw.sequentialHandoff === "supported" ? raw.sequentialHandoff : "legacy",
+    ...(raw.landingFadeBars === 2 || raw.landingFadeBars === 4 || raw.landingFadeBars === 8
+      ? { landingFadeBars: raw.landingFadeBars } : {}),
+    ...(raw.landingCarryBars === 2 || raw.landingCarryBars === 3.5 || raw.landingCarryBars === 4 || raw.landingCarryBars === 4.5
+      ? { landingCarryBars: raw.landingCarryBars } : {}),
+    ...(raw.landingIncomingFadeBars === 8 || raw.landingIncomingFadeBars === 16 || raw.landingIncomingFadeBars === 32
+      ? { landingIncomingFadeBars: raw.landingIncomingFadeBars } : {}),
     phraseShape:
       raw.phraseShape === "sequential" ||
       raw.phraseShape === "complementary" ||
       raw.phraseShape === "landing"
         ? raw.phraseShape
+        : undefined,
+    intent:
+      raw.intent === "sustain" || raw.intent === "lift" || raw.intent === "breather"
+        ? raw.intent
         : undefined,
   };
 }
@@ -1398,6 +1620,7 @@ function toMixSpec(
 function collectAutomation(
   segments: PreparedSegment[],
   mixTypes: MixTransitionSpec[],
+  rateRegionsVersion?: 2,
 ): AutomationEvent[] {
   const events: AutomationEvent[] = [];
   for (let i = 0; i < mixTypes.length; i += 1) {
@@ -1406,7 +1629,8 @@ function collectAutomation(
     if (overlap <= 0) {
       continue;
     }
-    const start = outgoing.timelineStartMs + playableOutputMs(outgoing) - overlap;
+    const fromPrev = i > 0 ? (segments[i - 1]!.overlapToNextMs ?? 0) : 0;
+    const start = outgoing.timelineStartMs + playableOutputMs(outgoing, fromPrev, rateRegionsVersion) - overlap;
     const spec = mixTypes[i]!;
     const bars = normalizePhraseBars(spec.barCount);
     const barMs = overlap / bars;

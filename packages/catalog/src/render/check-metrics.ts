@@ -1,5 +1,9 @@
 import { parseEbur128, type ProcessRunner } from "@dnb-crate/audio-renderer";
-import { camelotDistance as camelotWheelDistance } from "@dnb-crate/domain";
+import {
+  RENDER_DURATION_TOLERANCE_MS,
+  camelotDistance as camelotWheelDistance,
+  type FrozenJoinEvidence,
+} from "@dnb-crate/domain";
 
 export function paramNumber(
   parameters: Record<string, number | string | boolean> | undefined,
@@ -25,12 +29,15 @@ export function firstDropMs(
 }
 
 /**
- * Residual is remaining grid error after the applied nudge. A one-beat
- * period-add (~345 ms at 174) is still reported as residual so the Peak v3.3
+ * Stored-grid consistency only. This correlates **frozen beat timestamps**,
+ * not independently measured audio. A zero residual is not proof that the
+ * render is beatmatched.
+ *
+ * A one-beat period-add (~345 ms at 174) is still reported so the Peak v3.3
  * failure mode stays visible. Phrase/bar wraps do not fall back to the raw
  * nudge — that offset is the applied correction, not leftover error.
  */
-export function alignmentResidualMs(
+export function storedGridResidualMs(
   downbeatOffsetMs: number | null,
   outgoingBeats: number[],
   incomingBeats: number[],
@@ -60,6 +67,95 @@ export function alignmentResidualMs(
     return downbeatOffsetMs;
   }
   return gridResidual;
+}
+
+/** @deprecated Use storedGridResidualMs — this is not an audio measurement. */
+export const alignmentResidualMs = storedGridResidualMs;
+
+export function beatsInWindow(beats: number[], startMs: number, endMs: number, padMs = 12_000): number[] {
+  return beats.filter((time) => time >= startMs - padMs && time <= endMs + padMs);
+}
+
+export function evaluateDurationError(
+  outputDurationMs: number,
+  plannedDurationMs: number | null,
+  kind: "preview" | "full",
+): { errorMs: number | null; status: "pass" | "warning" | "fail" | "unmeasured" } {
+  if (plannedDurationMs == null) {
+    return { errorMs: null, status: "unmeasured" };
+  }
+  const errorMs = outputDurationMs - plannedDurationMs;
+  if (Math.abs(errorMs) <= RENDER_DURATION_TOLERANCE_MS) {
+    return { errorMs, status: "pass" };
+  }
+  const strictHour = kind === "full" && plannedDurationMs >= 5 * 60_000;
+  return { errorMs, status: strictHour ? "fail" : "warning" };
+}
+
+export function freezeJoinEvidence(input: {
+  outgoingTrackId: string;
+  incomingTrackId: string;
+  outgoingAnalysisVersion: string | null;
+  incomingAnalysisVersion: string | null;
+  outgoingBeatsMs: number[];
+  incomingBeatsMs: number[];
+  outgoingSourceStartMs: number;
+  outgoingSourceEndMs: number;
+  incomingSourceStartMs: number;
+  incomingSourceEndMs: number;
+  outgoingCamelotKey: string | null;
+  incomingCamelotKey: string | null;
+  outgoingAudioEndMs: number | null;
+  outgoingTailEnergy: number | null;
+  incomingHeadEnergy: number | null;
+  incomingDropMs: number | null;
+  recipeVersion: number | null;
+  intent: FrozenJoinEvidence["intent"];
+}): FrozenJoinEvidence {
+  return {
+    outgoingTrackId: input.outgoingTrackId,
+    incomingTrackId: input.incomingTrackId,
+    outgoingAnalysisVersion: input.outgoingAnalysisVersion,
+    incomingAnalysisVersion: input.incomingAnalysisVersion,
+    outgoingBeatsMs: beatsInWindow(input.outgoingBeatsMs, input.outgoingSourceStartMs, input.outgoingSourceEndMs),
+    incomingBeatsMs: beatsInWindow(input.incomingBeatsMs, input.incomingSourceStartMs, input.incomingSourceEndMs),
+    outgoingCamelotKey: input.outgoingCamelotKey,
+    incomingCamelotKey: input.incomingCamelotKey,
+    outgoingAudioEndMs: input.outgoingAudioEndMs,
+    outgoingTailEnergy: input.outgoingTailEnergy,
+    incomingHeadEnergy: input.incomingHeadEnergy,
+    incomingDropMs: input.incomingDropMs,
+    recipeVersion: input.recipeVersion,
+    intent: input.intent,
+  };
+}
+
+export function storedGridFromEvidence(
+  evidence: FrozenJoinEvidence | undefined,
+  outgoingOverlapStartMs: number,
+  incomingOverlapStartMs: number,
+  outgoingRate: number,
+  incomingRate: number,
+  downbeatOffsetMs: number | null,
+  periodMs: number | null,
+): { residualMs: number | null; source: "frozen-manifest" | "missing"; kind: "stored-grid-consistency" } {
+  if (!evidence || evidence.outgoingBeatsMs.length < 4 || evidence.incomingBeatsMs.length < 4) {
+    return { residualMs: null, source: "missing", kind: "stored-grid-consistency" };
+  }
+  return {
+    residualMs: storedGridResidualMs(
+      downbeatOffsetMs,
+      evidence.outgoingBeatsMs,
+      evidence.incomingBeatsMs,
+      outgoingOverlapStartMs,
+      incomingOverlapStartMs,
+      outgoingRate,
+      incomingRate,
+      periodMs,
+    ),
+    source: "frozen-manifest",
+    kind: "stored-grid-consistency",
+  };
 }
 
 function residualFromBeatGrids(

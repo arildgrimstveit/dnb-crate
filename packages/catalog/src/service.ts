@@ -31,9 +31,14 @@ import type {
   TransitionValidation,
   ValidateSetPlanResult,
   AnalysisEngineId,
+  PlanQualityReport,
+  RateTransitionInput,
+  TransitionFeedback,
+  TransitionPreference,
 } from "@dnb-crate/domain";
 import {
   APP_NAME,
+  recordHourFeedbackSchema,
   APP_VERSION,
   COMPATIBLE_TRACKS_LIMIT_MAX,
   DEFAULT_ANALYSIS_ENGINE,
@@ -47,7 +52,11 @@ import {
   keyAgreement,
   normalizeDnbBpm,
   resolveBpmHint,
+  recipeFingerprint,
+  renderJoinFingerprint,
+  renderSequenceFingerprint,
   resolveCanonicalBpm,
+  resolveCanonicalKeyConfidence,
   scoreCandidate,
   effectiveEnergy,
   genresMatchFilter,
@@ -55,13 +64,16 @@ import {
   resolveDescriptorFilters,
   toPublicTrack,
 } from "@dnb-crate/domain";
-import { ffmpegMixReady } from "@dnb-crate/audio-renderer";
+import { ffmpegMixReady, sha256Json } from "@dnb-crate/audio-renderer";
+import type { HourFeedbackRepository } from "./hour-feedback-repository.ts";
 
 import type { SqliteDatabase } from "./db.ts";
 import { fingerprintFile } from "./fingerprint.ts";
 import { extractAudioMetadata } from "./metadata.ts";
 import { isPathInsideAnyRoot } from "./paths.ts";
 import { draftSetPlan } from "./planning/planner.ts";
+import { PlanningConstraintError } from "./planning/constraints.ts";
+import { reportSetPlanQuality, type TrackQualityEvidence } from "./planning/quality.ts";
 import { analysisToTimeline, buildEntries } from "./planning/timeline.ts";
 import { validateSetPlan } from "./planning/validate.ts";
 import type { TrackRepository } from "./repository.ts";
@@ -73,6 +85,9 @@ import type { AnalysisRepository } from "./analysis-repository.ts";
 import type { EnrichmentCoordinator } from "./enrichment/coordinator.ts";
 import { planTransition, validateTransition } from "./planning/transition-planner.ts";
 import { probePythonEngine } from "./analysis/python-engine.ts";
+import type { FeedbackRepository } from "./feedback-repository.ts";
+import type { ApprovedRecipeRepository } from "./approved-recipe-repository.ts";
+import type { TrackEvidenceSelection } from "./analysis-repository.ts";
 
 export type CatalogRuntime = {
   db: SqliteDatabase;
@@ -98,8 +113,22 @@ export class CatalogService {
     private readonly analysis: AnalysisCoordinator,
     private readonly analyses: AnalysisRepository,
     private readonly enrichment: EnrichmentCoordinator,
+    private readonly feedback: FeedbackRepository,
+    private readonly recipes: ApprovedRecipeRepository,
     private readonly logger: Logger,
+    private readonly hourFeedback: HourFeedbackRepository,
   ) {}
+
+  recordHourFeedback(input: {renderJobId: string; outputChecksum: string; accepted: boolean; quote: string}) {
+    const parsed = recordHourFeedbackSchema.parse(input);
+    const manifest = this.renders.getManifest(parsed.renderJobId);
+    if (manifest.kind !== "full" || manifest.outputChecksumSha256.toLowerCase() !== parsed.outputChecksum.toLowerCase()) {
+      throw new DomainError("INVALID_SET_PLAN", "Hour feedback must reference the full render's actual checksum");
+    }
+    return this.hourFeedback.record(manifest, parsed.accepted, parsed.quote);
+  }
+
+  listHourFeedback(renderJobId?: string) { return this.hourFeedback.list(renderJobId); }
 
   async getServerStatus(): Promise<ServerStatus> {
     const { resolved } = await resolveLibraryRoots(this.config.libraryRoots);
@@ -853,8 +882,8 @@ export class CatalogService {
           sourceBpmHint: srcA ? resolveBpmHint(srcA).bpm : null,
           descriptors: candA?.descriptors ?? null,
           sourceDescriptors: srcA?.descriptors ?? null,
-          candidateKeyConfidence: candA?.keyConfidence ?? null,
-          sourceKeyConfidence: srcA?.keyConfidence ?? null,
+          candidateKeyConfidence: resolveCanonicalKeyConfidence(track, candA),
+          sourceKeyConfidence: resolveCanonicalKeyConfidence(source, srcA),
           candidateGridOk: Boolean(candA && !candA.gridRejected),
           sourceGridOk: Boolean(srcA && !srcA.gridRejected),
           candidateLufs: candA?.integratedLufs ?? null,
@@ -885,6 +914,13 @@ export class CatalogService {
 
   createSetPlan(input: CreateSetPlanInput): CreateSetPlanResult {
     try {
+      const referencePlans = (input.variety?.referencePlanIds ?? []).map((id) => this.requirePlan(id).plan);
+      const varietyHistory = {
+        trackIds: [...new Set(referencePlans.flatMap((plan) => plan.entries.map((entry) => entry.trackId)))],
+        pairs: referencePlans.flatMap((plan) => plan.entries.slice(1).map((entry, i) => ({
+          outgoingTrackId: plan.entries[i]!.trackId, incomingTrackId: entry.trackId,
+        }))),
+      };
       const analyses = new Map(
         this.repository
           .listAll()
@@ -897,25 +933,41 @@ export class CatalogService {
           input.descriptors,
           this.getLibraryStats().descriptorPercentiles,
         ),
-      }, analyses, { percentiles: this.getLibraryStats().descriptorPercentiles });
+      }, analyses, {
+        percentiles: this.getLibraryStats().descriptorPercentiles,
+        feedback: this.feedback.index(),
+        recipes: this.recipes,
+        varietyHistory,
+      });
       const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
       const validation = validateSetPlan(drafted.plan, tracksById, {
         artistRepeatSpacing: input.artistRepeatSpacing,
         audioEndMsByTrackId: this.audioEndMsByTrackId(),
         effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
+        keyConfidenceByTrackId: this.keyConfidenceByTrackId(),
+        firstDropStartMsByTrackId: this.firstDropStartMsByTrackId(),
       });
       const stored = this.setPlans.save(
         drafted.plan,
         drafted.explanation.seed,
         drafted.explanation,
       );
+      const quality = this.qualityFor(stored.plan, {
+        validation,
+        partial: drafted.partial,
+        partialReasons: drafted.partialReasons,
+      });
       return {
         plan: stored.plan,
         explanation: stored.explanation,
-        validation,
-        partial: drafted.partial,
+        validation: { ...validation, quality },
+        partial: quality.partial,
+        quality,
       };
     } catch (error) {
+      if (error instanceof PlanningConstraintError || (error instanceof Error && error.message.startsWith("CONSTRAINT_INVALID:"))) {
+        throw new DomainError("INVALID_SET_PLAN", error.message.replace(/^CONSTRAINT_INVALID:/, ""));
+      }
       if (error instanceof Error && error.message.startsWith("TRACK_NOT_FOUND:")) {
         const parts = error.message.split(":");
         throw new DomainError(
@@ -952,7 +1004,7 @@ export class CatalogService {
               .filter((entry) => entry.gainDb !== 0)
               .map((entry) => [entry.trackId, { gainDb: entry.gainDb }]),
           ),
-          { dropAnchored: true, targetBpm: stored.plan.targetBpm },
+          { dropAnchored: true, targetBpm: stored.plan.targetBpm, recall: this.recipeLookupFor(stored.plan) },
         )
       : ordered.map((entry) => ({
           ...entry,
@@ -972,18 +1024,38 @@ export class CatalogService {
     const validation = validateSetPlan(plan, tracksById, {
       audioEndMsByTrackId: this.audioEndMsByTrackId(),
       effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
+      keyConfidenceByTrackId: this.keyConfidenceByTrackId(),
+      firstDropStartMsByTrackId: this.firstDropStartMsByTrackId(),
     });
     const saved = this.setPlans.save(plan, stored.seed, stored.explanation);
+    const quality = this.qualityFor(saved.plan, { validation, partial: false });
     return {
       plan: saved.plan,
       explanation: saved.explanation,
-      validation,
-      partial: false,
+      validation: { ...validation, quality },
+      partial: quality.partial,
+      quality,
     };
   }
 
   async validateSavedSetPlan(setPlanId: string): Promise<ValidateSetPlanResult> {
-    return this.renders.validatePlan(setPlanId);
+    const validation = await this.renders.validatePlan(setPlanId);
+    const plan = this.requirePlan(setPlanId).plan;
+    const quality = this.qualityFor(plan, { validation });
+    return { ...validation, quality };
+  }
+
+  reportSetPlanQuality(setPlanId: string): PlanQualityReport {
+    const stored = this.requirePlan(setPlanId);
+    const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
+    const validation = validateSetPlan(stored.plan, tracksById, {
+      artistRepeatSpacing: stored.plan.planningConstraints?.artistRepeatSpacing,
+      audioEndMsByTrackId: this.audioEndMsByTrackId(),
+      effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
+      keyConfidenceByTrackId: this.keyConfidenceByTrackId(),
+      firstDropStartMsByTrackId: this.firstDropStartMsByTrackId(),
+    });
+    return this.qualityFor(stored.plan, { validation });
   }
 
   startSetRender(input: {
@@ -991,8 +1063,34 @@ export class CatalogService {
     edgeFadeMs?: number;
     allowLowConfidence?: boolean;
     allowExcessiveTempo?: boolean;
+    allowOverlongDuration?: boolean;
   }) {
+    this.assertPlanReadyForRender(input.setPlanId, {
+      allowOverlongDuration: input.allowOverlongDuration,
+    });
     return this.renders.startFullRender(input);
+  }
+
+  assertPlanReadyForRender(
+    setPlanId: string,
+    options: { allowOverlongDuration?: boolean } = {},
+  ): void {
+    const quality = this.reportSetPlanQuality(setPlanId);
+    const plan = this.requirePlan(setPlanId).plan;
+    const invalidApplication = plan.entries.some((entry,index) => entry.transitionToNext?.parameters.appliedRecipeId != null && quality.joins[index]?.recipeStatus !== "applied");
+    const durationOnly =
+      quality.partialReasons.length > 0 &&
+      quality.partialReasons.every((reason) => reason === "DURATION" || reason === "AUDITION_DURATION");
+    const allowOverlong =
+      options.allowOverlongDuration === true &&
+      quality.qualityChecksPassed &&
+      quality.structurallyValid &&
+      durationOnly;
+    if (quality.partialReasons.includes("REQUIRED_TRANSITION_UNSATISFIED") || quality.partialReasons.includes("CONSTRAINT_UNSATISFIED") ||
+        invalidApplication ||
+        (quality.qualityPolicy === "strict" && !quality.readyForAudition && !allowOverlong)) {
+      throw new DomainError("INVALID_SET_PLAN", "Plan is not ready: resolve quality, duration and required-transition blockers before rendering");
+    }
   }
 
   createTransitionPreview(input: {
@@ -1088,9 +1186,24 @@ export class CatalogService {
         throw new DomainError("INVALID_SET_PLAN", `No entry ${input.replaceTrack.entryId}`);
       }
       const track = this.requireTrack(input.replaceTrack.trackId);
-      entry.trackId = track.id;
-      entry.sourceStartMs = 0;
-      entry.sourceEndMs = track.durationMs;
+      const index = entries.indexOf(entry);
+      if (index > 0) {
+        entries[index - 1] = { ...entries[index - 1]!, transitionToNext: null };
+      }
+      if (index + 1 < entries.length) {
+        const next = { ...entries[index + 1]! };
+        delete (next as { sourceStartMs?: number }).sourceStartMs;
+        entries[index + 1] = next;
+      }
+      entries[index] = {
+        id: entry.id,
+        trackId: track.id,
+        order: entry.order,
+        timelineStartMs: entry.timelineStartMs,
+        playbackRate: 1,
+        gainDb: entry.gainDb,
+        transitionToNext: null,
+      } as (typeof entries)[number];
     }
     if (input.setTrim) {
       const entry = entries.find((item) => item.id === input.setTrim!.entryId);
@@ -1193,7 +1306,7 @@ export class CatalogService {
       orderedTracks.map((track) => ({ ...track, analysis: this.toTimeline(track) })),
       undefined,
       new Map(entries.map((entry) => [entry.trackId, entry])),
-      { targetBpm: stored.plan.targetBpm },
+      { targetBpm: stored.plan.targetBpm, recall: this.recipeLookupFor(stored.plan) },
     );
     const plan: SetPlanV1 = {
       ...stored.plan,
@@ -1204,6 +1317,8 @@ export class CatalogService {
     const validation = validateSetPlan(plan, tracksById, {
       audioEndMsByTrackId: this.audioEndMsByTrackId(),
       effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
+      keyConfidenceByTrackId: this.keyConfidenceByTrackId(),
+      firstDropStartMsByTrackId: this.firstDropStartMsByTrackId(),
     });
     if (!validation.valid) {
       throw new DomainError(
@@ -1215,11 +1330,13 @@ export class CatalogService {
       );
     }
     const saved = this.setPlans.save(plan, stored.seed, stored.explanation);
+    const quality = this.qualityFor(saved.plan, { validation, partial: false });
     return {
       plan: saved.plan,
       explanation: saved.explanation,
-      validation,
-      partial: false,
+      validation: { ...validation, quality },
+      partial: quality.partial,
+      quality,
     };
   }
 
@@ -1238,13 +1355,200 @@ export class CatalogService {
 
   private toTimeline(track: Track) {
     const row = this.analyses.findByTrackId(track.id);
+    const keyRow = this.analyses.findKeyAnalysis(track.id) ?? row;
     const canon = resolveCanonicalBpm(track, row);
-    return analysisToTimeline(
+    const timeline = analysisToTimeline(
       row,
       canon.bpm,
       this.repository.listCuePoints(track.id),
       track.durationMs,
     );
+    if (timeline) {
+      timeline.keyConfidence = resolveCanonicalKeyConfidence(track, keyRow);
+    }
+    return timeline;
+  }
+
+  selectTrackEvidence(input: {
+    trackId: string;
+    rhythmEngine?: string | null;
+    structureEngine?: string | null;
+    keyEngine?: string | null;
+    reason?: string;
+  }): TrackEvidenceSelection {
+    this.requireTrack(input.trackId);
+    return this.analyses.setSelection(input.trackId, input);
+  }
+
+  getTrackEvidence(trackId: string): TrackEvidenceSelection | null {
+    this.requireTrack(trackId);
+    return this.analyses.getSelection(trackId);
+  }
+
+  rateTransition(input: RateTransitionInput): TransitionFeedback {
+    if (input.renderJobId) {
+      const manifest = this.renders.getManifest(input.renderJobId);
+      if (!input.transitionId) {
+        const fingerprint = renderSequenceFingerprint(manifest);
+        if (input.recipeFingerprint && input.recipeFingerprint !== fingerprint) {
+          throw new Error("Rating fields disagree with the stored render");
+        }
+        input = {
+          ...input,
+          setPlanId: manifest.setPlanId,
+          rendererVersion: manifest.rendererVersion,
+          recipeFingerprint: fingerprint,
+        };
+      } else {
+        const index = manifest.tracks.findIndex((track) => track.transitionId === input.transitionId);
+        const outgoing = manifest.tracks[index];
+        const incoming = manifest.tracks[index + 1];
+        if (index < 0 || !outgoing || !incoming) throw new Error("Transition not found in the heard render");
+        const fingerprint = renderJoinFingerprint(manifest, input.transitionId);
+        if ((input.outgoingTrackId && input.outgoingTrackId !== outgoing.trackId) ||
+            (input.incomingTrackId && input.incomingTrackId !== incoming.trackId) ||
+            (input.recipeFingerprint && input.recipeFingerprint !== fingerprint)) {
+          throw new Error("Rating fields disagree with the stored render join");
+        }
+        input = { ...input, outgoingTrackId: outgoing.trackId, incomingTrackId: incoming.trackId,
+          setPlanId: manifest.setPlanId, rendererVersion: manifest.rendererVersion, recipeFingerprint: fingerprint };
+      }
+    }
+    const fingerprint =
+      input.recipeFingerprint ??
+      recipeFingerprint({
+        type: input.type ?? "phrase_mix",
+        barCount: input.barCount,
+        intent: input.intent,
+        phraseShape: input.phraseShape,
+        outgoingRate: input.outgoingRate,
+        incomingRate: input.incomingRate,
+        mixInMs: input.mixInMs,
+        mixOutMs: input.mixOutMs,
+        recipeVersion: input.recipeVersion,
+        outgoingTrackId: input.outgoingTrackId,
+        incomingTrackId: input.incomingTrackId,
+      });
+    return this.feedback.insert({
+      recipeFingerprint: fingerprint,
+      outgoingTrackId: input.outgoingTrackId ?? null,
+      incomingTrackId: input.incomingTrackId ?? null,
+      setPlanId: input.setPlanId ?? null,
+      renderJobId: input.renderJobId ?? null,
+      transitionId: input.transitionId ?? null,
+      rendererVersion: input.rendererVersion ?? null,
+      overall: input.overall ?? "not_assessed",
+      timing: input.timing ?? "not_assessed",
+      phrasing: input.phrasing ?? "not_assessed",
+      bassClarity: input.bassClarity ?? "not_assessed",
+      harmonicFit: input.harmonicFit ?? "not_assessed",
+      energyContinuity: input.energyContinuity ?? "not_assessed",
+      vocalClash: input.vocalClash ?? "not_assessed",
+      note: input.note ?? null,
+    });
+  }
+
+  listTransitionFeedback(input: {
+    recipeFingerprint?: string;
+    outgoingTrackId?: string;
+    incomingTrackId?: string;
+    limit?: number;
+  }): { ratings: TransitionFeedback[] } {
+    return { ratings: this.feedback.list(input) };
+  }
+
+  getTransitionPreferences(input: {
+    recipeFingerprint?: string;
+    outgoingTrackId?: string;
+    incomingTrackId?: string;
+  }): { preferences: TransitionPreference[] } {
+    return { preferences: this.feedback.summarize(input) };
+  }
+
+  importApprovedRecipe(row: Omit<import("@dnb-crate/domain").ApprovedRecipeRecord, "id" | "createdAt"> & { id?: string }): {
+    inserted: boolean;
+    recipe: import("@dnb-crate/domain").ApprovedRecipeRecord;
+  } {
+    const existing = this.recipes.findDuplicate({
+      reusableFingerprint: row.reusableFingerprint,
+      status: row.status,
+      note: row.note,
+    });
+    if (existing) {
+      return { inserted: false, recipe: existing };
+    }
+    return { inserted: true, recipe: this.recipes.insert(row) };
+  }
+
+  listApprovedRecipes(outgoingTrackId?: string, incomingTrackId?: string) {
+    if (outgoingTrackId && incomingTrackId) {
+      return this.recipes.listForPair(outgoingTrackId, incomingTrackId);
+    }
+    return this.recipes.listAll();
+  }
+
+  private recipeLookupFor(plan: SetPlanV1) {
+    return {
+      listForPair: (outgoingTrackId: string, incomingTrackId: string) =>
+        this.recipes.listForPair(outgoingTrackId, incomingTrackId),
+      recipeIdForPair: (outgoingTrackId: string, incomingTrackId: string) =>
+        plan.planningConstraints?.requiredTransitions?.find(
+          (row) =>
+            row.outgoingTrackId === outgoingTrackId &&
+            row.incomingTrackId === incomingTrackId &&
+            row.reuse === "recipe",
+        )?.recipeId,
+      reuseForPair: (outgoingTrackId: string, incomingTrackId: string) =>
+        plan.planningConstraints?.requiredTransitions?.find(
+          (row) => row.outgoingTrackId === outgoingTrackId && row.incomingTrackId === incomingTrackId,
+        )?.reuse,
+    };
+  }
+
+  private keyConfidenceByTrackId(): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const track of this.repository.listAll()) {
+      const keyRow = this.analyses.findKeyAnalysis(track.id);
+      out.set(track.id, resolveCanonicalKeyConfidence(track, keyRow));
+    }
+    return out;
+  }
+
+  private qualityEvidenceByTrackId(): Map<string, TrackQualityEvidence> {
+    const out = new Map<string, TrackQualityEvidence>();
+    for (const track of this.repository.listAll()) {
+      const rhythm = this.analyses.findByTrackId(track.id);
+      const keyRow = this.analyses.findKeyAnalysis(track.id) ?? rhythm;
+      const timeline = this.toTimeline(track);
+      out.set(track.id, {
+        musicalKey: track.keySource === "manual" || track.keySource === "published" ? track.musicalKey : keyRow?.musicalKey ?? track.musicalKey,
+        camelotKey: track.keySource === "manual" || track.keySource === "published" ? track.camelotKey : keyRow?.camelotKey ?? track.camelotKey,
+        keySource: track.keySource,
+        keyConfidence: resolveCanonicalKeyConfidence(track, keyRow),
+        keyAnalyzerName: keyRow?.analyzerName ?? null,
+        nativeBpm: resolveCanonicalBpm(track, rhythm).bpm,
+        gridOk: timeline?.gridOk ?? false,
+        gridEngine: rhythm?.analyzerName ?? null,
+      });
+    }
+    return out;
+  }
+
+  private qualityFor(
+    plan: SetPlanV1,
+    options: { validation: ValidateSetPlanResult; partial?: boolean; partialReasons?: string[] },
+  ): PlanQualityReport {
+    return reportSetPlanQuality({
+      plan,
+      tracksById: new Map(this.repository.listAll().map((track) => [track.id, track])),
+      evidenceByTrackId: this.qualityEvidenceByTrackId(),
+      validation: options.validation,
+      recipes: this.recipes,
+      constraints: plan.planningConstraints ?? null,
+      partial: options.partial,
+      partialReasons: options.partialReasons,
+      hourAccepted: this.hourFeedback.acceptedPlan(plan.id, sha256Json(plan)),
+    });
   }
 
   private audioEndMsByTrackId(): Map<string, number> {
@@ -1253,6 +1557,17 @@ export class CatalogService {
       const end = this.analyses.findByTrackId(track.id)?.descriptors?.audioEndMs;
       if (typeof end === "number") {
         map.set(track.id, end);
+      }
+    }
+    return map;
+  }
+
+  private firstDropStartMsByTrackId(): Map<string, number> {
+    const map = new Map<string, number>();
+    for (const track of this.repository.listAll()) {
+      const drop = this.analyses.findByTrackId(track.id)?.sections?.find((section) => section.type === "drop");
+      if (drop && Number.isFinite(drop.startMs)) {
+        map.set(track.id, drop.startMs);
       }
     }
     return map;

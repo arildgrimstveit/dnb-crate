@@ -20,16 +20,23 @@ export {
   buildBassSwapFilter,
   buildMixFilter,
   buildPhraseMixFilter,
+  prefixIsolationRunInSec,
+  PREFIX_ISOLATION_RUN_IN_BARS,
+  PREFIX_ISOLATION_SPLICE_SEC,
+  rubberbandTempoFilter,
+  type TempoEngine,
   estimateArgvChars,
   expectedDurationMs,
   limiterAmplitudeFromCeilingDb,
   mixFilterArgs,
   outputDurationSec,
   redactInvocation,
+  RATE_SPLICE_XFADE_SEC,
   type FilterGraphOptions,
   type FilterTrim,
   type MixTransitionKind,
   type MixTransitionSpec,
+  type StretchScope,
 } from "./filter-graph.ts";
 export { parseEbur128, parseFfprobeJson, parseOutTimeMs, parseSilenceSpans } from "./parse.ts";
 export type { SilenceSpan } from "./parse.ts";
@@ -59,3 +66,10 @@ export {
 } from "./downbeat-align.ts";
 export type { DownbeatAlignment } from "./downbeat-align.ts";
 export { sha256File, sha256Json, sha256Text } from "./hash.ts";
+export {
+  clampMakeupDb,
+  prepareCliStretchedSegments,
+  resolveRubberbandCli,
+  rubberbandCliArgs,
+  RUBBERBAND_MAKEUP_CLAMP_DB,
+} from "./rubberband-cli.ts";

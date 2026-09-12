@@ -52,8 +52,9 @@ describe("track analysis and aligned transitions", () => {
     const analysis = catalog.service.getTrackAnalysis(track.id);
     expect(analysis.canonicalBpm).toBe(170);
     expect(analysis.canonicalBpmSource).toBe("manual");
-    expect(analysis.gridRejected).toBe(true);
-    expect(analysis.gridRejectionReason ?? "").toMatch(/Reference tempo 170 does not fit/i);
+    expect(analysis.gridRejected).toBe(false);
+    expect(analysis.gridSource).toBe("analyzed");
+    expect(Math.abs((analysis.bpm ?? 0) - 174)).toBeLessThan(1);
     expect(analysis.suggestedCues.length).toBeGreaterThan(0);
     expect(analysis.analyzerVersion).toBe("3.2.0");
     expect(analysis.descriptors?.energy).toBeTypeOf("number");
@@ -294,16 +295,19 @@ describe("track analysis and aligned transitions", () => {
     const click174 = buildClickTrackPcm({ bpm: 174, durationMs: 12_000 });
     await writeFile(path.join(library, "memory.wav"), encodeMonoWav(click175));
     await writeFile(path.join(library, "mismatch.wav"), encodeMonoWav(click174));
+    await writeFile(path.join(library, "halftime.wav"), encodeMonoWav(click174));
     await writeSineWav(path.join(library, "hintonly.wav"), { title: "HintOnly", durationMs: 2000 });
     await catalog.service.scanLibrary();
     const tracks = catalog.service.searchTracks({ limit: 10 }).tracks;
     const memory = tracks.find((item) => item.title === "memory")!;
     const mismatch = tracks.find((item) => item.title === "mismatch")!;
+    const halftime = tracks.find((item) => item.title === "halftime")!;
     const hintOnly = tracks.find((item) => item.title === "HintOnly")!;
     catalog.service.updateTrackMetadata(memory.id, { bpm: 176, bpmSource: "published" });
     catalog.service.updateTrackMetadata(mismatch.id, { bpm: 150, bpmSource: "published" });
+    catalog.service.updateTrackMetadata(halftime.id, { bpm: 87, bpmSource: "published" });
     const started = catalog.service.startTrackAnalysis({
-      trackIds: [memory.id, mismatch.id],
+      trackIds: [memory.id, mismatch.id, halftime.id],
     });
     await catalog.service.waitForAnalysisJob(started.job.id, 60_000);
     const accepted = catalog.service.getTrackAnalysis(memory.id);
@@ -313,10 +317,17 @@ describe("track analysis and aligned transitions", () => {
     expect(accepted.referenceBpm).toBe(176);
     expect(accepted.bpmHint).toBeNull();
 
-    const rejected = catalog.service.getTrackAnalysis(mismatch.id);
-    expect(rejected.gridRejected).toBe(true);
-    expect(rejected.bpmHint).not.toBeNull();
-    expect(Math.abs((rejected.bpmHint ?? 0) - 174)).toBeLessThan(1);
+    const kept = catalog.service.getTrackAnalysis(mismatch.id);
+    expect(kept.gridRejected).toBe(false);
+    expect(kept.gridSource).toBe("analyzed");
+    expect(Math.abs((kept.bpm ?? 0) - 174)).toBeLessThan(1);
+    expect(kept.canonicalBpm).toBe(150);
+    expect(kept.bpmHint).toBeNull();
+
+    const folded = catalog.service.getTrackAnalysis(halftime.id);
+    expect(folded.gridRejected).toBe(false);
+    expect(Math.abs((folded.bpm ?? 0) - 174)).toBeLessThan(1);
+    expect(folded.canonicalBpm).toBe(87);
 
     catalog.analyses.upsert({
       trackId: hintOnly.id,
@@ -403,5 +414,132 @@ describe("track analysis and aligned transitions", () => {
     expect(pipedRows.map((row) => row.bpm)).toEqual(seqRows.map((row) => row.bpm));
     expect(pipedRows.map((row) => row.gridRejected)).toEqual(seqRows.map((row) => row.gridRejected));
     expect(pipedRows.map((row) => row.gridSource)).toEqual(seqRows.map((row) => row.gridSource));
+  });
+
+  it("rebuilds an anchor grid at the canonical BPM, not the stored analysis BPM", async () => {
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-anchor-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(library, "memory.wav"), {
+      title: "Memory",
+      artist: "Test",
+      durationMs: 12_000,
+    });
+    await catalog.service.scanLibrary();
+    const track = catalog.service.searchTracks({ query: "Memory", limit: 1 }).tracks[0]!;
+    catalog.service.updateTrackMetadata(track.id, { bpm: 176, bpmSource: "published" });
+    catalog.analyses.upsert({
+      trackId: track.id,
+      analyzerName: DSP_ANALYZER_NAME,
+      analyzerVersion: DSP_ANALYZER_VERSION,
+      bpm: 175,
+      bpmConfidence: 0.4,
+      bpmRaw: 175,
+      referenceBpm: 176,
+      beatTimesMs: [0, 343],
+      downbeatTimesMs: [0],
+      gridRejected: true,
+      gridRejectionReason: "low confidence",
+      gridSource: "analyzed",
+      musicalKey: null,
+      keyConfidence: 0.01,
+      keyMode: null,
+      camelotKey: null,
+      tempoStability: 0.4,
+      downbeatConfidence: 0.4,
+      integratedLufs: null,
+      truePeakDb: null,
+      lowBandEnergy: null,
+      midBandEnergy: null,
+      highBandEnergy: null,
+      waveformSummary: null,
+      beatAnchorMs: null,
+      descriptors: null,
+      engineRuntimeMs: 1,
+      analyzedAt: new Date().toISOString(),
+      suggestedCues: [],
+      sections: [],
+    });
+    catalog.service.setCuePoints(track.id, [], 0);
+    const analysis = catalog.service.getTrackAnalysis(track.id);
+    expect(analysis.bpm).toBe(176);
+    expect(analysis.gridSource).toBe("anchor");
+    expect(analysis.gridRejected).toBe(false);
+    expect(analysis.bpmConfidence ?? 0).toBeGreaterThanOrEqual(0.6);
+    const period = analysis.beatTimesMs[1]! - analysis.beatTimesMs[0]!;
+    expect(period).toBeCloseTo(60_000 / 176, 0);
+  });
+
+  it("uses a selected sidecar rhythm for planning BPM", async () => {
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-sel-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(library, "sidecar.wav"), {
+      title: "Sidecar",
+      artist: "Test",
+      durationMs: 12_000,
+    });
+    await catalog.service.scanLibrary();
+    const track = catalog.service.searchTracks({ query: "Sidecar", limit: 1 }).tracks[0]!;
+    const base = {
+      trackId: track.id,
+      analyzerVersion: DSP_ANALYZER_VERSION,
+      bpmConfidence: 0.9,
+      bpmRaw: 174,
+      referenceBpm: null,
+      beatTimesMs: [0, 345],
+      downbeatTimesMs: [0],
+      gridRejected: false,
+      gridRejectionReason: null,
+      musicalKey: null,
+      keyConfidence: null,
+      keyMode: null,
+      camelotKey: null,
+      tempoStability: 0.9,
+      downbeatConfidence: 0.8,
+      integratedLufs: null,
+      truePeakDb: null,
+      lowBandEnergy: null,
+      midBandEnergy: null,
+      highBandEnergy: null,
+      waveformSummary: null,
+      beatAnchorMs: null,
+      descriptors: null,
+      engineRuntimeMs: 1,
+      analyzedAt: new Date().toISOString(),
+      suggestedCues: [],
+      sections: [],
+    };
+    catalog.analyses.upsert({
+      ...base,
+      analyzerName: DSP_ANALYZER_NAME,
+      bpm: 174,
+      gridSource: "analyzed",
+    });
+    catalog.analyses.upsert({
+      ...base,
+      analyzerName: "beat-this",
+      bpm: 176,
+      bpmRaw: 176,
+      gridSource: "sidecar",
+    });
+    expect(catalog.service.getTrackAnalysis(track.id).bpm).toBe(174);
+    catalog.service.selectTrackEvidence({
+      trackId: track.id,
+      rhythmEngine: "beat-this",
+      reason: "test",
+    });
+    expect(catalog.service.getTrackAnalysis(track.id).bpm).toBe(176);
+    expect(catalog.service.getTrackAnalysis(track.id).analyzerName).toBe("beat-this");
   });
 });

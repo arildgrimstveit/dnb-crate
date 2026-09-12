@@ -19,4 +19,6 @@ py -3.12 -m venv .venv
 & "$Root\.venv\Scripts\python.exe" -m pip install --upgrade pip
 & "$Root\.venv\Scripts\python.exe" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 & "$Root\.venv\Scripts\python.exe" -m pip install -r requirements.txt
+# Essentia KeyExtractor is optional and does not pip-build on Windows.
+# Native/offline path: Linux/macOS or conda-forge, then extract-key.py.
 Write-Host "Sidecar venv ready at $Root\.venv (Python 3.12 + CPU torch)"

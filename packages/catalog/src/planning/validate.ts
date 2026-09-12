@@ -1,10 +1,9 @@
 import {
   DURATION_TOLERANCE_MS,
   MAX_BPM_JUMP,
-  MAX_CAMELOT_DISTANCE_OK,
   MAX_ENERGY_DEVIATION,
   MIN_PLAYABLE_DURATION_MS,
-  camelotDistance,
+  isConfidentKeyClash,
   interpolateEnergy,
   normalizePersonName,
   type SetPlanV1,
@@ -14,6 +13,7 @@ import {
 } from "@dnb-crate/domain";
 
 import { planDurationMs, playableMs } from "./timeline.ts";
+import { lateDropMinPlayableMs } from "./windows.ts";
 
 export function validateSetPlan(
   plan: SetPlanV1,
@@ -22,6 +22,8 @@ export function validateSetPlan(
     artistRepeatSpacing?: number;
     audioEndMsByTrackId?: Map<string, number>;
     effectiveEnergyByTrackId?: Map<string, number>;
+    keyConfidenceByTrackId?: Map<string, number>;
+    firstDropStartMsByTrackId?: Map<string, number>;
   },
 ): ValidateSetPlanResult {
   const errors: ValidationIssue[] = [];
@@ -85,10 +87,12 @@ export function validateSetPlan(
         trackId: track.id,
       });
     }
-    if (
-      playableMs(entry) < MIN_PLAYABLE_DURATION_MS &&
-      track.durationMs >= MIN_PLAYABLE_DURATION_MS
-    ) {
+    const minPlayable =
+      lateDropMinPlayableMs(
+        track.durationMs,
+        options?.firstDropStartMsByTrackId?.get(entry.trackId),
+      ) ?? MIN_PLAYABLE_DURATION_MS;
+    if (playableMs(entry) < minPlayable && track.durationMs >= MIN_PLAYABLE_DURATION_MS) {
       errors.push({
         code: "INVALID_TRIM",
         message: `Playable duration is below ${MIN_PLAYABLE_DURATION_MS}ms`,
@@ -148,7 +152,7 @@ export function validateSetPlan(
     recentArtists.push(artist);
   }
 
-  const durationMs = planDurationMs(plan.entries);
+  const durationMs = planDurationMs(plan.entries, plan);
   const durationDeltaMs = durationMs - plan.targetDurationMs;
   if (Math.abs(durationDeltaMs) > DURATION_TOLERANCE_MS) {
     warnings.push({
@@ -196,8 +200,20 @@ export function validateSetPlan(
         trackId: a.id,
       });
     }
-    const distance = camelotDistance(a.camelotKey, b.camelotKey);
-    if (distance !== null && distance > MAX_CAMELOT_DISTANCE_OK) {
+    const leftConfidence =
+      options?.keyConfidenceByTrackId?.get(a.id) ??
+      (a.keySource === "manual" || a.keySource === "published" ? 1 : 0);
+    const rightConfidence =
+      options?.keyConfidenceByTrackId?.get(b.id) ??
+      (b.keySource === "manual" || b.keySource === "published" ? 1 : 0);
+    if (
+      isConfidentKeyClash({
+        leftKey: a.camelotKey,
+        rightKey: b.camelotKey,
+        leftConfidence,
+        rightConfidence,
+      })
+    ) {
       warnings.push({
         code: "KEY_CLASH",
         message: `Camelot ${a.camelotKey} → ${b.camelotKey} between ${a.title} and ${b.title}`,

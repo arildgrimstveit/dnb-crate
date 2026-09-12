@@ -27,6 +27,7 @@ export function createNodeProcessRunner(
           child = spawn(request.executable, request.args, {
             windowsHide: true,
             stdio: ["ignore", "pipe", "pipe"],
+            cwd: request.cwd,
           });
         } catch (error) {
           const code =

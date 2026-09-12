@@ -57,6 +57,9 @@ export const renderReadinessSchema = z.object({
 });
 
 export const renderManifestTrackSchema = z.object({
+  appliedRecipeId: z.string().optional(),
+  appliedRecipeFingerprint: z.string().optional(),
+  recipeReuseMode: z.string().optional(),
   trackId: z.string(),
   sourceFingerprint: z.string(),
   entryId: z.string(),
@@ -78,6 +81,10 @@ export const renderManifestTrackSchema = z.object({
   alignmentMode: z.enum(["bar", "beat", "phrase"]).nullable().optional(),
   barCount: z.number().int().nullable().optional(),
   phraseShape: z.string().nullable().optional(),
+  sequentialHandoff: z.enum(["legacy", "early", "supported"]).nullable().optional(),
+  landingFadeBars: z.union([z.literal(2), z.literal(4), z.literal(8)]).nullable().optional(),
+  landingCarryBars: z.union([z.literal(2), z.literal(3.5), z.literal(4), z.literal(4.5)]).nullable().optional(),
+  landingIncomingFadeBars: z.union([z.literal(8), z.literal(16), z.literal(32)]).nullable().optional(),
   exitKind: z.string().nullable().optional(),
   mixOutMs: z.number().nullable().optional(),
   mixInMs: z.number().nullable().optional(),
@@ -87,9 +94,27 @@ export const renderManifestTrackSchema = z.object({
   camelotDistance: z.number().nullable().optional(),
 });
 
+export const frozenJoinEvidenceSchema = z.object({
+  outgoingTrackId: z.string(),
+  incomingTrackId: z.string(),
+  outgoingAnalysisVersion: z.string().nullable(),
+  incomingAnalysisVersion: z.string().nullable(),
+  outgoingBeatsMs: z.array(z.number()),
+  incomingBeatsMs: z.array(z.number()),
+  outgoingCamelotKey: z.string().nullable(),
+  incomingCamelotKey: z.string().nullable(),
+  outgoingAudioEndMs: z.number().nullable(),
+  outgoingTailEnergy: z.number().nullable(),
+  incomingHeadEnergy: z.number().nullable(),
+  incomingDropMs: z.number().nullable(),
+  recipeVersion: z.number().nullable(),
+  intent: z.enum(["sustain", "lift", "breather"]).nullable(),
+});
+
 export const renderManifestV1Schema = z.object({
   schemaVersion: z.literal(1),
   rendererVersion: z.string(),
+  rateRegionsVersion: z.literal(2).optional(),
   applicationVersion: z.string(),
   renderJobId: z.string(),
   setPlanId: z.string(),
@@ -108,6 +133,7 @@ export const renderManifestV1Schema = z.object({
   ffprobeVersion: z.string(),
   invocation: z.string(),
   tracks: z.array(renderManifestTrackSchema),
+  joinEvidence: z.array(frozenJoinEvidenceSchema).optional(),
   automation: z.array(automationEventSchema).optional(),
   warnings: z.array(z.string()),
   createdAt: z.string(),
@@ -131,6 +157,10 @@ export const startSetRenderInputSchema = z.object({
     .optional()
     .describe("Allow phrase/bass-swap renders when analysis confidence is below the threshold."),
   allowExcessiveTempo: z.boolean().optional().describe("Allow playback rates beyond ±3%."),
+  allowOverlongDuration: z
+    .boolean()
+    .optional()
+    .describe("Allow a full render when the only blockers are duration / audition-window."),
 });
 
 export const createTransitionPreviewInputSchema = z.object({

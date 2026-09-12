@@ -1,21 +1,26 @@
 import {
-  ATEMPO_SKIP_THRESHOLD,
   BAND_HIGH_CROSSOVER_HZ,
   CROSSFADE_CURVE,
   clampMixPresetParams,
+  effectivePlaybackRate,
   expandPreset,
   normalizePhraseBars,
+  shouldSkipAtempo,
   type AutomationEvent,
   type BassSwapParams,
   type MixPresetParams,
   type PhraseBarCount,
 } from "@dnb-crate/domain";
 
+export type StretchScope = "all" | "overlap";
+
 export type FilterTrim = {
   startSec: number;
   endSec: number;
   gainDb: number;
   playbackRate?: number;
+  /** Solo isolate: stretch this many output seconds at the tail. */
+  stretchTailSec?: number;
 };
 
 export type MixTransitionKind = "crossfade" | "phrase_mix" | "bass_swap";
@@ -38,33 +43,153 @@ export type FilterGraphOptions = {
   warnings?: string[];
   /** When false, skip the mix-wide alimiter (used for intermediate pairwise joins). */
   applyLimiter?: boolean;
+  /**
+   * When false, keep the outgoing prefix inside the 3-band graph (incoming is delayed).
+   * Hours still play a dry prefix (so pairwise joins do not re-EQ the accumulated mix),
+   * but the 3-band path processes the full outgoing slice so the filters are warm.
+   * Dry joins the primed mix with a short linear splice. A one-bar equal-power
+   * acrossfade of dry vs phase-shifted 3-band audio ducked the whole mix.
+   */
+  isolatePrefix?: boolean;
+  /**
+   * Clip 11: `atempo` on a hot drop is a wind-tunnel. Listen-accepted Rubber Band
+   * settings are `27-drop-48k-rubberband.flac` (not the smooth/long `28`).
+   */
+  tempoEngine?: TempoEngine;
+  /**
+   * `overlap` (default): featured body stays at rate 1; Rubber Band only on the join.
+   * `all` is the pre-6.10 whole-window stretch (flickers on long bodies).
+   */
+  stretchScope?: StretchScope;
 };
+
+export type TempoEngine = "rubberband" | "atempo";
+
+/** Listen-accepted Rubber Band tempo filter (clip 11 `27`). */
+export function rubberbandTempoFilter(rate: number): string {
+  return `rubberband=tempo=${rate.toFixed(6)}:pitch=1:pitchq=quality:channels=together`;
+}
+
+/** Extra 3-band run-in before overlap when the outgoing prefix is isolated. */
+export const PREFIX_ISOLATION_RUN_IN_BARS = 1;
+/** Audible dry→primed splice. Keep IIR warmup longer than this in the wet path. */
+export const PREFIX_ISOLATION_SPLICE_SEC = 0.04;
+const PREFIX_ISOLATION_MIN_DRY_SEC = 0.001;
+/** Hide the native→stretched splice without a long two-tempo blend. */
+export const RATE_SPLICE_XFADE_SEC = 0.05;
 
 export function limiterAmplitudeFromCeilingDb(ceilingDb: number): number {
   return Number(Math.pow(10, ceilingDb / 20).toFixed(9));
 }
 
-export function outputDurationSec(trim: FilterTrim): number {
-  const rate = trim.playbackRate !== undefined && trim.playbackRate > 0 ? trim.playbackRate : 1;
-  return Math.max(0, trim.endSec - trim.startSec) / rate;
+export function outputDurationSec(
+  trim: FilterTrim,
+  context: {
+    overlapSec?: number;
+    stretchScope?: StretchScope;
+  } = {},
+): number {
+  const sourceSec = Math.max(0, trim.endSec - trim.startSec);
+  const requested = trim.playbackRate ?? 1;
+  const overlapSec = context.overlapSec ?? trim.stretchTailSec ?? 0;
+  const scope = context.stretchScope ?? "overlap";
+  if (scope === "all" || overlapSec <= 0) {
+    return sourceSec / effectivePlaybackRate(requested, sourceSec * 1000);
+  }
+  const rate = effectivePlaybackRate(requested, overlapSec * 1000);
+  if (rate === 1) {
+    return sourceSec;
+  }
+  const overlapSrc = overlapSec * rate;
+  if (overlapSrc >= sourceSec) {
+    return sourceSec / rate;
+  }
+  return sourceSec - overlapSrc + overlapSec;
 }
 
-export function expectedDurationMs(trims: FilterTrim[], overlapSeconds: number[]): number {
-  const playable = trims.reduce((sum, trim) => sum + outputDurationSec(trim), 0);
+export function expectedDurationMs(
+  trims: FilterTrim[],
+  overlapSeconds: number[],
+  stretchScope: StretchScope = "overlap",
+): number {
   const overlap = overlapSeconds.reduce((sum, item) => sum + item, 0);
+  const playable = trims.reduce((sum, trim, index) => {
+    const right = overlapSeconds[index] ?? 0;
+    const left = overlapSeconds[index - 1] ?? 0;
+    const overlapSec =
+      trim.stretchTailSec ??
+      (trims.length === 2 ? (index === 0 ? right : left) : index === 0 ? right : left);
+    return sum + outputDurationSec(trim, { overlapSec, stretchScope });
+  }, 0);
   return Math.max(0, Math.round((playable - overlap) * 1000));
 }
 
-function atempoSuffix(rate: number | undefined): string {
-  if (rate === undefined || Math.abs(rate - 1) < ATEMPO_SKIP_THRESHOLD) {
+function tempoSuffix(
+  rate: number | undefined,
+  sourceDurationMs: number,
+  engine: TempoEngine,
+): string {
+  if (rate === undefined || shouldSkipAtempo(rate, sourceDurationMs)) {
     return "";
+  }
+  if (engine === "rubberband") {
+    return `,${rubberbandTempoFilter(rate)}`;
   }
   return `,atempo=${rate.toFixed(6)}`;
 }
 
-function segmentPrep(index: number, trim: FilterTrim, sampleRateHz: number): string {
+function segmentPrep(
+  index: number,
+  trim: FilterTrim,
+  sampleRateHz: number,
+  tempoEngine: TempoEngine,
+  overlapSeconds: number[],
+  stretchScope: StretchScope,
+): string {
   const gain = Number.isFinite(trim.gainDb) ? trim.gainDb : 0;
-  return `[${index}:a]aformat=sample_fmts=fltp:sample_rates=${sampleRateHz}:channel_layouts=stereo,atrim=start=${trim.startSec}:end=${trim.endSec},asetpts=PTS-STARTPTS,volume=${gain}dB${atempoSuffix(trim.playbackRate)}[s${index}]`;
+  const sourceSec = Math.max(0, trim.endSec - trim.startSec);
+  const formatted = `[${index}:a]aformat=sample_fmts=fltp:sample_rates=${sampleRateHz}:channel_layouts=stereo,asetpts=PTS-STARTPTS,atrim=start=${trim.startSec}:end=${trim.endSec},asetpts=PTS-STARTPTS,volume=${gain}dB`;
+  const right = overlapSeconds[index] ?? 0;
+  const left = overlapSeconds[index - 1] ?? 0;
+  const overlapOut = trim.stretchTailSec ?? (index === 0 ? right : left);
+  const role: "outgoing" | "incoming" | "all" =
+    stretchScope === "all" || overlapOut <= 0
+      ? "all"
+      : trim.stretchTailSec != null || index === 0
+        ? "outgoing"
+        : "incoming";
+  const rate = effectivePlaybackRate(trim.playbackRate, overlapOut * 1000);
+  if (role === "all") {
+    return `${formatted}${tempoSuffix(trim.playbackRate, sourceSec * 1000, tempoEngine)}[s${index}]`;
+  }
+  if (rate === 1) {
+    return `${formatted}[s${index}]`;
+  }
+  const overlapSrc = overlapOut * rate;
+  const xfade = RATE_SPLICE_XFADE_SEC;
+  if (overlapSrc >= sourceSec - xfade || overlapSrc < xfade) {
+    return `${formatted}${tempoSuffix(rate, overlapSrc * 1000, tempoEngine)}[s${index}]`;
+  }
+  const raw = `r${index}`;
+  const split = `[${raw}]asplit=2[rb${index}][rt${index}]`;
+  if (role === "outgoing") {
+    const bodySrc = sourceSec - overlapSrc;
+    return [
+      `${formatted}[${raw}]`,
+      split,
+      `[rb${index}]atrim=start=0:end=${(bodySrc + xfade).toFixed(6)},asetpts=PTS-STARTPTS[b${index}]`,
+      `[rt${index}]atrim=start=${bodySrc.toFixed(6)},asetpts=PTS-STARTPTS${tempoSuffix(rate, overlapSrc * 1000, tempoEngine)}[t${index}]`,
+      `[b${index}][t${index}]acrossfade=d=${xfade}:o=1:c1=${CROSSFADE_CURVE}:c2=${CROSSFADE_CURVE}[s${index}]`,
+    ].join(";");
+  }
+  const headStart = Math.max(0, overlapSrc - xfade);
+  return [
+    `${formatted}[${raw}]`,
+    split,
+    `[rb${index}]atrim=start=0:end=${overlapSrc.toFixed(6)},asetpts=PTS-STARTPTS${tempoSuffix(rate, overlapSrc * 1000, tempoEngine)}[h${index}]`,
+    `[rt${index}]atrim=start=${headStart.toFixed(6)},asetpts=PTS-STARTPTS[n${index}]`,
+    `[h${index}][n${index}]acrossfade=d=${xfade}:o=1:c1=${CROSSFADE_CURVE}:c2=${CROSSFADE_CURVE}[s${index}]`,
+  ].join(";");
 }
 
 function limiterFilter(limiterAmplitude: number, applyLimiter: boolean): string {
@@ -77,6 +202,7 @@ function edgeFadeChain(
   trims: FilterTrim[],
   overlapSeconds: number[],
   edgeFadeSeconds?: { fadeIn: number; fadeOut: number },
+  stretchScope: StretchScope = "overlap",
 ): string {
   const post: string[] = [];
   const fadeIn = edgeFadeSeconds?.fadeIn ?? 0;
@@ -85,7 +211,7 @@ function edgeFadeChain(
     post.push(`afade=t=in:st=0:d=${fadeIn}`);
   }
   if (fadeOut > 0) {
-    const durationSec = expectedDurationMs(trims, overlapSeconds) / 1000;
+    const durationSec = expectedDurationMs(trims, overlapSeconds, stretchScope) / 1000;
     post.push(`afade=t=out:st=${Math.max(0, durationSec - fadeOut)}:d=${fadeOut}`);
   }
   return post.length > 0 ? post.join(",") : "anull";
@@ -97,9 +223,10 @@ function limiterChain(
   limiterAmplitude: number,
   edgeFadeSeconds?: { fadeIn: number; fadeOut: number },
   applyLimiter = true,
+  stretchScope: StretchScope = "overlap",
 ): string {
   const lim = limiterFilter(limiterAmplitude, applyLimiter);
-  const fades = edgeFadeChain(trims, overlapSeconds, edgeFadeSeconds);
+  const fades = edgeFadeChain(trims, overlapSeconds, edgeFadeSeconds, stretchScope);
   if (lim === "anull") {
     return fades;
   }
@@ -118,6 +245,16 @@ function lr4Highpass(hz: number): string {
   return `highpass=f=${hz},highpass=f=${hz}`;
 }
 
+export function prefixIsolationRunInSec(prefixSec: number, barMs: number): number {
+  if (prefixSec <= PREFIX_ISOLATION_MIN_DRY_SEC) {
+    return 0;
+  }
+  const barSec = barMs > 0 ? barMs / 1000 : 0.25;
+  const desired = Math.max(0.25, barSec * PREFIX_ISOLATION_RUN_IN_BARS);
+  const runIn = Math.min(prefixSec, desired);
+  return prefixSec - runIn > PREFIX_ISOLATION_MIN_DRY_SEC ? runIn : 0;
+}
+
 function assertGraphShape(trims: FilterTrim[], overlapSeconds: number[]): void {
   if (trims.length === 0) {
     throw new Error("Need at least one audio segment");
@@ -129,15 +266,17 @@ function assertGraphShape(trims: FilterTrim[], overlapSeconds: number[]): void {
 
 /**
  * Equal-power acrossfade graph. Paths stay on `-i` inputs; the filter uses labels only.
- * Pitch-preserving tempo matching uses `atempo` (not `asetrate`).
+ * Pitch-preserving tempo matching uses Rubber Band when requested, else `atempo` (not `asetrate`).
  */
 export function buildAcrossfadeFilter(options: FilterGraphOptions): string {
   const { trims, overlapSeconds, limiterAmplitude, sampleRateHz, edgeFadeSeconds } = options;
   assertGraphShape(trims, overlapSeconds);
+  const tempoEngine = options.tempoEngine ?? "atempo";
+  const stretchScope = options.stretchScope ?? "overlap";
 
   const parts: string[] = [];
   for (let i = 0; i < trims.length; i += 1) {
-    parts.push(segmentPrep(i, trims[i]!, sampleRateHz));
+    parts.push(segmentPrep(i, trims[i]!, sampleRateHz, tempoEngine, overlapSeconds, stretchScope));
   }
 
   let current = "s0";
@@ -151,7 +290,7 @@ export function buildAcrossfadeFilter(options: FilterGraphOptions): string {
   }
 
   parts.push(
-    `[${current}]${limiterChain(trims, overlapSeconds, limiterAmplitude, edgeFadeSeconds, options.applyLimiter)}[out]`,
+    `[${current}]${limiterChain(trims, overlapSeconds, limiterAmplitude, edgeFadeSeconds, options.applyLimiter, stretchScope)}[out]`,
   );
   return parts.join(";");
 }
@@ -239,19 +378,23 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
     { ...spec?.bassSwap, ...spec?.params, barCount, targetBpm: spec?.params?.targetBpm ?? null },
     barCount,
   );
-  const t0 = outputDurationSec(trims[0]!);
+  const stretchScope = options.stretchScope ?? "overlap";
   const overlap = overlapSeconds[0]!;
+  const t0 = outputDurationSec(trims[0]!, { overlapSec: overlap, stretchScope });
   const prefixSec = t0 - overlap;
-  const isolatePrefix = prefixSec > 0.001;
-  const delayMs = isolatePrefix ? 0 : Math.max(0, Math.round(prefixSec * 1000));
   const barMs =
     params.targetBpm != null && params.targetBpm > 0
       ? (4 * 60_000) / params.targetBpm
       : (overlap * 1000) / barCount;
+  const runInSec = prefixIsolationRunInSec(prefixSec, barMs);
+  const tempoEngine = options.tempoEngine ?? "atempo";
+  const isolatePrefix = options.isolatePrefix !== false && runInSec > 0;
+  const expectedSec = expectedDurationMs(trims, overlapSeconds, stretchScope) / 1000;
+  const delayMs = Math.max(0, Math.round(prefixSec * 1000));
   const events = expandPreset(type, params, barCount, barMs);
   const hasUnity = options.hasAfadeUnity !== false;
   const warnings = options.warnings ?? [];
-  const outgoingOrigin = isolatePrefix ? 0 : Math.max(0, prefixSec);
+  const outgoingOrigin = Math.max(0, prefixSec);
   const byTarget = (target: AutomationEvent["target"]) =>
     events.filter((ev) => ev.target === target);
   const incomingDelay = delayMs > 0 ? `,adelay=${delayMs}|${delayMs}` : "";
@@ -277,15 +420,21 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
     }
     return `[${src}]${chain}[${out}]`;
   };
-  const prefixLabel = isolatePrefix ? prefixSec.toFixed(6) : "";
-  const outgoingSplit = isolatePrefix ? "tail" : "s0";
+  const spliceSec = isolatePrefix ? Math.min(PREFIX_ISOLATION_SPLICE_SEC, runInSec) : 0;
+  const prefixEndLabel = isolatePrefix ? prefixSec.toFixed(6) : "";
+  const tailStartLabel = isolatePrefix ? (prefixSec - spliceSec).toFixed(6) : "";
+  const outgoingSplit = isolatePrefix ? "wet" : "s0";
+  const mixedLabel = isolatePrefix && options.applyLimiter !== false ? "mixedLim" : "mixed";
+  const join = isolatePrefix
+    ? `[${mixedLabel}]atrim=start=${tailStartLabel},asetpts=PTS-STARTPTS[tailMix];[prefix][tailMix]acrossfade=d=${spliceSec.toFixed(6)}:o=1:c1=tri:c2=tri[joined]`
+    : `[mixed]${limiterFilter(limiterAmplitude, options.applyLimiter !== false)}[joined]`;
   const parts = [
-    segmentPrep(0, trims[0]!, sampleRateHz),
-    segmentPrep(1, trims[1]!, sampleRateHz),
+    segmentPrep(0, trims[0]!, sampleRateHz, tempoEngine, overlapSeconds, stretchScope),
+    segmentPrep(1, trims[1]!, sampleRateHz, tempoEngine, overlapSeconds, stretchScope),
     ...(isolatePrefix
       ? [
-          `[s0]atrim=start=0:end=${prefixLabel},asetpts=PTS-STARTPTS[prefix]`,
-          `[s0]atrim=start=${prefixLabel},asetpts=PTS-STARTPTS[tail]`,
+          `[s0]asplit=2[dry][wet]`,
+          `[dry]atrim=start=0:end=${prefixEndLabel},asetpts=PTS-STARTPTS[prefix]`,
         ]
       : []),
     `[${outgoingSplit}]asplit=3[oRawL][oRawM][oRawH]`,
@@ -303,12 +452,12 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
     withFade("iM0", iM, "iM"),
     withFade("iH0", iH, "iH"),
     `[oL][oM][oH][iL][iM][iH]amix=inputs=6:normalize=0:dropout_transition=0[mixed]`,
-    isolatePrefix
-      ? options.applyLimiter !== false
-        ? `[mixed]${limiterFilter(limiterAmplitude, true)}[mixedLim];[prefix][mixedLim]concat=n=2:v=0:a=1[joined]`
-        : `[prefix][mixed]concat=n=2:v=0:a=1[joined]`
-      : `[mixed]${limiterFilter(limiterAmplitude, options.applyLimiter !== false)}[joined]`,
-    `[joined]${edgeFadeChain(trims, overlapSeconds, edgeFadeSeconds)}[out]`,
+    ...(isolatePrefix && options.applyLimiter !== false
+      ? [`[mixed]${limiterFilter(limiterAmplitude, true)}[mixedLim]`]
+      : []),
+    join,
+    `[joined]atrim=start=0:end=${expectedSec.toFixed(6)},asetpts=PTS-STARTPTS[capped]`,
+    `[capped]${edgeFadeChain(trims, overlapSeconds, edgeFadeSeconds, stretchScope)}[out]`,
   ];
   return parts.join(";");
 }

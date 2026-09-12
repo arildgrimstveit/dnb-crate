@@ -45,6 +45,7 @@ export const appConfigSchema = z.object({
   renderEdgeFadeMs: z.number().int().min(0).max(5_000).optional(),
   ffmpegPath: z.string().min(1).optional(),
   ffprobePath: z.string().min(1).optional(),
+  rubberbandPath: z.string().min(1).optional(),
   analysis: analysisConfigSchema,
   enrichment: z
     .object({

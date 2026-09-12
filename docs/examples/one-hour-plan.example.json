@@ -3,7 +3,7 @@
   "id": "00000000-0000-4000-8000-000000000001",
   "name": "Example liquid hour (fictional tracks)",
   "targetDurationMs": 3600000,
-  "targetBpm": 174,
+  "targetBpm": null,
   "requestedArc": [
     { "atFraction": 0, "targetEnergy": 3 },
     { "atFraction": 0.75, "targetEnergy": 9 },
@@ -25,7 +25,7 @@
         "durationMs": 30000,
         "outgoingCuePointId": null,
         "incomingCuePointId": null,
-        "parameters": { "purpose": "stage2-timing-only" }
+        "parameters": { "purpose": "timing-only" }
       }
     }
   ],

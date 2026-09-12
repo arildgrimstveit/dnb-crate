@@ -222,7 +222,7 @@ describe("FFmpeg integration", () => {
       ],
     });
     expect(Math.abs(result.durationMs - 20_000)).toBeLessThan(400);
-    expect(result.invocation).toContain("concat=n=2");
+    expect(result.invocation).toContain("acrossfade=");
   }, 90_000);
 
   it("writes 24-bit 48 kHz FLAC when the output path is .flac", async (ctx) => {

@@ -3,6 +3,7 @@ export type RunRequest = {
   args: string[];
   abortSignal?: AbortSignal;
   timeoutMs?: number;
+  cwd?: string;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
 };
