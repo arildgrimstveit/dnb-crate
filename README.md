@@ -1,6 +1,6 @@
 # DnB Crate
 
-![DnB Crate](docs/images/dnb-crate.jpg)
+<p align="center"><img src="docs/images/dnb-crate.jpg" alt="DnB Crate" width="420"></p>
 
 Point this at a local drum & bass folder. It catalogs the files, measures grids and keys, plans a deterministic mix of the length you ask for, and renders a gapless 24-bit master plus a 16-bit listen FLAC.
 
