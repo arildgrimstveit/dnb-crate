@@ -37,7 +37,7 @@ Those words become structured fields:
 | “same mix again” | same brief + same `seed` (default 1) |
 | “try another one” / “a different take” | change `seed` |
 
-New plans: `qualityPolicy: "strict"`, omit `targetBpm` (each overlap beatmatches at the pair tempo), `dropAnchored` defaults true. Do not pin historical pairs or recipes unless you ask.
+A new mix will not reuse old pairings unless you ask. Tracks keep their own tempo and meet in the overlap; the planner skips unexplained risky keys and unexplained fades.
 
 Ready to render means the plan is valid, quality checks pass, and duration is within **5 minutes** of the request. The planner still aims within **90 s**. Analysis is advisory. Provenance is **manual > published > analyzed > tag**. The model must not invent BPM, key, energy, or cues.
 
