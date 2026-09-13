@@ -6,7 +6,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { AppConfig, SetPlanV1 } from "@dnb-crate/domain";
-import { DSP_ANALYZER_NAME, DSP_ANALYZER_VERSION, RENDERER_VERSION } from "@dnb-crate/domain";
+import {
+  AUDIO_ENGINE_ID,
+  DSP_ANALYZER_NAME,
+  DSP_ANALYZER_VERSION,
+  RENDERER_VERSION,
+} from "@dnb-crate/domain";
 import { createFakeFfmpegRunner, ProcessRunError, sha256Json } from "@dnb-crate/audio-renderer";
 
 import { createCatalogRuntime, writeSineWav } from "../src/index.ts";
@@ -669,6 +674,12 @@ describe("render jobs", () => {
     expect(catalog.renderJobs.findById(done.id)?.params.request?.settings?.loudnessTargetLufs).toBe(
       -14,
     );
+    expect(catalog.renderJobs.findById(done.id)?.params.request?.settings?.rendererVersion).toBe(
+      RENDERER_VERSION,
+    );
+    expect(catalog.renderJobs.findById(done.id)?.params.request?.settings?.audioEngineId).toBe(
+      AUDIO_ENGINE_ID,
+    );
 
     const hit = await catalog.service.createTransitionPreview({
       setPlanId: plan.id,
@@ -708,6 +719,119 @@ describe("render jobs", () => {
       restarted.renderJobs.findById(afterSettings.job.id)?.params.request?.settings
         ?.loudnessTargetLufs,
     ).toBe(-18);
+  });
+
+  it("fails a queued job whose frozen audio engine no longer matches", async () => {
+    const { catalog, plan } = await seededLibrary();
+    const started = await catalog.service.startSetRender({ setPlanId: plan.id });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
+    const request = structuredClone(catalog.renderJobs.findById(done.id)!.params.request);
+    request!.settings!.audioEngineId = "float-r3-lr4-join-v2";
+    const rerun = catalog.renderJobs.insertQueued({
+      id: crypto.randomUUID(),
+      kind: "full",
+      setPlanId: plan.id,
+      params: { request },
+    });
+    const failed = await catalog.service.waitForRenderJob(rerun.id, 15_000);
+    expect(failed.status).toBe("failed");
+    expect(failed.errorMessage).toMatch(/incompatible with running/);
+  });
+
+  it("fails a queued job when the frozen Rubber Band executable is replaced", async () => {
+    const root = path.join(os.tmpdir(), `dnb-r3-pin-${crypto.randomUUID()}`);
+    const library = path.join(root, "library");
+    const cli = path.join(root, "rubberband.exe");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(library, { recursive: true });
+    await writeFile(cli, "rubberband-v1");
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      useFakeFfmpeg: true,
+      rubberbandCliPath: cli,
+    });
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(library, "alpha.wav"), {
+      title: "Alpha",
+      artist: "A",
+      durationMs: 8000,
+    });
+    await writeSineWav(path.join(library, "bravo.wav"), {
+      title: "Bravo",
+      artist: "B",
+      durationMs: 8000,
+    });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
+    const plan = saveTwoTrackPlan(
+      catalog,
+      tracks.find((track) => track.title === "Alpha")!.id,
+      tracks.find((track) => track.title === "Bravo")!.id,
+    );
+    const started = await catalog.service.startSetRender({ setPlanId: plan.id });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
+    const frozen = catalog.renderJobs.findById(done.id)?.params.request?.settings;
+    expect(frozen?.rubberbandCliPath).toBe(cli);
+    expect(frozen?.rubberbandSha256).toMatch(/^[a-f0-9]{64}$/);
+    await writeFile(cli, "rubberband-v2");
+    const rerun = catalog.renderJobs.insertQueued({
+      id: crypto.randomUUID(),
+      kind: "full",
+      setPlanId: plan.id,
+      params: { request: catalog.renderJobs.findById(done.id)!.params.request },
+    });
+    const failed = await catalog.service.waitForRenderJob(rerun.id, 15_000);
+    expect(failed.status).toBe("failed");
+    expect(failed.errorMessage).toMatch(/replaced after queue/);
+  });
+
+  it("withholds the listen copy when its measured peak exceeds the ceiling", async () => {
+    const root = path.join(os.tmpdir(), `dnb-listen-peak-${crypto.randomUUID()}`);
+    const library = path.join(root, "library");
+    const { mkdir, access } = await import("node:fs/promises");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      processRunner: createFakeFfmpegRunner({
+        probeDurationSec: 15,
+        eburForInput: (inputPath) =>
+          inputPath.replaceAll("\\", "/").endsWith("renders/fixture-mix.flac")
+            ? { truePeakDb: 0.8 }
+            : undefined,
+      }),
+    });
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(library, "alpha.wav"), {
+      title: "Alpha",
+      artist: "A",
+      durationMs: 8000,
+    });
+    await writeSineWav(path.join(library, "bravo.wav"), {
+      title: "Bravo",
+      artist: "B",
+      durationMs: 8000,
+    });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
+    const plan = saveTwoTrackPlan(
+      catalog,
+      tracks.find((track) => track.title === "Alpha")!.id,
+      tracks.find((track) => track.title === "Bravo")!.id,
+    );
+    const started = await catalog.service.startSetRender({ setPlanId: plan.id });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
+    expect(done.listenRootRelativePath).toBeNull();
+    const manifest = catalog.service.getRenderManifest(done.id);
+    expect(manifest.listenRootRelativePath).toBeUndefined();
+    expect(manifest.listenBitDepth).toBeUndefined();
+    expect(manifest.listenTruePeakDb).toBeCloseTo(0.8);
+    expect(manifest.warnings.some((warning) => warning.includes("Listen copy withheld"))).toBe(
+      true,
+    );
+    await expect(
+      access(path.join(root, "output", "renders", "fixture-mix.flac")),
+    ).rejects.toThrow();
   });
 });
 

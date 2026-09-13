@@ -1,4 +1,4 @@
-import { access, mkdir, stat } from "node:fs/promises";
+import { access, mkdir, stat, unlink } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 
@@ -17,6 +17,7 @@ import {
   MIN_ANALYSIS_CONFIDENCE,
   RENDER_CHECK_LEVEL_STEP_FAIL_LU,
   RENDER_CHECK_RESIDUAL_FAIL_MS,
+  AUDIO_ENGINE_ID,
   RENDERER_VERSION,
   LISTEN_RENDER_BIT_DEPTH,
   listenRenderRelPath,
@@ -57,7 +58,9 @@ import {
   requireAlignedFfmpeg,
   requireFfmpeg,
   renderMix,
+  measureLoudness,
   encodeListenFlac,
+  listenCopyFailureReason,
   applyAlignmentOffset,
   planAlignmentOffsetMs,
   mixTagsFromTracklist,
@@ -71,6 +74,7 @@ import {
   type ProcessRunner,
 } from "@dnb-crate/audio-renderer";
 
+import { assertFrozenAudioIdentity, hashRubberbandCli } from "./engine-identity.ts";
 import {
   evaluateDurationError,
   firstDropMs,
@@ -229,7 +233,10 @@ function freezeRenderSettings(settings: RenderSettings): FrozenRenderSettings {
     loudnessTargetLufs: settings.loudnessTargetLufs,
     truePeakCeilingDb: settings.truePeakCeilingDb,
     rendererVersion: RENDERER_VERSION,
+    audioEngineId: AUDIO_ENGINE_ID,
     rubberbandAvailable: Boolean(settings.rubberbandCliPath),
+    rubberbandCliPath: settings.rubberbandCliPath,
+    rubberbandSha256: hashRubberbandCli(settings.rubberbandCliPath),
   };
 }
 
@@ -1034,8 +1041,13 @@ export class RenderCoordinator {
           `Unknown rateRegionsVersion ${timing.unknownVersions.join(", ")} on plan ${plan.id}`,
         );
       }
+      const rubberbandCliPath =
+        frozenSettings?.rubberbandCliPath !== undefined
+          ? frozenSettings.rubberbandCliPath
+          : this.settings.rubberbandCliPath;
+      assertFrozenAudioIdentity(frozenSettings, rubberbandCliPath);
       let rateRegionsVersion = timing.version === 2 ? (2 as const) : undefined;
-      if (rateRegionsVersion === 2 && !this.settings.rubberbandCliPath) {
+      if (rateRegionsVersion === 2 && !rubberbandCliPath) {
         warnings.push("Join-only timing v2 needs Rubber Band R3; using overlap-only stretch.");
         rateRegionsVersion = undefined;
       }
@@ -1052,8 +1064,9 @@ export class RenderCoordinator {
         truePeakCeilingDb: frozenSettings?.truePeakCeilingDb ?? this.settings.truePeakCeilingDb,
         loudnessTargetLufs: frozenSettings?.loudnessTargetLufs ?? this.settings.loudnessTargetLufs,
         edgeFadeMs,
-        isolatePrefix: job.kind !== "preview",
-        rubberbandCliPath: this.settings.rubberbandCliPath,
+        isolatePrefix: false,
+        fidelityMode: job.kind === "full",
+        rubberbandCliPath,
         rateRegionsVersion,
         abortSignal: controller.signal,
         onProgress: (fraction) => {
@@ -1096,6 +1109,13 @@ export class RenderCoordinator {
         truePeakCeilingDb: frozenSettings?.truePeakCeilingDb ?? this.settings.truePeakCeilingDb,
         ffmpegVersion: binaries.ffmpegVersion,
         ffprobeVersion: binaries.ffprobeVersion,
+        rubberbandCliPath,
+        rubberbandSha256: frozenSettings?.rubberbandSha256 ?? hashRubberbandCli(rubberbandCliPath),
+        audioEngineId: frozenSettings?.audioEngineId ?? AUDIO_ENGINE_ID,
+        staticGainDb: mix.staticGainDb,
+        limiterApplied: mix.limiterApplied,
+        stretchEngine: mix.stretchEngine,
+        stretchEngines: mix.stretchEngines,
         invocation: mix.invocation,
         tracks: segments.map((segment, index) => {
           const params =
@@ -1174,8 +1194,26 @@ export class RenderCoordinator {
           } else {
             try {
               await encodeListenFlac(this.runner, binaries, absOut, listenAbs, controller.signal);
-              manifest.listenRootRelativePath = listenRel.split(path.sep).join("/");
-              manifest.listenBitDepth = LISTEN_RENDER_BIT_DEPTH;
+              const listenLoudness = await measureLoudness(
+                this.runner,
+                binaries,
+                listenAbs,
+                controller.signal,
+              );
+              manifest.listenIntegratedLufs = listenLoudness.integratedLufs;
+              manifest.listenTruePeakDb = listenLoudness.truePeakDb;
+              const listenFailure = listenCopyFailureReason(
+                listenLoudness,
+                frozenSettings?.truePeakCeilingDb ?? this.settings.truePeakCeilingDb,
+              );
+              if (listenFailure) {
+                await unlink(listenAbs).catch(() => undefined);
+                warnings.push(`Listen copy withheld: ${listenFailure}.`);
+                manifest.warnings = warnings;
+              } else {
+                manifest.listenRootRelativePath = listenRel.split(path.sep).join("/");
+                manifest.listenBitDepth = LISTEN_RENDER_BIT_DEPTH;
+              }
             } catch (error) {
               if (isAbortError(error) || this.jobs.findById(job.id)?.status === "cancelled") {
                 throw error;

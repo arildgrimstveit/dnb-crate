@@ -117,6 +117,15 @@ export type RenderManifestV1 = {
   truePeakCeilingDb: number;
   ffmpegVersion: string;
   ffprobeVersion: string;
+  rubberbandCliPath?: string | null;
+  rubberbandSha256?: string | null;
+  audioEngineId?: string;
+  staticGainDb?: number | null;
+  limiterApplied?: boolean;
+  stretchEngine?: string;
+  stretchEngines?: string[];
+  listenIntegratedLufs?: number | null;
+  listenTruePeakDb?: number | null;
   invocation: string;
   tracks: RenderManifestTrack[];
   joinEvidence?: FrozenJoinEvidence[];

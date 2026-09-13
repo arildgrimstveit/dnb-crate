@@ -12,9 +12,8 @@ Rules for new plans and renders. They apply to any local DnB folder. They are no
 
 ## Joins
 
-- Compare 16- and 32-bar windows on the actual source material. Do not maximize bar count.
-- Do not auto-pick 8 bars when 16 or 32 is feasible.
-- Drop-anchored landing: incoming already running, drop at overlap end.
+- Compare 16- and 32-bar windows on the actual source material. Prefer a 32-bar drop-anchored landing when the first drop is in the opening and the mix-in is not a dead intro. A late first drop (after 90 s) stays 16 unless that 32-bar prefix already has body. Do not auto-pick 8 bars when 16 or 32 is feasible.
+- Drop-anchored landing: incoming already running, first labeled drop at overlap end. A late first drop mixes in 16 bars before that drop.
 - Complementary quiet-tail prefers 16-bar `lift`. Sequential and landing stay `sustain`.
 - Stretch is **join only** (Rubber Band R3 when present). Do not stretch whole tracks.
 - Conservative harmonic = same key, relative, or adjacent same-mode. Unknown is not compatible.

@@ -1,11 +1,14 @@
-import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  CROSSFADE_CURVE,
   DEFAULT_RENDER_CHANNELS,
   DEFAULT_RENDER_SAMPLE_RATE_HZ,
   DomainError,
   FFMPEG_ARGV_SOFT_LIMIT,
+  clampMixPresetParams,
+  normalizePhraseBars,
   overlapOnlyPlayableMs,
   resolveRateRegions,
 } from "@dnb-crate/domain";
@@ -16,7 +19,10 @@ import {
   estimateArgvChars,
   expectedDurationMs,
   limiterAmplitudeFromCeilingDb,
+  limiterFilter,
+  JOIN_STITCH_XFADE_SEC,
   mixFilterArgs,
+  outputDurationSec,
   redactInvocation,
   type FilterTrim,
   type MixTransitionSpec,
@@ -26,7 +32,11 @@ import { sha256File } from "./hash.ts";
 import { buildFfmetadataFile, type MixOutputTags } from "./output-tags.ts";
 import { parseEbur128, parseOutTimeMs, parseSilenceSpans } from "./parse.ts";
 import { probeAudioFile } from "./probe.ts";
-import { prepareCliStretchedSegments, prepareBothJoinRegions } from "./rubberband-cli.ts";
+import {
+  INTERMEDIATE_PCM_CODEC,
+  prepareBothJoinRegions,
+  prepareCliStretchedSegments,
+} from "./rubberband-cli.ts";
 import type { ProcessRunner } from "./runner.ts";
 
 export type MixSegment = {
@@ -50,12 +60,17 @@ export type MixRequest = {
   abortSignal?: AbortSignal;
   onProgress?: (fraction: number) => void;
   postProcess?: boolean;
-  /** When false, skip the graph alimiter (intermediate pairwise joins). */
+  /** When true, apply a limiter inside the mix graph. Final masters limit after static gain instead. */
   applyLimiter?: boolean;
-  /** Intermediate hour joins use float so a hot sum cannot hard-clip in 24-bit. */
+  /** Assembly codec. Final masters stay float until delivery; intermediates must be float. */
   pcmCodec?: "pcm_s24le" | "pcm_f32le";
-  /** When false, keep the outgoing prefix in the 3-band graph. Hours play a dry prefix and acrossfade one bar onto a primed 3-band mix. */
+  /** Kept for callers; band reconstruction no longer dry/wet-splices the prefix. */
   isolatePrefix?: boolean;
+  /**
+   * Full-quality export: refuse unapproved stretch fallback, require finite
+   * loudness/true-peak measurements, and prefer one static gain over limiting.
+   */
+  fidelityMode?: boolean;
   /**
    * `rubberband-r3` (default when `rubberbandCliPath` is set): standalone R3 CLI.
    * `rubberband`: FFmpeg filter (`27` settings, flickers on Like a Memory).
@@ -74,7 +89,11 @@ export type MixRequest = {
   transitions?: MixTransitionSpec[];
   /** Mix-level tags for the published FLAC. Source-file tags are never copied. */
   outputMetadata?: MixOutputTags;
+  /** Keep a shared middle deck on the previous join’s crossover. */
+  outgoingCrossoverHz?: number;
 };
+
+export type StretchEngine = "rubberband-r3" | "rubberband" | "atempo" | "none";
 
 export type MixResult = {
   durationMs: number;
@@ -86,6 +105,10 @@ export type MixResult = {
   invocation: string;
   warnings: string[];
   expectedDurationMs: number;
+  staticGainDb: number | null;
+  limiterApplied: boolean;
+  stretchEngine: StretchEngine;
+  stretchEngines: StretchEngine[];
 };
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -150,6 +173,116 @@ function toTrims(segments: MixSegment[]): FilterTrim[] {
   }));
 }
 
+function needsStretch(segments: MixSegment[]): boolean {
+  return segments.some((segment) => {
+    const rate = segment.playbackRate ?? 1;
+    return rate !== 1 && Math.abs(rate - 1) > 1e-6;
+  });
+}
+
+function usesCliStretch(request: MixRequest): boolean {
+  return (
+    Boolean(request.rubberbandCliPath) &&
+    request.tempoEngine !== "atempo" &&
+    request.tempoEngine !== "rubberband"
+  );
+}
+
+function assertFidelityStretch(request: MixRequest): void {
+  if (request.fidelityMode === true && needsStretch(request.segments) && !usesCliStretch(request)) {
+    throw new DomainError(
+      "RENDER_FAILED",
+      "Fidelity mode requires Rubber Band R3; refusing FFmpeg rubberband/atempo fallback",
+      { retryable: false },
+    );
+  }
+}
+
+function combineStretchEngines(engines: StretchEngine[]): StretchEngine {
+  if (engines.includes("rubberband-r3")) {
+    return "rubberband-r3";
+  }
+  if (engines.includes("rubberband")) {
+    return "rubberband";
+  }
+  if (engines.includes("atempo")) {
+    return "atempo";
+  }
+  return "none";
+}
+
+function chooseStaticGainDb(
+  measured: { integratedLufs: number | null; truePeakDb: number | null },
+  loudnessTargetLufs: number,
+  truePeakCeilingDb: number,
+): number {
+  let gainDb = 0;
+  if (measured.integratedLufs != null && measured.integratedLufs > loudnessTargetLufs + 0.5) {
+    gainDb = loudnessTargetLufs - measured.integratedLufs;
+  }
+  if (measured.truePeakDb != null) {
+    const after = measured.truePeakDb + gainDb;
+    if (after > truePeakCeilingDb) {
+      gainDb += truePeakCeilingDb - after;
+    }
+  }
+  return gainDb;
+}
+
+const TRUE_PEAK_HEADROOM_DB = 0.05;
+
+function requireLoudness(
+  measured: { integratedLufs: number | null; truePeakDb: number | null },
+  fidelityMode: boolean,
+): void {
+  const ok =
+    measured.integratedLufs != null &&
+    Number.isFinite(measured.integratedLufs) &&
+    measured.truePeakDb != null &&
+    Number.isFinite(measured.truePeakDb);
+  if (!ok && fidelityMode) {
+    throw new DomainError(
+      "RENDER_FAILED",
+      "Loudness/true-peak measurement failed; refusing to finish a fidelity export",
+      { retryable: false },
+    );
+  }
+}
+
+function assertTruePeakCeiling(
+  measured: { truePeakDb: number | null },
+  ceilingDb: number,
+  label: string,
+): void {
+  if (measured.truePeakDb == null || !Number.isFinite(measured.truePeakDb)) {
+    return;
+  }
+  if (measured.truePeakDb > ceilingDb + TRUE_PEAK_HEADROOM_DB) {
+    throw new DomainError(
+      "RENDER_FAILED",
+      `${label} true peak ${measured.truePeakDb.toFixed(2)} dB exceeds ceiling ${ceilingDb} dB`,
+      { retryable: false, details: { truePeakDb: measured.truePeakDb } },
+    );
+  }
+}
+
+function resolvedCrossoverHz(spec: MixTransitionSpec | undefined): number | undefined {
+  if (!spec || spec.type === "crossfade") {
+    return undefined;
+  }
+  const barCount = normalizePhraseBars(spec.barCount ?? spec.params?.barCount);
+  return clampMixPresetParams({ ...spec.bassSwap, ...spec.params, barCount }, barCount).crossoverHz;
+}
+
+function oversampledLimiterAf(limit: number, sampleRateHz: number): string {
+  const up = Math.min(192_000, sampleRateHz * 4);
+  const limiter = limiterFilter(limit, true);
+  if (up === sampleRateHz) {
+    return limiter;
+  }
+  return `aformat=sample_fmts=fltp:sample_rates=${up},${limiter},aformat=sample_fmts=fltp:sample_rates=${sampleRateHz}`;
+}
+
 function needsPairwise(request: MixRequest): boolean {
   const types =
     request.transitions ?? request.overlapMs.map(() => ({ type: "crossfade" as const }));
@@ -162,6 +295,7 @@ export async function renderMix(
   request: MixRequest,
 ): Promise<MixResult> {
   throwIfAborted(request.abortSignal);
+  assertFidelityStretch(request);
   if (request.segments.length === 0) {
     throw new DomainError("INVALID_SET_PLAN", "Render has no audio segments");
   }
@@ -235,6 +369,8 @@ export async function renderMix(
         expectedDurationMs: Math.round(expected),
         warnings: [...prepared.warnings, ...result.warnings],
         invocation: `${prepared.invocation} ; ${result.invocation}`,
+        stretchEngine: "rubberband-r3",
+        stretchEngines: ["rubberband-r3"],
       };
     } finally {
       await Promise.all(prepared.tempPaths.map(removeIfPresent));
@@ -253,12 +389,19 @@ export async function renderMix(
   const edge = request.edgeFadeMs ?? 0;
   const warnings: string[] = [];
   const stretchTemps: string[] = [];
-  const useCli =
-    Boolean(request.rubberbandCliPath) &&
-    request.tempoEngine !== "atempo" &&
-    request.tempoEngine !== "rubberband";
+  const fidelityMode = request.fidelityMode === true;
+  const useCli = usesCliStretch(request);
   let mixSegments = request.segments;
   let cliInvocation = "";
+  const stretchEngine: MixResult["stretchEngine"] = needsStretch(request.segments)
+    ? useCli
+      ? "rubberband-r3"
+      : request.tempoEngine === "atempo" || !binaries.hasRubberband
+        ? "atempo"
+        : "rubberband"
+    : "none";
+  let staticGainDb: number | null = null;
+  let limiterApplied = false;
   const partialPath = `${request.outputPath}.partial.wav`;
   const filterPath = `${request.outputPath}.filter.txt`;
   const useScript = binaries.hasFilterComplexScript;
@@ -309,8 +452,9 @@ export async function renderMix(
       transitions: request.transitions,
       hasAfadeUnity: binaries.hasAfadeUnity,
       warnings,
-      applyLimiter: request.applyLimiter,
+      applyLimiter: request.applyLimiter === true,
       isolatePrefix: request.isolatePrefix,
+      outgoingCrossoverHz: request.outgoingCrossoverHz,
       tempoEngine: useCli
         ? "atempo"
         : request.tempoEngine === "rubberband-r3"
@@ -340,7 +484,7 @@ export async function renderMix(
       "-ar",
       String(sampleRateHz),
       "-c:a",
-      request.pcmCodec ?? "pcm_s24le",
+      request.pcmCodec ?? INTERMEDIATE_PCM_CODEC,
       "-vn",
       "-map_metadata",
       "-1",
@@ -372,11 +516,13 @@ export async function renderMix(
     let measured = { integratedLufs: null as number | null, truePeakDb: null as number | null };
     if (postProcess) {
       measured = await measureLoudness(runner, binaries, workingPath, request.abortSignal);
-      if (
-        measured.integratedLufs !== null &&
-        measured.integratedLufs > request.loudnessTargetLufs + 0.5
-      ) {
-        const gainDb = request.loudnessTargetLufs - measured.integratedLufs;
+      requireLoudness(measured, fidelityMode);
+      const gainDb = chooseStaticGainDb(
+        measured,
+        request.loudnessTargetLufs,
+        request.truePeakCeilingDb,
+      );
+      if (Math.abs(gainDb) >= 0.05) {
         const attenuated = `${request.outputPath}.attenuated.wav`;
         const volumeArgs = [
           "-nostdin",
@@ -387,9 +533,9 @@ export async function renderMix(
           "-map_metadata",
           "-1",
           "-af",
-          `volume=${gainDb}dB,alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50`,
+          `volume=${gainDb}dB`,
           "-c:a",
-          "pcm_s24le",
+          INTERMEDIATE_PCM_CODEC,
           attenuated,
         ];
         invocation = `${invocation} ; ${redactInvocation(binaries.ffmpegPath, volumeArgs)}`;
@@ -403,13 +549,15 @@ export async function renderMix(
         }
         await removeIfPresent(workingPath);
         workingPath = attenuated;
+        staticGainDb = gainDb;
         warnings.push(
-          `Applied mix-wide ${gainDb.toFixed(2)} dB attenuation so integrated LUFS meets ${request.loudnessTargetLufs} LUFS. Per-track energy differences were preserved.`,
+          `Applied mix-wide ${gainDb.toFixed(2)} dB static gain so loudness and true peak meet target without limiting.`,
         );
         measured = await measureLoudness(runner, binaries, workingPath, request.abortSignal);
+        requireLoudness(measured, fidelityMode);
       }
 
-      if (measured.truePeakDb !== null && measured.truePeakDb > request.truePeakCeilingDb + 0.3) {
+      if (measured.truePeakDb !== null && measured.truePeakDb > request.truePeakCeilingDb + 0.05) {
         const limited = `${request.outputPath}.peak-limited.wav`;
         const peakArgs = [
           "-nostdin",
@@ -420,9 +568,9 @@ export async function renderMix(
           "-map_metadata",
           "-1",
           "-af",
-          `alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50`,
+          oversampledLimiterAf(limiterAmplitude, sampleRateHz),
           "-c:a",
-          "pcm_s24le",
+          INTERMEDIATE_PCM_CODEC,
           limited,
         ];
         invocation = `${invocation} ; ${redactInvocation(binaries.ffmpegPath, peakArgs)}`;
@@ -436,53 +584,13 @@ export async function renderMix(
         }
         await removeIfPresent(workingPath);
         workingPath = limited;
+        limiterApplied = true;
         warnings.push(
-          `Applied mix-wide true-peak limiter so true peak meets ${request.truePeakCeilingDb} dBTP.`,
+          `Applied one latency-compensated oversampled limiter so true peak meets ${request.truePeakCeilingDb} dBTP.`,
         );
         measured = await measureLoudness(runner, binaries, workingPath, request.abortSignal);
-        if (measured.truePeakDb !== null && measured.truePeakDb > request.truePeakCeilingDb + 0.3) {
-          const peakGainDb = request.truePeakCeilingDb - measured.truePeakDb - 0.2;
-          const ducked = `${request.outputPath}.peak-ducked.wav`;
-          const duckArgs = [
-            "-nostdin",
-            "-hide_banner",
-            "-y",
-            "-i",
-            workingPath,
-            "-map_metadata",
-            "-1",
-            "-af",
-            `volume=${peakGainDb}dB,alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50`,
-            "-c:a",
-            "pcm_s24le",
-            ducked,
-          ];
-          invocation = `${invocation} ; ${redactInvocation(binaries.ffmpegPath, duckArgs)}`;
-          const duckRun = await runner.run({
-            executable: binaries.ffmpegPath,
-            args: duckArgs,
-            abortSignal: request.abortSignal,
-          });
-          if (duckRun.exitCode !== 0) {
-            mapRunFailure(duckRun, request.abortSignal);
-          }
-          await removeIfPresent(workingPath);
-          workingPath = ducked;
-          warnings.push(
-            `Applied ${peakGainDb.toFixed(2)} dB after limiter so true peak meets ${request.truePeakCeilingDb} dBTP.`,
-          );
-          measured = await measureLoudness(runner, binaries, workingPath, request.abortSignal);
-          if (
-            measured.truePeakDb !== null &&
-            measured.truePeakDb > request.truePeakCeilingDb + 0.3
-          ) {
-            throw new DomainError(
-              "RENDER_FAILED",
-              `True peak ${measured.truePeakDb.toFixed(2)} dB exceeds ceiling ${request.truePeakCeilingDb} dB`,
-              { retryable: false, details: { truePeakDb: measured.truePeakDb } },
-            );
-          }
-        }
+        requireLoudness(measured, fidelityMode);
+        assertTruePeakCeiling(measured, request.truePeakCeilingDb, "Assembled mix");
       }
 
       const silenceArgs = [
@@ -533,6 +641,9 @@ export async function renderMix(
         }
         await removeIfPresent(workingPath);
         await atomicReplace(encoded, request.outputPath);
+        measured = await measureLoudness(runner, binaries, request.outputPath, request.abortSignal);
+        requireLoudness(measured, fidelityMode);
+        assertTruePeakCeiling(measured, request.truePeakCeilingDb, "Encoded master");
       } finally {
         await removeIfPresent(metadataPath);
       }
@@ -552,6 +663,10 @@ export async function renderMix(
       invocation,
       warnings,
       expectedDurationMs: expectedMs,
+      staticGainDb,
+      limiterApplied,
+      stretchEngine,
+      stretchEngines: [stretchEngine],
     };
   } catch (error) {
     await removeIfPresent(partialPath);
@@ -578,7 +693,16 @@ async function buildFlacEncodeArgs(
   request: MixRequest,
   expectedMs: number,
 ): Promise<string[]> {
-  const codecArgs = ["-c:a", "flac", "-compression_level", String(FLAC_COMPRESSION_LEVEL)];
+  const codecArgs = [
+    "-af",
+    `aformat=sample_fmts=s32:sample_rates=${request.sampleRateHz ?? DEFAULT_RENDER_SAMPLE_RATE_HZ}:channel_layouts=stereo`,
+    "-c:a",
+    "flac",
+    "-compression_level",
+    String(FLAC_COMPRESSION_LEVEL),
+    "-sample_fmt",
+    "s32",
+  ];
   if (!request.outputMetadata) {
     return [
       "-nostdin",
@@ -619,7 +743,7 @@ async function buildFlacEncodeArgs(
   ];
 }
 
-async function measureLoudness(
+export async function measureLoudness(
   runner: ProcessRunner,
   binaries: FfmpegBinaries,
   filePath: string,
@@ -641,15 +765,70 @@ async function measureLoudness(
     args,
     abortSignal,
   });
-  if (result.exitCode !== 0 && !abortSignal?.aborted) {
-    return parseEbur128(result.stderr);
-  }
   if (abortSignal?.aborted) {
     const error = new Error("Render cancelled");
     error.name = "AbortError";
     throw error;
   }
+  if (result.exitCode !== 0) {
+    return { integratedLufs: null, truePeakDb: null };
+  }
   return parseEbur128(result.stderr);
+}
+
+async function stitchPreservedPrefix(
+  runner: ProcessRunner,
+  binaries: FfmpegBinaries,
+  accPath: string,
+  accDurationMs: number,
+  joinPath: string,
+  joinSkipMs: number,
+  overlapMs: number,
+  outputPath: string,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  const accKeepSec = (accDurationMs - overlapMs) / 1000;
+  const xfadeSec = Math.min(
+    JOIN_STITCH_XFADE_SEC,
+    overlapMs / 4000,
+    Math.max(0, joinSkipMs / 1000),
+  );
+  const joinSkipSec = Math.max(0, joinSkipMs / 1000 - xfadeSec);
+  if (accKeepSec <= 0 || joinSkipMs / 1000 < 0) {
+    throw new DomainError(
+      "RENDER_FAILED",
+      "Cannot preserve completed audio: join region is longer than the accumulated mix",
+      { retryable: false },
+    );
+  }
+  const join =
+    xfadeSec > 0.001
+      ? `[0:a]atrim=end=${accKeepSec.toFixed(6)},asetpts=PTS-STARTPTS[prefix];[1:a]atrim=start=${joinSkipSec.toFixed(6)},asetpts=PTS-STARTPTS[tail];[prefix][tail]acrossfade=d=${xfadeSec.toFixed(6)}:o=1:c1=${CROSSFADE_CURVE}:c2=${CROSSFADE_CURVE}[out]`
+      : `[0:a]atrim=end=${accKeepSec.toFixed(6)},asetpts=PTS-STARTPTS[prefix];[1:a]atrim=start=${(joinSkipMs / 1000).toFixed(6)},asetpts=PTS-STARTPTS[tail];[prefix][tail]concat=n=2:v=0:a=1[out]`;
+  const args = [
+    "-nostdin",
+    "-hide_banner",
+    "-y",
+    "-i",
+    accPath,
+    "-i",
+    joinPath,
+    "-filter_complex",
+    join,
+    "-map",
+    "[out]",
+    "-c:a",
+    INTERMEDIATE_PCM_CODEC,
+    outputPath,
+  ];
+  const result = await runner.run({
+    executable: binaries.ffmpegPath,
+    args,
+    abortSignal,
+  });
+  if (result.exitCode !== 0) {
+    mapRunFailure(result, abortSignal);
+  }
 }
 
 async function renderPairwise(
@@ -658,72 +837,136 @@ async function renderPairwise(
   request: MixRequest,
 ): Promise<MixResult> {
   const dir = path.dirname(request.outputPath);
-  const accPath = path.join(dir, `${path.basename(request.outputPath)}.acc.wav`);
-  let current: MixSegment = request.segments[0]!;
-  let currentFile = current.filePath;
+  const base = path.basename(request.outputPath);
+  const stretchScope = request.stretchScope ?? "overlap";
+  const temps: string[] = [];
   const warnings: string[] = [];
-  let invocation = "pairwise-acrossfade";
+  const engines: StretchEngine[] = [];
+  let invocation = "pairwise-original-joins";
+  let accPath: string | null = null;
+  let accDurationMs = 0;
   try {
     for (let i = 1; i < request.segments.length; i += 1) {
+      const outgoing = request.segments[i - 1]!;
       const next = request.segments[i]!;
       const overlap = request.overlapMs[i - 1]!;
-      const stepOut = i === request.segments.length - 1 ? request.outputPath : accPath;
-      const result = await renderMix(runner, binaries, {
+      const joinPath = path.join(dir, `${base}.join-${i}.wav`);
+      temps.push(joinPath);
+      const join = await renderMix(runner, binaries, {
         ...request,
-        segments: [
-          { ...current, filePath: currentFile, playbackRate: current.playbackRate ?? 1 },
-          next,
-        ],
+        segments: [outgoing, next],
         overlapMs: [overlap],
         transitions: request.transitions
           ? [request.transitions[i - 1] ?? { type: "crossfade" }]
           : undefined,
-        outputPath: stepOut,
-        outputMetadata: i === request.segments.length - 1 ? request.outputMetadata : undefined,
-        edgeFadeMs: i === request.segments.length - 1 ? request.edgeFadeMs : 0,
-        postProcess: i === request.segments.length - 1,
-        applyLimiter: i === request.segments.length - 1,
-        pcmCodec: i === request.segments.length - 1 ? "pcm_s24le" : "pcm_f32le",
+        outgoingCrossoverHz:
+          i > 1 ? resolvedCrossoverHz(request.transitions?.[i - 2]) : request.outgoingCrossoverHz,
+        outputPath: joinPath,
+        outputMetadata: undefined,
+        edgeFadeMs: 0,
+        postProcess: false,
+        applyLimiter: false,
+        pcmCodec: INTERMEDIATE_PCM_CODEC,
+        fidelityMode: false,
         onProgress: (fraction) => {
           const overall = (i - 1 + fraction) / (request.segments.length - 1);
-          request.onProgress?.(overall);
+          request.onProgress?.(Math.min(0.9, overall));
         },
       });
-      warnings.push(...result.warnings);
-      invocation = `${invocation} ; ${result.invocation}`;
-      currentFile = stepOut;
-      current = {
-        filePath: stepOut,
-        sourceStartMs: 0,
-        sourceEndMs: result.durationMs,
-        gainDb: 0,
-        playbackRate: 1,
+      engines.push(join.stretchEngine);
+      warnings.push(...join.warnings);
+      invocation = `${invocation} ; ${join.invocation}`;
+      if (accPath == null) {
+        accPath = joinPath;
+        accDurationMs = join.durationMs;
+        continue;
+      }
+      const outgoingPlayableMs = Math.round(
+        outputDurationSec(toTrims([outgoing])[0]!, {
+          overlapSec: overlap / 1000,
+          stretchScope,
+        }) * 1000,
+      );
+      const stitched = path.join(dir, `${base}.stitch-${i}.wav`);
+      temps.push(stitched);
+      await stitchPreservedPrefix(
+        runner,
+        binaries,
+        accPath,
+        accDurationMs,
+        joinPath,
+        outgoingPlayableMs - overlap,
+        overlap,
+        stitched,
+        request.abortSignal,
+      );
+      invocation = `${invocation} ; pairwise-preserve-prefix`;
+      accPath = stitched;
+      const probe = await probeAudioFile(runner, binaries, stitched, request.abortSignal);
+      accDurationMs = probe.durationMs;
+    }
+    if (!accPath) {
+      throw new DomainError("INVALID_SET_PLAN", "Render has no audio segments", {
+        retryable: false,
+      });
+    }
+    const expectedMs = expectedDurationMs(
+      toTrims(request.segments),
+      request.overlapMs.map((ms) => ms / 1000),
+      stretchScope,
+    );
+    if (
+      (request.postProcess ?? true) === false &&
+      !isFlacOutput(request.outputPath) &&
+      !request.outputMetadata
+    ) {
+      await mkdir(path.dirname(request.outputPath), { recursive: true });
+      await copyFile(accPath, request.outputPath);
+      const probe = await probeAudioFile(runner, binaries, request.outputPath, request.abortSignal);
+      return {
+        durationMs: probe.durationMs,
+        sampleRateHz: probe.sampleRateHz,
+        channels: probe.channels,
+        checksumSha256: await sha256File(request.outputPath),
+        integratedLufs: null,
+        truePeakDb: null,
+        invocation,
+        warnings,
+        expectedDurationMs: expectedMs,
+        staticGainDb: null,
+        limiterApplied: false,
+        stretchEngine: combineStretchEngines(engines),
+        stretchEngines: engines,
       };
     }
-    const probe = await probeAudioFile(runner, binaries, request.outputPath, request.abortSignal);
-    const checksumSha256 = await sha256File(request.outputPath);
-    const loudness = await measureLoudness(
-      runner,
-      binaries,
-      request.outputPath,
-      request.abortSignal,
-    );
+    const finalized = await renderMix(runner, binaries, {
+      ...request,
+      segments: [
+        {
+          filePath: accPath,
+          sourceStartMs: 0,
+          sourceEndMs: accDurationMs,
+          gainDb: 0,
+          playbackRate: 1,
+        },
+      ],
+      overlapMs: [],
+      transitions: undefined,
+      rateRegionsVersion: undefined,
+      postProcess: request.postProcess ?? true,
+      applyLimiter: false,
+      fidelityMode: request.fidelityMode,
+      rubberbandCliPath: request.rubberbandCliPath,
+    });
     return {
-      durationMs: probe.durationMs,
-      sampleRateHz: probe.sampleRateHz,
-      channels: probe.channels,
-      checksumSha256,
-      integratedLufs: loudness.integratedLufs,
-      truePeakDb: loudness.truePeakDb,
-      invocation,
-      warnings,
-      expectedDurationMs: expectedDurationMs(
-        toTrims(request.segments),
-        request.overlapMs.map((ms) => ms / 1000),
-        request.stretchScope ?? "overlap",
-      ),
+      ...finalized,
+      warnings: [...warnings, ...finalized.warnings],
+      invocation: `${invocation} ; ${finalized.invocation}`,
+      expectedDurationMs: expectedMs,
+      stretchEngine: combineStretchEngines(engines),
+      stretchEngines: engines,
     };
   } finally {
-    await removeIfPresent(accPath);
+    await Promise.all(temps.map(removeIfPresent));
   }
 }

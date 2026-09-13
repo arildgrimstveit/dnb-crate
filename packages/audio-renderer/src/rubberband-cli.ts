@@ -29,6 +29,8 @@ export type StretchPrepareRequest = {
 };
 
 export const RUBBERBAND_MAKEUP_CLAMP_DB = 6;
+/** Temporary decode/resample/makeup/splice stays unbounded until final delivery. */
+export const INTERMEDIATE_PCM_CODEC = "pcm_f32le";
 
 /** Prepare both joins before accumulation; never stretch an already mixed prefix. */
 export async function prepareBothJoinRegions(
@@ -178,7 +180,15 @@ async function applyMakeup(
   await runFfmpeg(
     runner,
     binaries,
-    ["-i", wetPath, "-af", `volume=${gainDb.toFixed(3)}dB`, "-c:a", "pcm_s24le", matched],
+    [
+      "-i",
+      wetPath,
+      "-af",
+      `volume=${gainDb.toFixed(3)}dB`,
+      "-c:a",
+      INTERMEDIATE_PCM_CODEC,
+      matched,
+    ],
     abortSignal,
   );
   return { gainDb, outputPath: matched };
@@ -258,6 +268,13 @@ export async function prepareCliStretchedSegments(
       const slice = path.join(work, `${path.basename(request.outputPath)}.rb${i}.slice.wav`);
       const stretched = path.join(work, `${path.basename(request.outputPath)}.rb${i}.wav`);
       tempPaths.push(slice, stretched);
+      const plannedGain = Number.isFinite(segment.gainDb) ? segment.gainDb : 0;
+      const extractFilter = [
+        `aformat=sample_fmts=fltp:sample_rates=${sampleRateHz}:channel_layouts=stereo`,
+        Math.abs(plannedGain) >= 0.01 ? `volume=${plannedGain}dB` : null,
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join(",");
       await runFfmpeg(
         runner,
         binaries,
@@ -268,12 +285,12 @@ export async function prepareCliStretchedSegments(
           segment.filePath,
           "-t",
           (sourceMs / 1000).toFixed(6),
-          "-ar",
-          String(sampleRateHz),
+          "-af",
+          extractFilter,
           "-ac",
           "2",
           "-c:a",
-          "pcm_s24le",
+          INTERMEDIATE_PCM_CODEC,
           slice,
         ],
         request.abortSignal,
@@ -307,6 +324,7 @@ export async function prepareCliStretchedSegments(
           sourceEndMs: probe.durationMs,
           playbackRate: 1,
           stretchTailMs: undefined,
+          gainDb: 0,
         });
         parts.push(`rubberband-r3 -T ${rate.toFixed(6)} makeup=${makeup.gainDb.toFixed(2)}dB`);
         if (Math.abs(makeup.gainDb) >= 0.15) {
@@ -336,7 +354,7 @@ export async function prepareCliStretchedSegments(
             "-af",
             `atrim=start=${bodySrc.toFixed(6)},asetpts=PTS-STARTPTS`,
             "-c:a",
-            "pcm_s24le",
+            INTERMEDIATE_PCM_CODEC,
             region,
           ],
           request.abortSignal,
@@ -350,7 +368,7 @@ export async function prepareCliStretchedSegments(
             "-af",
             `atrim=start=0:end=${(bodySrc + xfade).toFixed(6)},asetpts=PTS-STARTPTS`,
             "-c:a",
-            "pcm_s24le",
+            INTERMEDIATE_PCM_CODEC,
             native,
           ],
           request.abortSignal,
@@ -365,7 +383,7 @@ export async function prepareCliStretchedSegments(
             "-af",
             `atrim=start=0:end=${overlapSrc.toFixed(6)},asetpts=PTS-STARTPTS`,
             "-c:a",
-            "pcm_s24le",
+            INTERMEDIATE_PCM_CODEC,
             region,
           ],
           request.abortSignal,
@@ -379,7 +397,7 @@ export async function prepareCliStretchedSegments(
             "-af",
             `atrim=start=${Math.max(0, overlapSrc - xfade).toFixed(6)},asetpts=PTS-STARTPTS`,
             "-c:a",
-            "pcm_s24le",
+            INTERMEDIATE_PCM_CODEC,
             native,
           ],
           request.abortSignal,
@@ -405,7 +423,7 @@ export async function prepareCliStretchedSegments(
           "-map",
           "[out]",
           "-c:a",
-          "pcm_s24le",
+          INTERMEDIATE_PCM_CODEC,
           stretched,
         ],
         request.abortSignal,
@@ -418,6 +436,7 @@ export async function prepareCliStretchedSegments(
         sourceEndMs: probe.durationMs,
         playbackRate: 1,
         stretchTailMs: undefined,
+        gainDb: 0,
       });
       parts.push(
         `rubberband-r3 ${role} -T ${rate.toFixed(6)} makeup=${makeup.gainDb.toFixed(2)}dB`,

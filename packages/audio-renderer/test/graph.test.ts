@@ -181,15 +181,15 @@ describe("filter graph", () => {
     expect(filter).toContain("silence=0.063");
     expect(filter).toContain("st=28.965");
     expect(filter).toContain("adelay=17931|17931");
-    expect(filter).toContain("acrossfade=d=0.040000:o=1:c1=tri:c2=tri");
-    expect(filter).toContain("[s0]asplit=2[dry][wet]");
-    expect(filter).toContain("atrim=start=17.891034");
+    expect(filter).toContain("[s0]asplit=3");
+    expect(filter).not.toContain("[s0]asplit=2[dry][wet]");
+    expect(filter).not.toContain("c1=tri:c2=tri");
     expect(filter).toContain("amix=inputs=6");
     expect(filter).not.toMatch(/[A-Za-z]:\\/);
     expect(filter).not.toContain(".wav");
   });
 
-  it("keeps the outgoing prefix out of the 3-band split", () => {
+  it("reconstructs the outgoing prefix through complementary 3-band filters", () => {
     const filter = buildPhraseMixFilter({
       trims: [
         { startSec: 10, endSec: 30, gainDb: 0, playbackRate: 1 },
@@ -200,16 +200,12 @@ describe("filter graph", () => {
       sampleRateHz: 48_000,
       hasAfadeUnity: true,
     });
-    expect(filter).toContain("[s0]asplit=2[dry][wet]");
-    expect(filter).toContain("[dry]atrim=start=0:end=12.000000");
-    expect(filter).toContain("[wet]asplit=3");
-    expect(filter).toContain("atrim=start=11.960000");
-    expect(filter).toContain("acrossfade=d=0.040000:o=1:c1=tri:c2=tri");
+    expect(filter).toContain("[s0]asplit=3");
+    expect(filter).not.toContain("[s0]asplit=2[dry][wet]");
+    expect(filter).not.toContain("c1=tri:c2=tri");
     expect(filter).not.toContain("concat=n=2");
     expect(filter).toContain("adelay=12000|12000");
-    expect(filter).not.toContain("[s0]asplit=3");
-    expect(filter).toContain("[mixed]alimiter=");
-    expect(filter).not.toContain("[joined]alimiter=");
+    expect(filter).not.toContain("[mixed]alimiter=");
     expect(filter).toContain("[joined]atrim=start=0:end=32.000000");
   });
 
@@ -283,6 +279,29 @@ describe("filter graph", () => {
     expect(filter).toContain("afade=t=out");
     expect(filter).toContain("afade=t=in");
     expect(filter).not.toContain(".wav");
+  });
+
+  it("splits a shared outgoing deck at the previous join’s crossover", () => {
+    const filter = buildBandMixFilter({
+      trims: [
+        { startSec: 0, endSec: 8, gainDb: 0 },
+        { startSec: 0, endSec: 8, gainDb: 0 },
+      ],
+      overlapSeconds: [2],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+      hasAfadeUnity: true,
+      outgoingCrossoverHz: 120,
+      transitions: [{ type: "phrase_mix", barCount: 16, params: { crossoverHz: 250 } }],
+    });
+    expect(filter).toContain("[oRawL]lowpass=f=120,lowpass=f=120[oL0]");
+    expect(filter).toContain(
+      "[oRawM]highpass=f=120,highpass=f=120,lowpass=f=2500,lowpass=f=2500[oM0]",
+    );
+    expect(filter).toContain("[iRawL]lowpass=f=250,lowpass=f=250[iL0]");
+    expect(filter).toContain(
+      "[iRawM]highpass=f=250,highpass=f=250,lowpass=f=2500,lowpass=f=2500[iM0]",
+    );
   });
 
   it("uses -filter_complex when the script option is unavailable", () => {

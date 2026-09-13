@@ -37,6 +37,8 @@ export type CatalogRuntimeOptions = {
   processRunner?: ProcessRunner;
   /** When true, skip FFmpeg detection at startup by injecting the in-process fake. */
   useFakeFfmpeg?: boolean;
+  /** Override the Rubber Band CLI frozen into queued jobs. */
+  rubberbandCliPath?: string | null;
   http?: HttpClient;
   enrichmentIntervals?: {
     musicbrainz?: number;
@@ -78,9 +80,11 @@ export function createCatalogRuntime(
     analyses,
     runner,
     logger,
-    options.useFakeFfmpeg || options.processRunner
-      ? null
-      : resolveRubberbandCli(config.rubberbandPath),
+    options.rubberbandCliPath !== undefined
+      ? options.rubberbandCliPath
+      : options.useFakeFfmpeg || options.processRunner
+        ? null
+        : resolveRubberbandCli(config.rubberbandPath),
   );
   const analysis = new AnalysisCoordinator(
     config,

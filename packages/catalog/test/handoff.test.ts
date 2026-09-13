@@ -22,8 +22,8 @@ describe("handoff candidate scoring", () => {
     expect(scoreHandoff(active).valleyBars).toBeLessThan(scoreHandoff(quiet).valleyBars!);
   });
 
-  it("DJ scoring prefers a later cut to a 32-bar landing that starts in a quiet intro", () => {
-    const quietThirtyTwo = {
+  it("DJ scoring keeps a 32-bar landing that starts in the opening build", () => {
+    const thirtyTwo = {
       barCount: 32 as const,
       exitKind: "dropLanding" as const,
       phraseShape: "landing" as const,
@@ -36,14 +36,14 @@ describe("handoff candidate scoring", () => {
       outgoingBars: { rms: Array(32).fill(0.85) },
     };
     const laterSixteen = {
-      ...quietThirtyTwo,
+      ...thirtyTwo,
       barCount: 16 as const,
       mixInMs: 34_000,
       mixInBar: 24,
       incomingBars: { rms: Array.from({ length: 16 }, (_, i) => (i < 8 ? 0.22 : 0.85)) },
       outgoingBars: { rms: Array(16).fill(0.85) },
     };
-    expect(pickHandoffCandidate([quietThirtyTwo, laterSixteen])).toBe(laterSixteen);
+    expect(pickHandoffCandidate([thirtyTwo, laterSixteen])).toBe(thirtyTwo);
   });
 
   it("DJ scoring prefers a 16/32-bar landing to an energetic 8-bar landing", () => {
@@ -110,7 +110,7 @@ describe("handoff candidate scoring", () => {
       outgoingBars: { rms: Array(16).fill(0.85) },
     };
     expect(pickHandoffCandidate([quietThirtyTwo, eight])).toBe(quietThirtyTwo);
-    expect(pickHandoffCandidate([quietThirtyTwo, eight, sixteen])).toBe(sixteen);
+    expect(pickHandoffCandidate([quietThirtyTwo, eight, sixteen])).toBe(quietThirtyTwo);
   });
 
   it("DJ scoring keeps a 32-bar landing that already has incoming energy", () => {

@@ -24,6 +24,7 @@ export {
   PREFIX_ISOLATION_RUN_IN_BARS,
   PREFIX_ISOLATION_SPLICE_SEC,
   rubberbandTempoFilter,
+  limiterFilter,
   type TempoEngine,
   estimateArgvChars,
   expectedDurationMs,
@@ -31,6 +32,7 @@ export {
   mixFilterArgs,
   outputDurationSec,
   redactInvocation,
+  JOIN_STITCH_XFADE_SEC,
   RATE_SPLICE_XFADE_SEC,
   type FilterGraphOptions,
   type FilterTrim,
@@ -42,8 +44,15 @@ export { parseEbur128, parseFfprobeJson, parseOutTimeMs, parseSilenceSpans } fro
 export type { SilenceSpan } from "./parse.ts";
 export { probeAudioFile } from "./probe.ts";
 export type { ProbeResult } from "./parse.ts";
-export { renderMix, type MixRequest, type MixResult, type MixSegment } from "./mix.ts";
-export { encodeListenFlac } from "./listen.ts";
+export {
+  renderMix,
+  measureLoudness,
+  type MixRequest,
+  type MixResult,
+  type MixSegment,
+  type StretchEngine,
+} from "./mix.ts";
+export { encodeListenFlac, listenCopyFailureReason } from "./listen.ts";
 export {
   MIX_TAG_ARTIST,
   buildCueSheet,
@@ -66,11 +75,12 @@ export {
   wrapDelta,
 } from "./downbeat-align.ts";
 export type { DownbeatAlignment } from "./downbeat-align.ts";
-export { sha256File, sha256Json, sha256Text } from "./hash.ts";
+export { sha256File, sha256FileSync, sha256Json, sha256Text } from "./hash.ts";
 export {
   clampMakeupDb,
   prepareCliStretchedSegments,
   resolveRubberbandCli,
   rubberbandCliArgs,
+  INTERMEDIATE_PCM_CODEC,
   RUBBERBAND_MAKEUP_CLAMP_DB,
 } from "./rubberband-cli.ts";

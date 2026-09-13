@@ -542,9 +542,16 @@ export function planPhraseWindow(
     if (!introBuildAt(at)) {
       continue;
     }
-    // Weak 32-bar builds that only meet the drop at the cut stay thin; prefer a later 16.
-    if (barCount === 32 && mixInBar === dropBar - 32 && (at?.sectionEnergy ?? 0) < 0.28) {
-      continue;
+    if (barCount === 32 && mixInBar === dropBar - 32) {
+      const energy = at?.sectionEnergy ?? 0;
+      // Dead file-adjacent intro. Opening builds around 0.17–0.27 still take 32.
+      if (energy < 0.12) {
+        continue;
+      }
+      // Late first drop: keep the 16-bar cut unless the last 32 already has body.
+      if (drop.startMs >= 90_000 && energy < 0.28) {
+        continue;
+      }
     }
     candidates.push({
       mixInBar,
@@ -565,6 +572,14 @@ export function planPhraseWindow(
   const outSections = outAnalysis?.sections ?? [];
   for (const bars of [16, 32] as PhraseBarCount[]) {
     if (bars > (options.maxBars ?? 32) || dropBar < bars) continue;
+    if (bars === 32) {
+      const mixInBar = dropBar - 32;
+      const at = sectionAtBar(inSections, mixInBar, inBpm, inDownbeats, inStart);
+      const energy = at?.sectionEnergy ?? 0;
+      if (energy < 0.12 || (drop.startMs >= 90_000 && energy < 0.28)) {
+        continue;
+      }
+    }
     const tail = lateTailExit(outgoing, bars, outBpm);
     if (!tail) continue;
     candidates.push({

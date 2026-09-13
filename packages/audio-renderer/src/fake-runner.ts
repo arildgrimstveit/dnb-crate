@@ -32,6 +32,14 @@ function buildSineWav(durationMs: number, sampleRate = 48_000): Buffer {
   return riff;
 }
 
+function inputPathFromArgs(args: string[]): string | null {
+  const index = args.indexOf("-i");
+  if (index < 0) {
+    return null;
+  }
+  return args[index + 1] ?? null;
+}
+
 function lastOutputPath(args: string[]): string | null {
   const last = args.at(-1);
   if (!last || last === "-" || last.startsWith("-")) {
@@ -53,6 +61,15 @@ export function createFakeFfmpegRunner(
     hangUntilAbort?: boolean;
     /** ffprobe duration. Default 1s; catalog fixture renders use 15s to match the two-track plan. */
     probeDurationSec?: number;
+    eburIntegratedLufs?: number | null;
+    eburTruePeakDb?: number | null;
+    eburForInput?: (inputPath: string) =>
+      | {
+          integratedLufs?: number | null;
+          truePeakDb?: number | null;
+        }
+      | null
+      | undefined;
   } = {},
 ): ProcessRunner {
   const failOn = options.failOn ?? "never";
@@ -162,7 +179,25 @@ export function createFakeFfmpegRunner(
         };
       }
       if (isEbur) {
-        const text = `Summary:\n  Integrated loudness:\n    I:         -14.2 LUFS\n  True peak:\n    Peak:       -1.20 dBFS\n`;
+        const input = inputPathFromArgs(request.args);
+        const override = input ? options.eburForInput?.(input) : undefined;
+        if (override === null) {
+          request.onStderr?.("");
+          return { exitCode: 0, signal: null, stdout: "", stderr: "" };
+        }
+        const integrated =
+          override?.integratedLufs !== undefined
+            ? override.integratedLufs
+            : (options.eburIntegratedLufs ?? -14.2);
+        const peak =
+          override?.truePeakDb !== undefined
+            ? override.truePeakDb
+            : (options.eburTruePeakDb ?? -1.2);
+        if (integrated == null || peak == null) {
+          request.onStderr?.("");
+          return { exitCode: 0, signal: null, stdout: "", stderr: "" };
+        }
+        const text = `Summary:\n  Integrated loudness:\n    I:         ${integrated.toFixed(1)} LUFS\n  True peak:\n    Peak:       ${peak.toFixed(2)} dBFS\n`;
         request.onStderr?.(text);
         return { exitCode: 0, signal: null, stdout: "", stderr: text };
       }

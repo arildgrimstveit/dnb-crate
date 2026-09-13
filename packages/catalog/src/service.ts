@@ -1660,7 +1660,8 @@ export class CatalogService {
         if (typeof row.keyConfidence === "number") {
           keyConfidenceByTrackId.set(trackId, row.keyConfidence);
         }
-        const drop = row.sections.find((section) => section.type === "drop");
+        const drops = row.sections.filter((section) => section.type === "drop");
+        const drop = drops[0];
         if (drop && Number.isFinite(drop.startMs)) {
           firstDropStartMsByTrackId.set(trackId, drop.startMs);
         }

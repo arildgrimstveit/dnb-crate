@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { clampMakeupDb, resolveRubberbandCli, rubberbandCliArgs } from "../src/rubberband-cli.ts";
+import {
+  INTERMEDIATE_PCM_CODEC,
+  clampMakeupDb,
+  resolveRubberbandCli,
+  rubberbandCliArgs,
+} from "../src/rubberband-cli.ts";
 
 describe("rubberband CLI", () => {
+  it("keeps R3 intermediates in float", () => {
+    expect(INTERMEDIATE_PCM_CODEC).toBe("pcm_f32le");
+  });
+
   it("uses R3 fine and the FFmpeg tempo multiple", () => {
     const args = rubberbandCliArgs(174 / 175, "in.wav", "out.wav");
     expect(args[0]).toBe("-3");

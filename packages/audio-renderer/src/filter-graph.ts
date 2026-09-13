@@ -44,11 +44,8 @@ export type FilterGraphOptions = {
   /** When false, skip the mix-wide alimiter (used for intermediate pairwise joins). */
   applyLimiter?: boolean;
   /**
-   * When false, keep the outgoing prefix inside the 3-band graph (incoming is delayed).
-   * Hours still play a dry prefix (so pairwise joins do not re-EQ the accumulated mix),
-   * but the 3-band path processes the full outgoing slice so the filters are warm.
-   * Dry joins the primed mix with a short linear splice. A one-bar equal-power
-   * acrossfade of dry vs phase-shifted 3-band audio ducked the whole mix.
+   * Kept for callers. Pairwise accumulation now joins original decks and
+   * concatenates preserved bodies; it does not re-filter completed audio.
    */
   isolatePrefix?: boolean;
   /**
@@ -61,6 +58,11 @@ export type FilterGraphOptions = {
    * `all` is the pre-6.10 whole-window stretch (flickers on long bodies).
    */
   stretchScope?: StretchScope;
+  /**
+   * Split the outgoing deck with this crossover so a shared middle deck keeps
+   * the same IIR phase it already had as the previous join’s incoming deck.
+   */
+  outgoingCrossoverHz?: number;
 };
 
 export type TempoEngine = "rubberband" | "atempo";
@@ -77,6 +79,8 @@ export const PREFIX_ISOLATION_SPLICE_SEC = 0.04;
 const PREFIX_ISOLATION_MIN_DRY_SEC = 0.001;
 /** Hide the native→stretched splice without a long two-tempo blend. */
 export const RATE_SPLICE_XFADE_SEC = 0.05;
+/** Equal-power blend at a pairwise join boundary after the shared deck is phase-matched. */
+export const JOIN_STITCH_XFADE_SEC = 0.012;
 
 export function limiterAmplitudeFromCeilingDb(ceilingDb: number): number {
   return Number(Math.pow(10, ceilingDb / 20).toFixed(9));
@@ -192,10 +196,16 @@ function segmentPrep(
   ].join(";");
 }
 
-function limiterFilter(limiterAmplitude: number, applyLimiter: boolean): string {
-  return applyLimiter
-    ? `alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50`
-    : "anull";
+export function limiterFilter(
+  limiterAmplitude: number,
+  applyLimiter: boolean,
+  options: { compensateLatency?: boolean } = {},
+): string {
+  if (!applyLimiter) {
+    return "anull";
+  }
+  const latency = options.compensateLatency === false ? "" : ":latency=1";
+  return `alimiter=limit=${limiterAmplitude}:level=false:attack=5:release=50${latency}`;
 }
 
 function edgeFadeChain(
@@ -222,7 +232,7 @@ function limiterChain(
   overlapSeconds: number[],
   limiterAmplitude: number,
   edgeFadeSeconds?: { fadeIn: number; fadeOut: number },
-  applyLimiter = true,
+  applyLimiter = false,
   stretchScope: StretchScope = "overlap",
 ): string {
   const lim = limiterFilter(limiterAmplitude, applyLimiter);
@@ -290,7 +300,7 @@ export function buildAcrossfadeFilter(options: FilterGraphOptions): string {
   }
 
   parts.push(
-    `[${current}]${limiterChain(trims, overlapSeconds, limiterAmplitude, edgeFadeSeconds, options.applyLimiter, stretchScope)}[out]`,
+    `[${current}]${limiterChain(trims, overlapSeconds, limiterAmplitude, edgeFadeSeconds, options.applyLimiter === true, stretchScope)}[out]`,
   );
   return parts.join(";");
 }
@@ -386,9 +396,8 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
     params.targetBpm != null && params.targetBpm > 0
       ? (4 * 60_000) / params.targetBpm
       : (overlap * 1000) / barCount;
-  const runInSec = prefixIsolationRunInSec(prefixSec, barMs);
   const tempoEngine = options.tempoEngine ?? "atempo";
-  const isolatePrefix = options.isolatePrefix !== false && runInSec > 0;
+  void options.isolatePrefix;
   const expectedSec = expectedDurationMs(trims, overlapSeconds, stretchScope) / 1000;
   const delayMs = Math.max(0, Math.round(prefixSec * 1000));
   const events = expandPreset(type, params, barCount, barMs);
@@ -402,7 +411,8 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
     const fades = compileBandAfades(byTarget(target), origin, hasUnity, warnings);
     return fades.length > 0 ? `${fades}${suffix}` : suffix.replace(/^,/, "") || "anull";
   };
-  const lowHz = params.crossoverHz;
+  const incomingLowHz = params.crossoverHz;
+  const outgoingLowHz = options.outgoingCrossoverHz ?? incomingLowHz;
   const highHz = BAND_HIGH_CROSSOVER_HZ;
   const oL = band("outgoing_low", outgoingOrigin, "");
   const oM = band("outgoing_mid", outgoingOrigin, "");
@@ -416,30 +426,16 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
     }
     return `[${src}]${chain}[${out}]`;
   };
-  const spliceSec = isolatePrefix ? Math.min(PREFIX_ISOLATION_SPLICE_SEC, runInSec) : 0;
-  const prefixEndLabel = isolatePrefix ? prefixSec.toFixed(6) : "";
-  const tailStartLabel = isolatePrefix ? (prefixSec - spliceSec).toFixed(6) : "";
-  const outgoingSplit = isolatePrefix ? "wet" : "s0";
-  const mixedLabel = isolatePrefix && options.applyLimiter !== false ? "mixedLim" : "mixed";
-  const join = isolatePrefix
-    ? `[${mixedLabel}]atrim=start=${tailStartLabel},asetpts=PTS-STARTPTS[tailMix];[prefix][tailMix]acrossfade=d=${spliceSec.toFixed(6)}:o=1:c1=tri:c2=tri[joined]`
-    : `[mixed]${limiterFilter(limiterAmplitude, options.applyLimiter !== false)}[joined]`;
   const parts = [
     segmentPrep(0, trims[0]!, sampleRateHz, tempoEngine, overlapSeconds, stretchScope),
     segmentPrep(1, trims[1]!, sampleRateHz, tempoEngine, overlapSeconds, stretchScope),
-    ...(isolatePrefix
-      ? [
-          `[s0]asplit=2[dry][wet]`,
-          `[dry]atrim=start=0:end=${prefixEndLabel},asetpts=PTS-STARTPTS[prefix]`,
-        ]
-      : []),
-    `[${outgoingSplit}]asplit=3[oRawL][oRawM][oRawH]`,
-    `[oRawL]${lr4Lowpass(lowHz)}[oL0]`,
-    `[oRawM]${lr4Highpass(lowHz)},${lr4Lowpass(highHz)}[oM0]`,
+    `[s0]asplit=3[oRawL][oRawM][oRawH]`,
+    `[oRawL]${lr4Lowpass(outgoingLowHz)}[oL0]`,
+    `[oRawM]${lr4Highpass(outgoingLowHz)},${lr4Lowpass(highHz)}[oM0]`,
     `[oRawH]${lr4Highpass(highHz)}[oH0]`,
     `[s1]asplit=3[iRawL][iRawM][iRawH]`,
-    `[iRawL]${lr4Lowpass(lowHz)}[iL0]`,
-    `[iRawM]${lr4Highpass(lowHz)},${lr4Lowpass(highHz)}[iM0]`,
+    `[iRawL]${lr4Lowpass(incomingLowHz)}[iL0]`,
+    `[iRawM]${lr4Highpass(incomingLowHz)},${lr4Lowpass(highHz)}[iM0]`,
     `[iRawH]${lr4Highpass(highHz)}[iH0]`,
     withFade("oL0", oL, "oL"),
     withFade("oM0", oM, "oM"),
@@ -448,10 +444,7 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
     withFade("iM0", iM, "iM"),
     withFade("iH0", iH, "iH"),
     `[oL][oM][oH][iL][iM][iH]amix=inputs=6:normalize=0:dropout_transition=0[mixed]`,
-    ...(isolatePrefix && options.applyLimiter !== false
-      ? [`[mixed]${limiterFilter(limiterAmplitude, true)}[mixedLim]`]
-      : []),
-    join,
+    `[mixed]${limiterFilter(limiterAmplitude, options.applyLimiter === true)}[joined]`,
     `[joined]atrim=start=0:end=${expectedSec.toFixed(6)},asetpts=PTS-STARTPTS[capped]`,
     `[capped]${edgeFadeChain(trims, overlapSeconds, edgeFadeSeconds, stretchScope)}[out]`,
   ];

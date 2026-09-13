@@ -73,6 +73,19 @@ describe("phrase windows", () => {
     expect(Math.abs(landingErrorMs(dj, 1, dj.barCount * BAR_MS)!)).toBeLessThan(2);
   });
 
+  it("keeps a 32-bar landing that starts in an opening build, not at file start", () => {
+    const outgoing = track("out", [section("drop", 16, 96, 0.9)], 96);
+    const incoming = track(
+      "in",
+      [section("intro", 0, 16, 0.12), section("build", 16, 48, 0.4), section("drop", 48, 96, 0.9)],
+      96,
+    );
+    const dj = planPhraseWindow(outgoing, incoming);
+    expect(dj.barCount).toBe(32);
+    expect(dj.mixInBar).toBe(16);
+    expect(Math.abs(landingErrorMs(dj, 1, 32 * BAR_MS)!)).toBeLessThan(2);
+  });
+
   it("skips a file-start 32-bar intro when a later cut exists", () => {
     const outgoing = track("out", [section("drop", 16, 96, 0.9)], 96);
     const incoming = track("in", [section("intro", 0, 32, 0.08), section("drop", 32, 96, 0.9)], 96);
@@ -200,7 +213,7 @@ describe("phrase windows", () => {
     expect(window.mixOutMs + window.barCount * BAR_MS - 48 * BAR_MS).toBeGreaterThanOrEqual(90_000);
     expect(window.mixOutMs).toBeGreaterThan(64 * BAR_MS);
   });
-  it("skips a 32-bar weak incoming build and drop-anchors a 16", () => {
+  it("keeps a 32-bar opening landing when the build is not a dead intro", () => {
     const outgoing = track("out", [section("drop", 16, 80, 0.9)], 80);
     const incoming = track(
       "in",
@@ -208,11 +221,11 @@ describe("phrase windows", () => {
       80,
     );
     const window = planPhraseWindow(outgoing, incoming);
-    expect(window.barCount).toBe(16);
-    expect(window.mixInBar).toBe(32);
+    expect(window.barCount).toBe(32);
+    expect(window.mixInBar).toBe(16);
     expect(window.exitKind).toBe("dropLanding");
     expect(window.phraseShape).toBe("landing");
-    expect(Math.abs(landingErrorMs(window, 1, 16 * BAR_MS)!)).toBeLessThan(2);
+    expect(Math.abs(landingErrorMs(window, 1, 32 * BAR_MS)!)).toBeLessThan(2);
   });
 
   it("drop-anchors a 48-bar intro onto a drop-ending outgoing", () => {
@@ -229,7 +242,7 @@ describe("phrase windows", () => {
     expect(Math.abs(landingErrorMs(window, 1, window.barCount * BAR_MS)!)).toBeLessThan(2);
   });
 
-  it("uses 16 bars instead of a 32-bar duck when the incoming head is quiet", () => {
+  it("prefers a 32-bar drop landing to a quiet-tail duck when the opening build exists", () => {
     const outgoing = track(
       "out",
       [section("drop", 16, 48, 0.9), section("outro", 48, 72, 0.2)],
@@ -241,27 +254,10 @@ describe("phrase windows", () => {
       80,
     );
     const window = planPhraseWindow(outgoing, incoming);
-    expect(window.exitKind).toBe("quietTail");
-    expect(window.barCount).toBe(16);
-    expect(window.mixInBar).toBe(32);
-    expect(window.phraseShape).not.toBe("landing");
-  });
-
-  it("mixes out at the outro phrase boundary as quietTail", () => {
-    const outgoing = track(
-      "out",
-      [section("drop", 16, 48, 0.9), section("outro", 48, 72, 0.2)],
-      72,
-    );
-    const incoming = track(
-      "in",
-      [section("intro", 0, 16, 0.2), section("build", 16, 48, 0.2), section("drop", 48, 80, 0.85)],
-      80,
-    );
-    const window = planPhraseWindow(outgoing, incoming);
-    expect(window.exitKind).toBe("quietTail");
-    expect(window.phraseShape).toBe("complementary");
-    expect(window.mixOutBar).toBe(48);
+    expect(window.exitKind).toBe("dropLanding");
+    expect(window.barCount).toBe(32);
+    expect(window.mixInBar).toBe(16);
+    expect(window.phraseShape).toBe("landing");
   });
 
   it("uses B=8 when the incoming drop is at bar 8", () => {

@@ -1029,7 +1029,7 @@ describe("planner tempo matching", () => {
     };
   }
 
-  it("stamps lift intent on a quiet complementary join and prefers 16 bars", () => {
+  it("stamps sustain on a 32-bar drop-anchored landing", () => {
     const bar = (4 * 60_000) / 174;
     const outgoing = phraseGrid(174, "8A", {
       sections: [
@@ -1055,10 +1055,9 @@ describe("planner tempo matching", () => {
     });
     const incoming = phraseGrid(174, "9A");
     const chosen = chooseTransition(outgoing, incoming, { dropAnchored: true });
-    expect(chosen.transition.parameters.intent).toBe("lift");
-    expect(chosen.transition.parameters.barCount).toBe(16);
-    expect(chosen.transition.parameters.lowHandoverBar).toBe(8);
-    expect(chosen.window?.exitKind).toBe("quietTail");
+    expect(chosen.transition.parameters.intent).toBe("sustain");
+    expect(chosen.transition.parameters.barCount).toBe(32);
+    expect(chosen.window?.exitKind).toBe("dropLanding");
   });
 
   it("stamps sustain on a sequential kit-on join", () => {

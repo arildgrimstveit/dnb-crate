@@ -166,7 +166,9 @@ export function pickHandoffCandidate<T extends HandoffCandidate>(candidates: T[]
   const deepLandings = pool.filter(
     (item) => item.barCount >= 16 && item.exitKind === "dropLanding" && !isQuietIncomingStart(item),
   );
-  return pickByScore(deepLandings.length > 0 ? deepLandings : pool);
+  const scored = deepLandings.length > 0 ? deepLandings : pool;
+  const thirtyTwo = scored.filter((item) => item.barCount === 32);
+  return pickByScore(thirtyTwo.length > 0 ? thirtyTwo : scored);
 }
 
 /** About two bars at 174 BPM; file-start mix-ins are often the first downbeat, not 0 ms. */
@@ -182,12 +184,9 @@ function isFileStartIntro(candidate: HandoffCandidate): boolean {
   return candidate.mixInMs <= candidate.audioStartMs + FILE_START_MS;
 }
 
-/** 32-bar landings through a quiet intro, not only the first 2.8 s / bar 0. */
+/** File-start intros only. A 32-bar landing that starts in the opening build is kept. */
 function isQuietIncomingStart(candidate: HandoffCandidate): boolean {
-  if (isFileStartIntro(candidate)) {
-    return true;
-  }
-  return candidate.barCount >= 32 && quietIncomingPrefix(candidate) > 0.5;
+  return isFileStartIntro(candidate);
 }
 
 function incomingHasEnergy(candidate: HandoffCandidate): boolean {

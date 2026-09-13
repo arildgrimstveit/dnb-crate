@@ -8,6 +8,7 @@ import {
   createFakeFfmpegRunner,
   detectFfmpeg,
   encodeListenFlac,
+  listenCopyFailureReason,
   requireFfmpeg,
 } from "../src/index.ts";
 
@@ -60,5 +61,20 @@ describe("encodeListenFlac", () => {
     ]);
     expect(new Set(partials).size).toBe(2);
     await expect(readFile(listen)).resolves.toBeInstanceOf(Buffer);
+  });
+});
+
+describe("listenCopyFailureReason", () => {
+  it("accepts a finite measurement under the ceiling", () => {
+    expect(listenCopyFailureReason({ integratedLufs: -14.1, truePeakDb: -1.2 }, -1)).toBeNull();
+  });
+
+  it("rejects a missing measurement or a peak over the ceiling", () => {
+    expect(listenCopyFailureReason({ integratedLufs: null, truePeakDb: -1.2 }, -1)).toMatch(
+      /measurement failed/,
+    );
+    expect(listenCopyFailureReason({ integratedLufs: -14.1, truePeakDb: 0.2 }, -1)).toMatch(
+      /exceeds ceiling/,
+    );
   });
 });

@@ -47,7 +47,12 @@ export type FrozenRenderSettings = {
   loudnessTargetLufs: number;
   truePeakCeilingDb: number;
   rendererVersion: string;
+  audioEngineId: string;
   rubberbandAvailable: boolean;
+  /** Frozen executable identity; execution must use this path, not a later worker default. */
+  rubberbandCliPath: string | null;
+  /** SHA-256 of the Rubber Band executable at queue time. */
+  rubberbandSha256: string | null;
 };
 
 /** One snapshot of the selected rhythm, structure and key rows for a track. */

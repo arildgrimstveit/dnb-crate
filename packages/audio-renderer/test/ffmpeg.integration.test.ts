@@ -13,12 +13,94 @@ import {
   requireFfmpeg,
 } from "../src/index.ts";
 
-function buildSineWav(durationMs: number, frequencyHz: number, sampleRate = 44_100): Buffer {
+function buildImpulseWav(durationMs: number, sampleRate = 44_100): Buffer {
+  const frameCount = Math.max(1, Math.round((sampleRate * durationMs) / 1000));
+  const data = Buffer.alloc(frameCount * 2);
+  data.writeInt16LE(12_000, 0);
+  const fmt = Buffer.alloc(24);
+  fmt.write("fmt ", 0, 4, "ascii");
+  fmt.writeUInt32LE(16, 4);
+  fmt.writeUInt16LE(1, 8);
+  fmt.writeUInt16LE(1, 10);
+  fmt.writeUInt32LE(sampleRate, 12);
+  fmt.writeUInt32LE(sampleRate * 2, 16);
+  fmt.writeUInt16LE(2, 20);
+  fmt.writeUInt16LE(16, 22);
+  const dataChunk = Buffer.alloc(8 + data.length);
+  dataChunk.write("data", 0, 4, "ascii");
+  dataChunk.writeUInt32LE(data.length, 4);
+  data.copy(dataChunk, 8);
+  const inner = Buffer.concat([Buffer.from("WAVE", "ascii"), fmt, dataChunk]);
+  const riff = Buffer.alloc(8 + inner.length);
+  riff.write("RIFF", 0, 4, "ascii");
+  riff.writeUInt32LE(inner.length, 4);
+  inner.copy(riff, 8);
+  return riff;
+}
+
+function readFloatStereoPeak(
+  wav: Buffer,
+  sampleRate: number,
+  seconds: number,
+): {
+  residual: (other: ReturnType<typeof readFloatStereoPeak>) => number;
+  samples: Float32Array;
+} {
+  const dataOffset = wav.indexOf(Buffer.from("data"));
+  const pcm = wav.subarray(dataOffset + 8);
+  const frames = Math.min(Math.floor(pcm.length / 8), Math.round(sampleRate * seconds));
+  const samples = new Float32Array(frames);
+  for (let i = 0; i < frames; i += 1) {
+    samples[i] = pcm.readFloatLE(i * 8);
+  }
+  return {
+    samples,
+    residual(other) {
+      const n = Math.min(samples.length, other.samples.length);
+      let err = 0;
+      let ref = 0;
+      for (let i = 0; i < n; i += 1) {
+        const a = samples[i] ?? 0;
+        const b = other.samples[i] ?? 0;
+        err += (a - b) ** 2;
+        ref += a * a;
+      }
+      return Math.sqrt(err / Math.max(ref, 1e-20));
+    },
+  };
+}
+
+function maxAdjacentStep(
+  wav: Buffer,
+  sampleRate: number,
+  startSec: number,
+  endSec: number,
+): number {
+  const dataOffset = wav.indexOf(Buffer.from("data"));
+  const pcm = wav.subarray(dataOffset + 8);
+  const start = Math.max(0, Math.round(startSec * sampleRate));
+  const end = Math.min(Math.floor(pcm.length / 8) - 1, Math.round(endSec * sampleRate));
+  let max = 0;
+  let previous = pcm.readFloatLE(start * 8);
+  for (let i = start + 1; i <= end; i += 1) {
+    const sample = pcm.readFloatLE(i * 8);
+    max = Math.max(max, Math.abs(sample - previous));
+    previous = sample;
+  }
+  return max;
+}
+
+function buildSineWav(
+  durationMs: number,
+  frequencyHz: number,
+  sampleRate = 44_100,
+  amplitude = 12_000,
+): Buffer {
   const frameCount = Math.max(1, Math.round((sampleRate * durationMs) / 1000));
   const data = Buffer.alloc(frameCount * 2);
   for (let i = 0; i < frameCount; i += 1) {
     const sample = Math.sin((2 * Math.PI * frequencyHz * i) / sampleRate);
-    data.writeInt16LE(Math.round(sample * 12000), i * 2);
+    data.writeInt16LE(Math.round(sample * amplitude), i * 2);
   }
   const fmt = Buffer.alloc(24);
   fmt.write("fmt ", 0, 4, "ascii");
@@ -105,6 +187,7 @@ describe("FFmpeg integration", () => {
       truePeakCeilingDb: -1,
       loudnessTargetLufs: -14,
       postProcess: false,
+      pcmCodec: "pcm_s24le",
     });
     const { readFile } = await import("node:fs/promises");
     const wav = await readFile(out);
@@ -229,8 +312,117 @@ describe("FFmpeg integration", () => {
       ],
     });
     expect(Math.abs(result.durationMs - 20_000)).toBeLessThan(400);
-    expect(result.invocation).toContain("acrossfade=");
+    expect(result.invocation).toContain("pairwise");
+    expect(result.invocation).toContain("preserve-prefix");
+    expect(result.stretchEngines).toEqual(["none", "none"]);
   }, 90_000);
+
+  it("keeps an earlier impulse body when later silent joins are appended", async (ctx) => {
+    const binaries = await detectFfmpeg(runner, { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" });
+    if (!binaries) {
+      ctx.skip();
+      return;
+    }
+    requireFfmpeg(binaries);
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-prefix-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    await mkdir(root, { recursive: true });
+    const impulse = path.join(root, "impulse.wav");
+    const silent = path.join(root, "silent.wav");
+    const two = path.join(root, "two.wav");
+    const many = path.join(root, "many.wav");
+    await writeFile(impulse, buildImpulseWav(4000));
+    await writeFile(silent, buildSineWav(4000, 0));
+    const join = {
+      overlapMs: [1000] as number[],
+      truePeakCeilingDb: -1,
+      loudnessTargetLufs: -14,
+      postProcess: false,
+      transitions: [
+        { type: "phrase_mix" as const, barCount: 16 as const, params: { targetBpm: 174 } },
+      ],
+    };
+    await renderMix(runner, binaries, {
+      ...join,
+      segments: [
+        { filePath: impulse, sourceStartMs: 0, sourceEndMs: 4000, gainDb: 0 },
+        { filePath: silent, sourceStartMs: 0, sourceEndMs: 4000, gainDb: 0 },
+      ],
+      outputPath: two,
+    });
+    await renderMix(runner, binaries, {
+      ...join,
+      overlapMs: [1000, 1000, 1000, 1000, 1000],
+      transitions: Array.from({ length: 5 }, () => join.transitions[0]!),
+      segments: [
+        { filePath: impulse, sourceStartMs: 0, sourceEndMs: 4000, gainDb: 0 },
+        ...Array.from({ length: 5 }, () => ({
+          filePath: silent,
+          sourceStartMs: 0,
+          sourceEndMs: 4000,
+          gainDb: 0,
+        })),
+      ],
+      outputPath: many,
+    });
+    const a = readFloatStereoPeak(
+      await (await import("node:fs/promises")).readFile(two),
+      48_000,
+      0.05,
+    );
+    const b = readFloatStereoPeak(
+      await (await import("node:fs/promises")).readFile(many),
+      48_000,
+      0.05,
+    );
+    const residualDb = 20 * Math.log10(Math.max(1e-12, a.residual(b)));
+    expect(residualDb).toBeLessThan(-60);
+  }, 120_000);
+
+  it("does not click when adjacent phrase joins use 120 Hz then 250 Hz", async (ctx) => {
+    const binaries = await detectFfmpeg(runner, { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" });
+    if (!binaries) {
+      ctx.skip();
+      return;
+    }
+    requireFfmpeg(binaries);
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-concat-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    await mkdir(root, { recursive: true });
+    const silent = path.join(root, "silent.wav");
+    const tone = path.join(root, "tone.wav");
+    const out = path.join(root, "mix.wav");
+    await writeFile(silent, buildSineWav(8000, 180, 44_100, 0));
+    await writeFile(tone, buildSineWav(8000, 180, 44_100, 0.2 * 32_767));
+    const result = await renderMix(runner, binaries, {
+      segments: [
+        { filePath: silent, sourceStartMs: 0, sourceEndMs: 8000, gainDb: 0 },
+        { filePath: tone, sourceStartMs: 0, sourceEndMs: 8000, gainDb: 0 },
+        { filePath: silent, sourceStartMs: 0, sourceEndMs: 8000, gainDb: 0 },
+      ],
+      overlapMs: [2000, 2000],
+      outputPath: out,
+      truePeakCeilingDb: -1,
+      loudnessTargetLufs: -14,
+      postProcess: false,
+      applyLimiter: false,
+      transitions: [
+        { type: "phrase_mix", barCount: 16, params: { targetBpm: 174, crossoverHz: 120 } },
+        { type: "phrase_mix", barCount: 16, params: { targetBpm: 174, crossoverHz: 250 } },
+      ],
+    });
+    expect(Math.abs(result.durationMs - 20_000)).toBeLessThan(400);
+    const wav = await (await import("node:fs/promises")).readFile(out);
+    const toneStep = maxAdjacentStep(wav, 48_000, 8.5, 11.5);
+    const boundaryStep = maxAdjacentStep(wav, 48_000, 11.985, 12.015);
+    expect(toneStep).toBeGreaterThan(0);
+    expect(boundaryStep).toBeLessThan(0.04);
+    expect(boundaryStep).toBeLessThan(toneStep * 12);
+  }, 120_000);
 
   it("writes 24-bit 48 kHz FLAC when the output path is .flac", async (ctx) => {
     const binaries = await detectFfmpeg(runner, { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" });
@@ -412,6 +604,47 @@ describe("FFmpeg integration", () => {
     expect(cue).toContain('TITLE "Alpha"');
     expect(cue).toContain("TRACK 02 AUDIO");
     expect(cue).toContain("INDEX 01 00:03:00");
+  }, 60_000);
+
+  it("does not cancel a 180 Hz outgoing prefix at the phrase-mix overlap", async (ctx) => {
+    const binaries = await detectFfmpeg(runner, { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" });
+    if (!binaries) {
+      ctx.skip();
+      return;
+    }
+    requireFfmpeg(binaries);
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-fid-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    await mkdir(root, { recursive: true });
+    const outgoing = path.join(root, "out.wav");
+    const incoming = path.join(root, "in.wav");
+    const mixed = path.join(root, "mix.wav");
+    await writeFile(outgoing, buildSineWav(8000, 180));
+    const quiet = buildSineWav(8000, 180);
+    const dataAt = quiet.indexOf(Buffer.from("data"));
+    quiet.fill(0, dataAt + 8);
+    await writeFile(incoming, quiet);
+    const result = await renderMix(runner, binaries, {
+      segments: [
+        { filePath: outgoing, sourceStartMs: 0, sourceEndMs: 8000, gainDb: 0 },
+        { filePath: incoming, sourceStartMs: 0, sourceEndMs: 8000, gainDb: 0 },
+      ],
+      overlapMs: [4000],
+      outputPath: mixed,
+      truePeakCeilingDb: -1,
+      loudnessTargetLufs: -14,
+      postProcess: false,
+      applyLimiter: false,
+      transitions: [{ type: "phrase_mix", barCount: 16, params: { targetBpm: 174 } }],
+    });
+    expect(result.limiterApplied).toBe(false);
+    const steady = await measureMeanVolume(runner, binaries, mixed, 1500, 2500);
+    const boundary = await measureMeanVolume(runner, binaries, mixed, 3600, 4000);
+    expect(steady).not.toBeNull();
+    expect(boundary).not.toBeNull();
+    expect(Math.abs((steady ?? 0) - (boundary ?? 0))).toBeLessThan(3);
   }, 60_000);
 });
 

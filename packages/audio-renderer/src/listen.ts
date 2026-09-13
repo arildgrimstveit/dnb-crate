@@ -7,6 +7,25 @@ import type { FfmpegBinaries } from "./detect.ts";
 import type { ProcessRunner } from "./runner.ts";
 
 const LISTEN_FLAC_COMPRESSION_LEVEL = 8;
+const TRUE_PEAK_HEADROOM_DB = 0.05;
+
+export function listenCopyFailureReason(
+  measured: { integratedLufs: number | null; truePeakDb: number | null },
+  ceilingDb: number,
+): string | null {
+  if (
+    measured.integratedLufs == null ||
+    measured.truePeakDb == null ||
+    !Number.isFinite(measured.integratedLufs) ||
+    !Number.isFinite(measured.truePeakDb)
+  ) {
+    return "Listen-copy loudness/true-peak measurement failed";
+  }
+  if (measured.truePeakDb > ceilingDb + TRUE_PEAK_HEADROOM_DB) {
+    return `Listen-copy true peak ${measured.truePeakDb.toFixed(2)} dB exceeds ceiling ${ceilingDb} dB`;
+  }
+  return null;
+}
 const publishLocks = new Map<string, Promise<void>>();
 
 async function removeIfPresent(filePath: string): Promise<void> {
