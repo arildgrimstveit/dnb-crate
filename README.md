@@ -155,6 +155,8 @@ Tests use generated audio fixtures. The compressed-audio integration suite encod
 - `apps/cli` — administration
 - `apps/mcp-server` — thin MCP adapters
 
+Keep dependencies pointing inward: CLI/MCP adapters call catalog services; the catalog coordinates persistence, analysis, and rendering; the audio packages depend on domain contracts, and the domain does not depend on the catalog or audio implementations. ESLint enforces these package boundaries. File traversal lives in `scanner.ts`, while `library-scan.ts` owns import and missing-file reconciliation. Track-list reads load related metadata in batches so query count does not grow per track.
+
 Generated files go under `outputRoot`. Tools never accept arbitrary paths, SQL, or shell commands.
 
 ## Worker lifecycle and scanning

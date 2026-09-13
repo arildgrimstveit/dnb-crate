@@ -146,20 +146,20 @@ export class TrackRepository {
   findById(id: string): Track | null {
     const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(id) as
       TrackRow | undefined;
-    return row ? this.hydrate(row) : null;
+    return row ? this.hydrateRows([row])[0]! : null;
   }
 
   findByFilePath(filePath: string): Track | null {
     const row = this.db.prepare("SELECT * FROM tracks WHERE file_path = ?").get(filePath) as
       TrackRow | undefined;
-    return row ? this.hydrate(row) : null;
+    return row ? this.hydrateRows([row])[0]! : null;
   }
 
   findByFingerprint(fingerprint: string): Track[] {
     const rows = this.db
       .prepare("SELECT * FROM tracks WHERE file_fingerprint = ?")
       .all(fingerprint) as TrackRow[];
-    return rows.map((row) => this.hydrate(row));
+    return this.hydrateRows(rows);
   }
 
   listPathIndex(): Array<{ id: string; filePath: string }> {
@@ -172,7 +172,7 @@ export class TrackRepository {
 
   listAll(): Track[] {
     const rows = this.db.prepare("SELECT * FROM tracks").all() as TrackRow[];
-    return rows.map((row) => this.hydrate(row));
+    return this.hydrateRows(rows);
   }
 
   listCuePoints(trackId: string): CuePoint[] {
@@ -350,7 +350,7 @@ export class TrackRepository {
     const rows = this.db
       .prepare("SELECT * FROM tracks ORDER BY updated_at DESC, id ASC LIMIT ?")
       .all(limit) as TrackRow[];
-    return rows.map((row) => toPublicTrack(this.hydrate(row)));
+    return this.hydrateRows(rows).map(toPublicTrack);
   }
 
   upsertFromScan(input: UpsertTrackInput): { track: Track; moved: boolean } {
@@ -664,11 +664,11 @@ export class TrackRepository {
         );
       }
       const operator = direction === "asc" ? ">" : "<";
-      // NULLS LAST for both directions: missing values sort after present ones in asc,
-      // and still last in desc by putting IS NULL first only for the opposite of SQL default.
+      // NULLS LAST in either direction: enter the null group after a non-null cursor,
+      // and never return to non-null values once the cursor is in the null group.
       where.push(`(
         (${column} IS NULL AND ? IS NULL AND tracks.id ${operator} ?)
-        OR (${column} IS NOT NULL AND ? IS NULL)
+        OR (${column} IS NULL AND ? IS NOT NULL)
         OR (${column} IS NOT NULL AND ? IS NOT NULL AND (${column} ${operator} ? OR (${column} = ? AND tracks.id ${operator} ?)))
       )`);
       params.push(
@@ -688,7 +688,7 @@ export class TrackRepository {
       .prepare(`SELECT tracks.* FROM tracks ${whereSql} ${orderSql} LIMIT ?`)
       .all(...params, limit + 1) as TrackRow[];
 
-    const page = rows.slice(0, limit).map((row) => this.hydrate(row));
+    const page = this.hydrateRows(rows.slice(0, limit));
     const last = page[page.length - 1];
     let nextCursor: string | null = null;
     if (rows.length > limit && last) {
@@ -1265,23 +1265,40 @@ export class TrackRepository {
     return updated;
   }
 
-  private hydrate(row: TrackRow): Track {
-    const moods = this.db
-      .prepare("SELECT mood FROM track_moods WHERE track_id = ? ORDER BY mood")
-      .all(row.id) as { mood: string }[];
-    const subgenres = this.db
-      .prepare("SELECT subgenre FROM track_subgenres WHERE track_id = ? ORDER BY subgenre")
-      .all(row.id) as { subgenre: string }[];
-    const tags = this.db
-      .prepare("SELECT tag FROM track_tags WHERE track_id = ? ORDER BY tag")
-      .all(row.id) as { tag: string }[];
-    const genres = this.tableExists("track_genres")
-      ? (
-          this.db
-            .prepare("SELECT genre FROM track_genres WHERE track_id = ? ORDER BY genre")
-            .all(row.id) as { genre: string }[]
-        ).map((item) => item.genre)
-      : [];
+  /** Fetch each metadata relation once for a result set, rather than once per track. */
+  private hydrateRows(rows: TrackRow[]): Track[] {
+    if (rows.length === 0) return [];
+    const ids = JSON.stringify(rows.map((row) => row.id));
+    const relations = [
+      ["moods", "track_moods", "mood"],
+      ["subgenres", "track_subgenres", "subgenre"],
+      ["tags", "track_tags", "tag"],
+      ["genres", "track_genres", "genre"],
+    ] as const;
+    const values = new Map<
+      string,
+      Required<Pick<Track, "moods" | "subgenres" | "tags" | "genres">>
+    >();
+    for (const row of rows) values.set(row.id, { moods: [], subgenres: [], tags: [], genres: [] });
+    for (const [field, table, column] of relations) {
+      if (field === "genres" && !this.tableExists(table)) continue;
+      // JSON supplies one bound parameter even for libraries beyond SQLite's variable limit.
+      // Table and column identifiers come only from the fixed relation list above.
+      const items = this.db
+        .prepare(
+          `SELECT track_id, ${column} AS value FROM ${table}
+         WHERE track_id IN (SELECT value FROM json_each(?)) ORDER BY ${column}`,
+        )
+        .all(ids) as { track_id: string; value: string }[];
+      for (const item of items) values.get(item.track_id)![field].push(item.value);
+    }
+    return rows.map((row) => this.hydrate(row, values.get(row.id)!));
+  }
+
+  private hydrate(
+    row: TrackRow,
+    relations: Required<Pick<Track, "moods" | "subgenres" | "tags" | "genres">>,
+  ): Track {
     const fieldSources = parseFieldSources(row.field_sources_json);
     const artistCanonical =
       row.artist_canonical ?? (row.artist ? normalizePersonName(row.artist) : null);
@@ -1313,9 +1330,9 @@ export class TrackRepository {
       keySource: row.key_source,
       energy: row.energy,
       rating: row.rating,
-      subgenres: subgenres.map((item) => item.subgenre),
-      moods: moods.map((item) => item.mood),
-      tags: tags.map((item) => item.tag),
+      subgenres: relations.subgenres,
+      moods: relations.moods,
+      tags: relations.tags,
       notes: row.notes,
       analysisStatus: row.analysis_status,
       fileMissing: row.file_missing === 1,
@@ -1328,7 +1345,7 @@ export class TrackRepository {
       recordingMbid: row.recording_mbid ?? null,
       artistCanonical,
       recordingKey,
-      genres,
+      genres: relations.genres,
       fieldSources,
     };
   }

@@ -257,6 +257,16 @@ function lr4Highpass(hz: number): string {
   return `highpass=f=${hz},highpass=f=${hz}`;
 }
 
+/** Keep band joins and phase-matched crossfades on the same reconstruction. */
+function splitBands(input: string, prefix: string, lowHz: number): string[] {
+  return [
+    `[${input}]asplit=3[${prefix}RawL][${prefix}RawM][${prefix}RawH]`,
+    `[${prefix}RawL]${lr4Lowpass(lowHz)}[${prefix}L0]`,
+    `[${prefix}RawM]${lr4Highpass(lowHz)},${lr4Lowpass(BAND_HIGH_CROSSOVER_HZ)}[${prefix}M0]`,
+    `[${prefix}RawH]${lr4Highpass(BAND_HIGH_CROSSOVER_HZ)}[${prefix}H0]`,
+  ];
+}
+
 export function prefixIsolationRunInSec(prefixSec: number, barMs: number): number {
   if (prefixSec <= PREFIX_ISOLATION_MIN_DRY_SEC) {
     return 0;
@@ -297,11 +307,8 @@ export function buildAcrossfadeFilter(options: FilterGraphOptions): string {
     const hz = i === 0 ? options.outgoingCrossoverHz : options.incomingCrossoverHz;
     if (hz == null) return `s${i}`;
     parts.push(
-      `[s${i}]asplit=3[c${i}l][c${i}m][c${i}h]`,
-      `[c${i}l]${lr4Lowpass(hz)}[c${i}lo]`,
-      `[c${i}m]${lr4Highpass(hz)},${lr4Lowpass(BAND_HIGH_CROSSOVER_HZ)}[c${i}mi]`,
-      `[c${i}h]${lr4Highpass(BAND_HIGH_CROSSOVER_HZ)}[c${i}hi]`,
-      `[c${i}lo][c${i}mi][c${i}hi]amix=inputs=3:normalize=0:dropout_transition=0[c${i}]`,
+      ...splitBands(`s${i}`, `c${i}`, hz),
+      `[c${i}L0][c${i}M0][c${i}H0]amix=inputs=3:normalize=0:dropout_transition=0[c${i}]`,
     );
     return `c${i}`;
   });
@@ -430,7 +437,6 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
   };
   const incomingLowHz = params.crossoverHz;
   const outgoingLowHz = options.outgoingCrossoverHz ?? incomingLowHz;
-  const highHz = BAND_HIGH_CROSSOVER_HZ;
   const oL = band("outgoing_low", outgoingOrigin, "");
   const oM = band("outgoing_mid", outgoingOrigin, "");
   const oH = band("outgoing_high", outgoingOrigin, "");
@@ -446,14 +452,8 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
   const parts = [
     segmentPrep(0, trims[0]!, sampleRateHz, tempoEngine, overlapSeconds, stretchScope),
     segmentPrep(1, trims[1]!, sampleRateHz, tempoEngine, overlapSeconds, stretchScope),
-    `[s0]asplit=3[oRawL][oRawM][oRawH]`,
-    `[oRawL]${lr4Lowpass(outgoingLowHz)}[oL0]`,
-    `[oRawM]${lr4Highpass(outgoingLowHz)},${lr4Lowpass(highHz)}[oM0]`,
-    `[oRawH]${lr4Highpass(highHz)}[oH0]`,
-    `[s1]asplit=3[iRawL][iRawM][iRawH]`,
-    `[iRawL]${lr4Lowpass(incomingLowHz)}[iL0]`,
-    `[iRawM]${lr4Highpass(incomingLowHz)},${lr4Lowpass(highHz)}[iM0]`,
-    `[iRawH]${lr4Highpass(highHz)}[iH0]`,
+    ...splitBands("s0", "o", outgoingLowHz),
+    ...splitBands("s1", "i", incomingLowHz),
     withFade("oL0", oL, "oL"),
     withFade("oM0", oM, "oM"),
     withFade("oH0", oH, "oH"),

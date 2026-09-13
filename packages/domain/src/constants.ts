@@ -7,9 +7,6 @@ export const AUDIO_ENGINE_ID = "float-r3-lr4-join-v4";
 export const DJ_HANDOFF_POLICY = "dj-continuity-v1" as const;
 export const DEFAULT_RENDER_OUTPUT_FORMAT = "flac" as const;
 export const DEFAULT_RENDER_OUTPUT_EXTENSION = ".flac";
-/** @deprecated Prefer DSP_ANALYZER_NAME; kept for migrated envelope rows. */
-export const ANALYZER_NAME = "dnb-crate-envelope";
-export const ANALYZER_VERSION = "1.0.0";
 export const DSP_ANALYZER_NAME = "dnb-crate-dsp";
 export const DSP_ANALYZER_VERSION = "3.2.0";
 export const ANALYSIS_ENGINE_IDS = ["dnb-crate-dsp"] as const;
