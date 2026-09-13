@@ -1,4 +1,4 @@
-import { access, mkdir, stat, unlink } from "node:fs/promises";
+import { access, mkdir, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 
@@ -1193,27 +1193,33 @@ export class RenderCoordinator {
             manifest.warnings = warnings;
           } else {
             try {
-              await encodeListenFlac(this.runner, binaries, absOut, listenAbs, controller.signal);
-              const listenLoudness = await measureLoudness(
+              await encodeListenFlac(
                 this.runner,
                 binaries,
+                absOut,
                 listenAbs,
                 controller.signal,
+                async (stagedPath) => {
+                  const measured = await measureLoudness(
+                    this.runner,
+                    binaries,
+                    stagedPath,
+                    controller.signal,
+                  );
+                  manifest.listenIntegratedLufs = measured.integratedLufs;
+                  manifest.listenTruePeakDb = measured.truePeakDb;
+                  const failure = listenCopyFailureReason(
+                    measured,
+                    frozenSettings?.truePeakCeilingDb ?? this.settings.truePeakCeilingDb,
+                  );
+                  if (failure)
+                    throw new DomainError("RENDER_FAILED", `Listen copy withheld: ${failure}.`, {
+                      retryable: false,
+                    });
+                },
               );
-              manifest.listenIntegratedLufs = listenLoudness.integratedLufs;
-              manifest.listenTruePeakDb = listenLoudness.truePeakDb;
-              const listenFailure = listenCopyFailureReason(
-                listenLoudness,
-                frozenSettings?.truePeakCeilingDb ?? this.settings.truePeakCeilingDb,
-              );
-              if (listenFailure) {
-                await unlink(listenAbs).catch(() => undefined);
-                warnings.push(`Listen copy withheld: ${listenFailure}.`);
-                manifest.warnings = warnings;
-              } else {
-                manifest.listenRootRelativePath = listenRel.split(path.sep).join("/");
-                manifest.listenBitDepth = LISTEN_RENDER_BIT_DEPTH;
-              }
+              manifest.listenRootRelativePath = listenRel.split(path.sep).join("/");
+              manifest.listenBitDepth = LISTEN_RENDER_BIT_DEPTH;
             } catch (error) {
               if (isAbortError(error) || this.jobs.findById(job.id)?.status === "cancelled") {
                 throw error;

@@ -795,7 +795,7 @@ describe("render jobs", () => {
       processRunner: createFakeFfmpegRunner({
         probeDurationSec: 15,
         eburForInput: (inputPath) =>
-          inputPath.replaceAll("\\", "/").endsWith("renders/fixture-mix.flac")
+          inputPath.replaceAll("\\", "/").includes("renders/fixture-mix.flac.")
             ? { truePeakDb: 0.8 }
             : undefined,
       }),

@@ -424,6 +424,61 @@ describe("FFmpeg integration", () => {
     expect(boundaryStep).toBeLessThan(toneStep * 12);
   }, 120_000);
 
+  it.each([false, true])(
+    "preserves the shared deck through mixed joins (band first: %s)",
+    async (bandFirst) => {
+      const binaries = requireFfmpeg(
+        await detectFfmpeg(runner, { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" }),
+      );
+      const root = path.join(os.tmpdir(), `dnb-mixed-phase-${crypto.randomUUID()}`);
+      await mkdir(root, { recursive: true });
+      const silent = path.join(root, "silent.wav");
+      const tone = path.join(root, "tone.wav");
+      await writeFile(silent, buildSineWav(8000, 180, 48000, 0));
+      await writeFile(tone, buildSineWav(8000, 180, 48000, 6500));
+      for (const crossoverHz of [120, 250]) {
+        const band = { type: "bass_swap" as const, barCount: 16 as const, params: { crossoverHz } };
+        const cross = { type: "crossfade" as const };
+        const samples: Float32Array[] = [];
+        for (const transitions of [[band, band], bandFirst ? [band, cross] : [cross, band]]) {
+          const outputPath = path.join(root, `${crossoverHz}-${samples.length}.wav`);
+          await renderMix(runner, binaries, {
+            segments: [silent, tone, silent].map((filePath) => ({
+              filePath,
+              sourceStartMs: 0,
+              sourceEndMs: 8000,
+              gainDb: 0,
+            })),
+            overlapMs: [2000, 2000],
+            transitions,
+            outputPath,
+            truePeakCeilingDb: -1,
+            loudnessTargetLufs: -14,
+            postProcess: false,
+          });
+          samples.push(
+            readFloatStereoPeak(
+              await (await import("node:fs/promises")).readFile(outputPath),
+              48000,
+              12,
+            ).samples,
+          );
+        }
+        let error = 0,
+          reference = 0;
+        // The 12 ms stitch precedes the next intended transition. Its shared
+        // deck must equal the phase-consistent band/band control throughout.
+        for (let i = Math.floor(11.98 * 48000); i < 12 * 48000; i++) {
+          error += (samples[0]![i]! - samples[1]![i]!) ** 2;
+          reference += samples[0]![i]! ** 2;
+        }
+        expect(reference).toBeGreaterThan(0);
+        expect(Math.sqrt(error / reference)).toBeLessThan(0.01);
+      }
+    },
+    120_000,
+  );
+
   it("writes 24-bit 48 kHz FLAC when the output path is .flac", async (ctx) => {
     const binaries = await detectFfmpeg(runner, { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" });
     if (!binaries) {

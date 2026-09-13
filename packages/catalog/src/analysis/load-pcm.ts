@@ -47,10 +47,14 @@ export async function loadPcmForAnalysis(
       ],
     });
     if (result.exitCode !== 0) {
-      throw new DomainError("ANALYSIS_FAILED", "FFmpeg could not decode this file for analysis", {
-        retryable: false,
-        details: { stderr: result.stderr.slice(-400) },
-      });
+      throw new DomainError(
+        "ANALYSIS_FAILED",
+        `Cannot decode audio for analysis: ${path.basename(filePath)}. Check that it plays locally and is not damaged or DRM-protected; replace or re-export an unreadable file.`,
+        {
+          retryable: false,
+          details: { stderr: result.stderr.slice(-400) },
+        },
+      );
     }
     return decodeWavPcm(await readFile(tmp));
   } finally {

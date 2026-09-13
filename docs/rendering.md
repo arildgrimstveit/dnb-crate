@@ -8,7 +8,7 @@ Install FFmpeg and ffprobe on `PATH` (or set `ffmpegPath` / `ffprobePath`). Phra
 
 Stretch prefers standalone Rubber Band 4 (`-3` / fine) when `rubberbandPath`, `DNB_CRATE_RUBBERBAND_PATH`, or `tools/rubberband-cli/` is present. Queued jobs freeze that executable path, its SHA-256, and the audio-engine id. Execution refuses a replaced binary or a queued engine id that no longer matches the running DSP. Full renders use the frozen path and refuse FFmpeg `rubberband` / `atempo` fallback when any original deck needs stretch, including multi-track pairwise mixes. Featured bodies stay at rate 1. Extract, makeup and splices stay 32-bit float; planned segment gain is applied before any bounded or external step.
 
-Filter graphs prefer `-filter_complex_script`. Phrase-mix and bass-swap with three or more decks join the original pair each time, then stitch the preserved prefix with a short wet-to-wet equal-power fade. A shared middle deck keeps the previous join’s crossover so IIR phase stays continuous. Completed track bodies are not sent through the band filters again. Pairwise also applies if an inline graph would blow the argv limit.
+Filter graphs prefer `-filter_complex_script`. Phrase-mix and bass-swap with three or more decks join the original pair each time, then stitch the preserved prefix with a short fade. Each shared deck uses a consistent crossover response across its two joins, including plain crossfade → band and band → plain crossfade. A plain crossfade applies the adjacent band reconstruction to that deck when needed; this prevents blending dry and phase-shifted copies at the stitch. Completed track bodies are not sent through the band filters again. Pairwise also applies if an inline graph would blow the argv limit.
 
 ## Loudness
 
@@ -48,9 +48,10 @@ config change does not change what an already-queued job renders and invalidates
 identities. An incompatible queued engine or replaced binary fails the job instead of rendering with
 the new DSP.
 
-Named listen FLACs encode to a unique staging file per job, then publish under a lock so two workers
-cannot share one `.partial.flac`. The previous listen file is replaced only after the new encode is
-ready.
+Named listen FLACs encode to a unique staging file per job. The coordinator measures and verifies
+that staged file before publishing under a lock. Failed verification removes only that job’s staged
+file and preserves the previous named listen file. Measurements in the manifest belong to the
+verified stage, even when another same-name render publishes later.
 
 ## Jobs
 

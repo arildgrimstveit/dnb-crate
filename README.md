@@ -4,6 +4,8 @@
 
 Point this at a local drum & bass folder. It catalogs the files, measures grids and keys, plans a deterministic mix of the length you ask for, and renders a gapless 24-bit master plus a 16-bit listen FLAC.
 
+**Use your existing MP3/M4A library.** You can mix MP3 (including variable-bitrate), unprotected M4A, WAV, FLAC, and AIFF files in the same set. No manual conversion is needed: FFmpeg decodes your sources for analysis and mixing, and the original files stay unchanged. FLAC is the output format; it avoids another lossy encoding step but cannot restore detail already lost in a compressed source.
+
 An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server. The same services are on the CLI. The model interprets requests; this app owns scanning, storage, search, planning, and rendering.
 
 ## Ask for a mix
@@ -70,6 +72,8 @@ copy dnb-crate.config.example.json dnb-crate.config.json
 ```
 
 Set `libraryRoots` to your music folder and `outputRoot` to a directory **outside** that folder. Config and `data/` are gitignored. Environment variables: `.env.example`.
+
+Keep the default `supportedExtensions` to include MP3 and M4A. After adding music, run `library:scan` and `analysis:run` below. Scanning reports malformed or unreadable files and continues with readable files. If a file fails, check that it plays locally and that the app can read it; replace or re-export damaged files. Changing the filename extension does not convert audio. DRM-protected downloads cannot be used. If non-WAV analysis reports missing FFmpeg, install FFmpeg/ffprobe or set `ffmpegPath`/`ffprobePath` in the config.
 
 ## Typical flow
 
@@ -140,7 +144,7 @@ pnpm lint
 pnpm format:check
 ```
 
-Tests use tiny sine-wave fixtures. They never read a private library.
+Tests use generated audio fixtures. The compressed-audio integration suite encodes real CBR/VBR MP3, AAC/M4A, and FLAC files with FFmpeg, then checks scanning, analysis, mixing, and cue timing. It requires FFmpeg/ffprobe with the `libmp3lame` encoder (also installed in CI). Tests never read a private library.
 
 ## Layout
 

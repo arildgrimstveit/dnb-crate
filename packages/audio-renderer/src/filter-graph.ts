@@ -63,6 +63,8 @@ export type FilterGraphOptions = {
    * the same IIR phase it already had as the previous join’s incoming deck.
    */
   outgoingCrossoverHz?: number;
+  /** Phase-match an incoming deck that will participate in a later band join. */
+  incomingCrossoverHz?: number;
 };
 
 export type TempoEngine = "rubberband" | "atempo";
@@ -289,12 +291,27 @@ export function buildAcrossfadeFilter(options: FilterGraphOptions): string {
     parts.push(segmentPrep(i, trims[i]!, sampleRateHz, tempoEngine, overlapSeconds, stretchScope));
   }
 
-  let current = "s0";
+  // A shared deck must have the same reconstruction on both sides of a stitch,
+  // including when one of its joins uses full-band crossfading.
+  const labels = trims.map((_, i) => {
+    const hz = i === 0 ? options.outgoingCrossoverHz : options.incomingCrossoverHz;
+    if (hz == null) return `s${i}`;
+    parts.push(
+      `[s${i}]asplit=3[c${i}l][c${i}m][c${i}h]`,
+      `[c${i}l]${lr4Lowpass(hz)}[c${i}lo]`,
+      `[c${i}m]${lr4Highpass(hz)},${lr4Lowpass(BAND_HIGH_CROSSOVER_HZ)}[c${i}mi]`,
+      `[c${i}h]${lr4Highpass(BAND_HIGH_CROSSOVER_HZ)}[c${i}hi]`,
+      `[c${i}lo][c${i}mi][c${i}hi]amix=inputs=3:normalize=0:dropout_transition=0[c${i}]`,
+    );
+    return `c${i}`;
+  });
+
+  let current = labels[0]!;
   for (let i = 0; i < overlapSeconds.length; i += 1) {
     const overlap = overlapSeconds[i]!;
     const out = i === overlapSeconds.length - 1 ? "mixed" : `m${i + 1}`;
     parts.push(
-      `[${current}][s${i + 1}]acrossfade=d=${overlap}:o=1:c1=${CROSSFADE_CURVE}:c2=${CROSSFADE_CURVE}[${out}]`,
+      `[${current}][${labels[i + 1]}]acrossfade=d=${overlap}:o=1:c1=${CROSSFADE_CURVE}:c2=${CROSSFADE_CURVE}[${out}]`,
     );
     current = out;
   }

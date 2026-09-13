@@ -91,6 +91,7 @@ export type MixRequest = {
   outputMetadata?: MixOutputTags;
   /** Keep a shared middle deck on the previous join’s crossover. */
   outgoingCrossoverHz?: number;
+  incomingCrossoverHz?: number;
 };
 
 export type StretchEngine = "rubberband-r3" | "rubberband" | "atempo" | "none";
@@ -455,6 +456,7 @@ export async function renderMix(
       applyLimiter: request.applyLimiter === true,
       isolatePrefix: request.isolatePrefix,
       outgoingCrossoverHz: request.outgoingCrossoverHz,
+      incomingCrossoverHz: request.incomingCrossoverHz,
       tempoEngine: useCli
         ? "atempo"
         : request.tempoEngine === "rubberband-r3"
@@ -860,7 +862,13 @@ async function renderPairwise(
           ? [request.transitions[i - 1] ?? { type: "crossfade" }]
           : undefined,
         outgoingCrossoverHz:
-          i > 1 ? resolvedCrossoverHz(request.transitions?.[i - 2]) : request.outgoingCrossoverHz,
+          i > 1
+            ? (resolvedCrossoverHz(request.transitions?.[i - 2]) ??
+              resolvedCrossoverHz(request.transitions?.[i - 1]))
+            : request.outgoingCrossoverHz,
+        incomingCrossoverHz:
+          resolvedCrossoverHz(request.transitions?.[i - 1]) ??
+          resolvedCrossoverHz(request.transitions?.[i]),
         outputPath: joinPath,
         outputMetadata: undefined,
         edgeFadeMs: 0,

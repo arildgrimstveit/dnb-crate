@@ -99,6 +99,7 @@ export async function encodeListenFlac(
   inputPath: string,
   outputPath: string,
   abortSignal?: AbortSignal,
+  verifyStaged?: (stagedPath: string) => Promise<void>,
 ): Promise<void> {
   if (abortSignal?.aborted) {
     const error = new Error("Render cancelled");
@@ -125,26 +126,37 @@ export async function encodeListenFlac(
     String(LISTEN_FLAC_COMPRESSION_LEVEL),
     partial,
   ];
-  const result = await runner.run({
-    executable: binaries.ffmpegPath,
-    args,
-    abortSignal,
-  });
-  if (result.exitCode !== 0) {
-    await removeIfPresent(partial);
-    if (abortSignal?.aborted) {
-      const error = new Error("Render cancelled");
-      error.name = "AbortError";
-      throw error;
+  try {
+    const result = await runner.run({
+      executable: binaries.ffmpegPath,
+      args,
+      abortSignal,
+    });
+    if (result.exitCode !== 0) {
+      if (abortSignal?.aborted) {
+        const error = new Error("Render cancelled");
+        error.name = "AbortError";
+        throw error;
+      }
+      throw new DomainError(
+        "RENDER_FAILED",
+        `Listen encode exited with code ${result.exitCode}${result.signal ? ` (${result.signal})` : ""}`,
+        {
+          retryable: false,
+          details: { stderr: result.stderr.slice(-800) },
+        },
+      );
     }
-    throw new DomainError(
-      "RENDER_FAILED",
-      `Listen encode exited with code ${result.exitCode}${result.signal ? ` (${result.signal})` : ""}`,
-      {
-        retryable: false,
-        details: { stderr: result.stderr.slice(-800) },
-      },
-    );
+    await verifyStaged?.(partial);
+    await withPublishLock(outputPath, async () => {
+      if (abortSignal?.aborted) {
+        const error = new Error("Render cancelled");
+        error.name = "AbortError";
+        throw error;
+      }
+      await atomicReplace(partial, outputPath);
+    });
+  } finally {
+    await removeIfPresent(partial);
   }
-  await withPublishLock(outputPath, () => atomicReplace(partial, outputPath));
 }

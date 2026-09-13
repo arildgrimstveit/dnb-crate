@@ -227,7 +227,11 @@ export class CatalogService {
         }
       } catch (error) {
         skippedMalformed += 1;
-        warnings.push(`Malformed or unreadable audio: ${file.relativeFromRoot} (${String(error)})`);
+        warnings.push(
+          `Malformed or unreadable audio: ${file.relativeFromRoot}. ` +
+            `Check that the file is readable and plays locally; replace or re-export it if damaged. ` +
+            `Renaming a file extension does not convert audio. (${String(error)})`,
+        );
         this.logger.warn(
           { file: file.relativeFromRoot, err: String(error) },
           "skipped malformed audio",

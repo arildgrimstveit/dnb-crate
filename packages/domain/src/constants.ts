@@ -1,8 +1,8 @@
 export const APP_NAME = "dnb-crate-mcp";
 export const APP_VERSION = "0.5.0";
-export const RENDERER_VERSION = "6.14.1";
+export const RENDERER_VERSION = "6.14.2";
 /** DSP identity mixed into the preview cache; bump when the audio graph changes. */
-export const AUDIO_ENGINE_ID = "float-r3-lr4-join-v3";
+export const AUDIO_ENGINE_ID = "float-r3-lr4-join-v4";
 /** Stored label for the only join engine: continuity windows, supported sequential, timing v2. */
 export const DJ_HANDOFF_POLICY = "dj-continuity-v1" as const;
 export const DEFAULT_RENDER_OUTPUT_FORMAT = "flac" as const;
