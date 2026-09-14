@@ -28,10 +28,10 @@ describe("rubberband CLI", () => {
     expect(clampMakeupDb(2.9)).toBeCloseTo(2.9, 5);
   });
 
-  it("resolves the bundled Windows CLI when present", () => {
+  it("resolves env, explicit, or bundled Rubber Band CLI when present", () => {
     const found = resolveRubberbandCli();
     if (found) {
-      expect(found.replaceAll("\\", "/")).toMatch(/rubberband(?:-r3)?\.exe$/i);
+      expect(found.replaceAll("\\", "/")).toMatch(/rubberband(?:-r3)?(?:\.exe)?$/i);
     } else {
       expect(found).toBeNull();
     }
