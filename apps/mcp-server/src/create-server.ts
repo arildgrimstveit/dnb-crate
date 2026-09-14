@@ -1,5 +1,9 @@
 import type { CatalogService } from "@dnb-crate/catalog";
 import {
+  startMixWorkflowInputSchema,
+  mixWorkflowIdInputSchema,
+  mixWorkflowDataSchema,
+  preflightDataSchema,
   APP_NAME,
   recordHourFeedbackSchema,
   listHourFeedbackSchema,
@@ -96,6 +100,73 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
         "Local drum & bass crate: catalog, set planning, beat-grid analysis, and FLAC rendering (24-bit master plus 16-bit named listen copy) with equal-power, phrase-mix, and bass-swap templates. Identify tracks and plans by UUID.",
     },
     { capabilities: { tools: {}, resources: {}, prompts: {} } },
+  );
+
+  server.registerTool(
+    "start_mix_workflow",
+    {
+      title: "Create a verified first mix",
+      description:
+        "Preferred first-run operation: preflight configured roots, scan, analyze rhythm and keys, create and validate a strict plan, render and verify master/listen output. Returns promptly; poll get_mix_workflow. Reuse requestToken only for the same brief. Never accepts filesystem paths.",
+      inputSchema: startMixWorkflowInputSchema,
+      outputSchema: toolResultSchema(mixWorkflowDataSchema),
+      annotations: { readOnlyHint: false, idempotentHint: true },
+    },
+    (input) => {
+      try {
+        return toolSuccess(service.workflows.start(input));
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+  for (const name of ["get_mix_workflow", "resume_mix_workflow", "cancel_mix_workflow"] as const) {
+    server.registerTool(
+      name,
+      {
+        title: name.replaceAll("_", " "),
+        description:
+          name === "get_mix_workflow"
+            ? "Read persisted stage progress, issues, child IDs and verified output references."
+            : name === "resume_mix_workflow"
+              ? "Resume an interrupted or blocked mix; preserve plans and completed valid work. Changed planned sources require a new workflow."
+              : "Cancel this workflow and exclusively owned child jobs. Cleanup settles before worker ownership is released.",
+        inputSchema: mixWorkflowIdInputSchema,
+        outputSchema: toolResultSchema(mixWorkflowDataSchema),
+        annotations: { readOnlyHint: name === "get_mix_workflow", idempotentHint: true },
+      },
+      async ({ id }) => {
+        try {
+          return toolSuccess(
+            name === "get_mix_workflow"
+              ? service.workflows.get(id)
+              : name === "resume_mix_workflow"
+                ? await service.workflows.resume(id)
+                : service.workflows.cancel(id),
+          );
+        } catch (error) {
+          return toolFailure(error);
+        }
+      },
+    );
+  }
+  server.registerTool(
+    "get_mix_preflight",
+    {
+      title: "Check first-mix prerequisites",
+      description:
+        "Check configured roots, output writability, FFmpeg capabilities and KeyFinder. Brief-specific readiness and conditional stretching requirements are checked against the actual plan.",
+      inputSchema: emptyInputSchema,
+      outputSchema: toolResultSchema(preflightDataSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    },
+    async () => {
+      try {
+        return toolSuccess(await service.workflows.preflight.check());
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
   );
 
   server.registerTool(
@@ -1052,7 +1123,7 @@ export function createDnbCrateMcpServer(options: CreateServerOptions): McpServer
     {
       title: "Build a DnB set",
       description:
-        "Turn a natural-language set brief into structured create_set_plan arguments, then validate and revise.",
+        "Turn a natural-language set brief into start_mix_workflow, then poll until verified or blocked.",
       argsSchema: buildDnbSetPromptArgsSchema,
     },
     ({ request }) => ({
@@ -1067,12 +1138,11 @@ Brief:
 ${request}
 
 Workflow:
-1. Call get_planning_readiness if metadata may be incomplete. Optionally start_track_analysis for unanalyzed/stale tracks and poll get_analysis_status. DSP is the only analysis engine.
-2. Use search_tracks to resolve named tracks to UUIDs (never filesystem paths).
-3. Call create_set_plan with structured fields only: name, targetDurationMinutes or targetDurationMs, requestedArc, preferredMoods/Subgenres/Artists, descriptors, genres include/exclude, dropAnchored, artistRepeatSpacing, seed. Pass the user's requested length (20 minutes, 90 minutes, etc.). Default to 60 minutes only when they do not say. Default qualityPolicy is strict. Omit targetBpm so each overlap beatmatches at the pair tempo. Pass targetBpm only for an explicit mix-wide tempo lock. Do not pin historical pairs or recipes unless the user asks.
-4. Call validate_set_plan and read quality (qualityChecksPassed, readyForAudition, per-join harmonicClass and fallbackReason).
-5. start_set_render. Poll get_render_status; read get_render_manifest when succeeded.
-6. Summarize the tracklist with timeline times, remaining warnings, quality flags, and render job id. Give listenRootRelativePath for playback and outputRootRelativePath as the 24-bit master. Do not copy the master to a second identical FLAC.
+1. Use search_tracks to resolve explicitly named tracks to UUIDs (never filesystem paths).
+2. Call start_mix_workflow with a new requestToken and a brief using create_set_plan fields: name, targetDurationMinutes or targetDurationMs, requestedArc, preferredMoods/Subgenres/Artists, descriptors, genres, artistRepeatSpacing and seed. Preserve the requested duration and strict quality policy. Omit targetBpm unless explicitly requested.
+3. Poll get_mix_workflow. It scans configured roots, analyzes missing rhythm and key evidence, plans, validates, renders and checks output asynchronously.
+4. If blocked, explain the issue and nextAction. Never invent metadata, shorten the requested mix, or disable quality checks. Resume with resume_mix_workflow after correcting prerequisites. Start a new workflow for an explicitly changed brief.
+5. Report success only when status is succeeded and result.verified is true. Give the master and listen references and workflow/plan/render IDs. A withheld listen copy is a failure even if the master exists.
 
 Do not invent BPM, key, energy, or cue points. Analysis is advisory. Provenance is manual > published > analyzed > tag. Playback-rate changes stay within ±3% unless allowExcessiveTempo.`,
           },

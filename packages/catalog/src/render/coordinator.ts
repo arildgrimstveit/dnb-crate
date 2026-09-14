@@ -53,6 +53,7 @@ import {
 } from "@dnb-crate/domain";
 import {
   detectFfmpeg,
+  resolveRubberbandCli,
   ffmpegAlignedReady,
   ffmpegMixReady,
   requireAlignedFfmpeg,
@@ -324,6 +325,14 @@ export class RenderCoordinator {
     this.pump();
   }
 
+  refreshNativeDependencies = false;
+
+  resetDependencyCache(): void {
+    this.binaries = undefined;
+    if (this.refreshNativeDependencies)
+      this.settings.rubberbandCliPath = resolveRubberbandCli(this.config.rubberbandPath);
+  }
+
   async detect(): Promise<FfmpegBinaries | null> {
     if (this.binaries !== undefined) {
       return this.binaries;
@@ -400,6 +409,8 @@ export class RenderCoordinator {
 
   async startFullRender(input: {
     setPlanId: string;
+    workflowJobId?: string;
+    shouldEnqueue?: () => boolean;
     edgeFadeMs?: number;
     allowLowConfidence?: boolean;
     allowExcessiveTempo?: boolean;
@@ -433,8 +444,10 @@ export class RenderCoordinator {
       ...validation.warnings.map((issue) => issue.message),
       ...validation.renderReadiness.issues.map((issue) => issue.message),
     ];
+    if (input.shouldEnqueue && !input.shouldEnqueue())
+      throw new DomainError("RENDER_FAILED", "Workflow cancelled before render enqueue.");
     const job = this.jobs.insertQueued({
-      id: crypto.randomUUID(),
+      id: input.workflowJobId ?? crypto.randomUUID(),
       kind: "full",
       setPlanId: stored.plan.id,
       warnings,
@@ -555,7 +568,11 @@ export class RenderCoordinator {
     return job.manifest;
   }
 
-  async checkRender(renderJobId: string): Promise<RenderCheckResult> {
+  async checkRender(renderJobId: string, abortSignal?: AbortSignal): Promise<RenderCheckResult> {
+    const runner: ProcessRunner = {
+      run: (request) =>
+        this.runner.run({ ...request, abortSignal, timeoutMs: request.timeoutMs ?? 180_000 }),
+    };
     const job = this.getStatus(renderJobId);
     if (job.status !== "succeeded" || !job.outputRootRelativePath) {
       throw new DomainError(
@@ -566,7 +583,7 @@ export class RenderCoordinator {
     const manifest = this.getManifest(renderJobId);
     const outputPath = path.resolve(this.config.outputRoot, job.outputRootRelativePath);
     const binaries = requireFfmpeg(await this.detect());
-    const silenceRun = await this.runner.run({
+    const silenceRun = await runner.run({
       executable: binaries.ffmpegPath,
       args: [
         "-nostdin",
@@ -655,7 +672,7 @@ export class RenderCoordinator {
       const levelStepLu =
         overlapAtMs != null
           ? await measureLevelStepLu(
-              this.runner,
+              runner,
               binaries.ffmpegPath,
               outputPath,
               overlapAtMs,
@@ -1206,6 +1223,7 @@ export class RenderCoordinator {
                     stagedPath,
                     controller.signal,
                   );
+                  manifest.listenChecksumSha256 = await sha256File(stagedPath);
                   manifest.listenIntegratedLufs = measured.integratedLufs;
                   manifest.listenTruePeakDb = measured.truePeakDb;
                   const failure = listenCopyFailureReason(

@@ -52,3 +52,5 @@ packages/*/test/**/*.js
 apps/*/src/**/*.js
 apps/*/test/**/*.js
 
+# Isolated native test downloads (FFmpeg, KeyFinder, Rubber Band)
+tools/native-test/

@@ -13,6 +13,7 @@ export const analysisEngineIdSchema = z.enum(ANALYSIS_ENGINE_IDS);
 export const analysisConfigSchema = z
   .object({
     defaultEngine: analysisEngineIdSchema.default(DEFAULT_ANALYSIS_ENGINE),
+    keyAnalysis: z.enum(["auto", "off"]).optional(),
     prefetch: z.number().int().min(0).max(4).optional(),
   })
   .optional();
@@ -34,6 +35,7 @@ export const appConfigSchema = z.object({
   renderEdgeFadeMs: z.number().int().min(0).max(5_000).optional(),
   ffmpegPath: z.string().min(1).optional(),
   ffprobePath: z.string().min(1).optional(),
+  keyfinderPath: z.string().min(1).optional(),
   rubberbandPath: z.string().min(1).optional(),
   analysis: analysisConfigSchema,
   enrichment: z

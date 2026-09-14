@@ -114,6 +114,18 @@ export const validateTransitionInputSchema = z.object({
 });
 
 export const analysisJobSchema = z.object({
+  keyStages: z
+    .array(
+      z.object({
+        trackId: z.string(),
+        state: z.enum(["pending", "running", "succeeded", "failed", "skipped"]),
+        fingerprint: z.string(),
+        identity: z.string(),
+        reason: z.string().nullable(),
+        analyzedAt: z.string(),
+      }),
+    )
+    .optional(),
   id: z.string(),
   status: analysisJobStatusSchema,
   progress: z.number().min(0).max(1),

@@ -265,6 +265,7 @@ export class TrackRepository {
       musicalKey: string | null;
       keyConfidence?: number | null;
       gridRejected?: boolean;
+      preserveKey?: boolean;
     },
   ): Track {
     const existing = this.findById(trackId);
@@ -289,7 +290,11 @@ export class TrackRepository {
       input.musicalKey !== null && (input.keyConfidence ?? 0) >= MIN_KEY_CONFIDENCE
         ? input.musicalKey
         : null;
-    if (existing.keySource !== "manual" && existing.keySource !== "published") {
+    if (
+      !input.preserveKey &&
+      existing.keySource !== "manual" &&
+      existing.keySource !== "published"
+    ) {
       if (gatedKey) {
         const normalized = normalizeKey(gatedKey);
         musicalKey = normalized?.musicalKey ?? gatedKey;
@@ -1215,12 +1220,22 @@ export class TrackRepository {
     const existing = this.findById(id);
     const keepBpm =
       existing?.bpmSource === "manual" ||
-      existing?.bpmSource === "analyzed" ||
+      (existing?.bpmSource === "analyzed" && existing.fileFingerprint === input.fileFingerprint) ||
       existing?.bpmSource === "published";
     const keepKey =
       existing?.keySource === "manual" ||
-      existing?.keySource === "analyzed" ||
+      (existing?.keySource === "analyzed" && existing.fileFingerprint === input.fileFingerprint) ||
       existing?.keySource === "published";
+    if (existing && existing.fileFingerprint !== input.fileFingerprint) {
+      this.setAnalysisStatus(id, "pending");
+      for (const stage of ["dsp", "key"]) {
+        this.db
+          .prepare(
+            "UPDATE analysis_stages SET state='pending', reason='Source fingerprint changed' WHERE track_id=? AND stage=?",
+          )
+          .run(id, stage);
+      }
+    }
     const timestamp = nowIso();
     this.db
       .prepare(

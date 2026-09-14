@@ -130,6 +130,9 @@ export function loadConfig(options: ConfigLoadOptions = {}): AppConfig {
   if (env.DNB_CRATE_FFPROBE_PATH) {
     merged.ffprobePath = env.DNB_CRATE_FFPROBE_PATH;
   }
+  if (env.DNB_CRATE_KEYFINDER_PATH) {
+    merged.keyfinderPath = env.DNB_CRATE_KEYFINDER_PATH;
+  }
   if (env.DNB_CRATE_RUBBERBAND_PATH) {
     merged.rubberbandPath = env.DNB_CRATE_RUBBERBAND_PATH;
   }
@@ -186,6 +189,9 @@ export function loadConfig(options: ConfigLoadOptions = {}): AppConfig {
     outputRoot: resolvePathValue(parsed.data.outputRoot, cwd),
     libraryRoots: parsed.data.libraryRoots.map((root) => resolvePathValue(root, cwd)),
     supportedExtensions: parsed.data.supportedExtensions.map((ext) => ext.toLowerCase()),
+    keyfinderPath: parsed.data.keyfinderPath
+      ? resolvePathValue(parsed.data.keyfinderPath, cwd)
+      : undefined,
     rubberbandPath: parsed.data.rubberbandPath
       ? resolvePathValue(parsed.data.rubberbandPath, cwd)
       : undefined,

@@ -1,6 +1,7 @@
 import type { AnalysisEngineId, AnalysisJob, AnalysisJobStatus } from "@dnb-crate/domain";
 import { ANALYSIS_JOB_LIST_LIMIT_MAX, DomainError } from "@dnb-crate/domain";
 
+import { AnalysisRepository } from "./analysis-repository.ts";
 import type { SqliteDatabase } from "./db.ts";
 
 type JobRow = {
@@ -62,7 +63,7 @@ export class AnalysisJobRepository {
   findById(id: string): AnalysisJob | null {
     const row = this.db.prepare("SELECT * FROM analysis_jobs WHERE id = ?").get(id) as
       JobRow | undefined;
-    return row ? mapJob(row) : null;
+    return row ? this.withKeyStages(mapJob(row)) : null;
   }
 
   require(id: string): AnalysisJob {
@@ -119,7 +120,7 @@ export class AnalysisJobRepository {
         `UPDATE analysis_jobs SET
           status = 'succeeded', progress = 1, completed_ids_json = ?, failed_ids_json = ?,
           error_code = NULL, error_message = NULL, retryable = 0, completed_at = ?
-         WHERE id = ?`,
+         WHERE id = ? AND status = 'running'`,
       )
       .run(JSON.stringify(completedTrackIds), JSON.stringify(failedTrackIds), nowIso(), id);
     return this.require(id);
@@ -150,6 +151,22 @@ export class AnalysisJobRepository {
     return this.require(id);
   }
 
+  retry(id: string, recheck = false): void {
+    this.db
+      .prepare(
+        "UPDATE analysis_jobs SET status='queued', error_code=NULL, error_message=NULL, started_at=NULL, completed_at=NULL WHERE id=? AND (status IN ('failed','cancelled') OR (status='succeeded' AND ?=1))",
+      )
+      .run(id, recheck ? 1 : 0);
+  }
+
+  cancel(id: string): void {
+    this.db
+      .prepare(
+        "UPDATE analysis_jobs SET status='cancelled', completed_at=? WHERE id=? AND status IN ('queued','running')",
+      )
+      .run(nowIso(), id);
+  }
+
   failRunningAsInterrupted(): number {
     const result = this.db
       .prepare(
@@ -163,11 +180,22 @@ export class AnalysisJobRepository {
     return result.changes;
   }
 
+  private withKeyStages(job: AnalysisJob): AnalysisJob {
+    const analyses = new AnalysisRepository(this.db);
+    return {
+      ...job,
+      keyStages: job.trackIds.flatMap((trackId) => {
+        const stage = analyses.getStage(trackId, "key");
+        return stage ? [{ trackId, ...stage }] : [];
+      }),
+    };
+  }
+
   list(limit?: number): AnalysisJob[] {
     const cap = Math.min(limit ?? 20, ANALYSIS_JOB_LIST_LIMIT_MAX);
     const rows = this.db
       .prepare(`SELECT * FROM analysis_jobs ORDER BY created_at DESC, id DESC LIMIT ?`)
       .all(cap) as JobRow[];
-    return rows.map(mapJob);
+    return rows.map((row) => this.withKeyStages(mapJob(row)));
   }
 }

@@ -80,6 +80,7 @@ export function createFakeFfmpegRunner(
       }
       if (options.hangUntilAbort) {
         const isMeta =
+          request.args.includes("-encoders") ||
           request.args.includes("-version") ||
           request.args.includes("-filters") ||
           request.args.includes("-h") ||
@@ -119,6 +120,13 @@ export function createFakeFfmpegRunner(
       const isEbur = request.args.some((arg) => arg.includes("ebur128"));
       const isSilence = request.args.some((arg) => arg.includes("silencedetect"));
 
+      if (request.args.includes("-encoders"))
+        return {
+          exitCode: 0,
+          signal: null,
+          stdout: " A..... flac FLAC encoder\n A..... pcm_s16le PCM encoder\n",
+          stderr: "",
+        };
       if (isVersion) {
         const name = /ffprobe/i.test(request.executable) ? "ffprobe" : "ffmpeg";
         return {

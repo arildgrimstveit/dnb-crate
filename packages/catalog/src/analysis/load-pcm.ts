@@ -12,6 +12,7 @@ export async function loadPcmForAnalysis(
   filePath: string,
   runner: ProcessRunner,
   binaries: FfmpegBinaries | null,
+  abortSignal?: AbortSignal,
 ): Promise<PcmAudio> {
   const ext = path.extname(filePath).toLowerCase();
   if (WAV_EXTS.has(ext)) {
@@ -31,6 +32,8 @@ export async function loadPcmForAnalysis(
   try {
     const result = await runner.run({
       executable: binaries.ffmpegPath,
+      timeoutMs: 180_000,
+      abortSignal,
       args: [
         "-nostdin",
         "-hide_banner",

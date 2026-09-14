@@ -442,3 +442,10 @@ export {
   transitionFeedbackSchema,
   transitionPreferenceSchema,
 } from "./feedback-contracts.ts";
+
+export {
+  startMixWorkflowInputSchema,
+  mixWorkflowIdInputSchema,
+  mixWorkflowDataSchema,
+  preflightDataSchema,
+} from "./mix-workflow-contracts.ts";

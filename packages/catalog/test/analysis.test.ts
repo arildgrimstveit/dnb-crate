@@ -217,6 +217,7 @@ describe("track analysis and aligned transitions", () => {
     await writeSineWav(path.join(library, "noref.wav"), { title: "NoRef", durationMs: 2000 });
     await writeSineWav(path.join(library, "plain.wav"), { title: "Plain", durationMs: 2000 });
     await writeSineWav(path.join(library, "v210.wav"), { title: "V210", durationMs: 2000 });
+    await writeSineWav(path.join(library, "nokey.wav"), { title: "NoKey", durationMs: 2000 });
     await catalog.service.scanLibrary();
     const tracks = catalog.service.searchTracks({ limit: 10 }).tracks;
     const fresh = tracks.find((item) => item.title === "Fresh")!;
@@ -224,9 +225,11 @@ describe("track analysis and aligned transitions", () => {
     const noRef = tracks.find((item) => item.title === "NoRef")!;
     const plain = tracks.find((item) => item.title === "Plain")!;
     const v210 = tracks.find((item) => item.title === "V210")!;
+    const noKey = tracks.find((item) => item.title === "NoKey")!;
     catalog.service.updateTrackMetadata(fresh.id, { bpm: 174, bpmSource: "published" });
     catalog.service.updateTrackMetadata(noRef.id, { bpm: 174, bpmSource: "published" });
     catalog.service.updateTrackMetadata(v210.id, { bpm: 174, bpmSource: "published" });
+    catalog.service.updateTrackMetadata(noKey.id, { bpm: 174, bpmSource: "published" });
     const stub = (trackId: string, version: string, referenceBpm: number | null) => {
       catalog.analyses.upsert({
         trackId,
@@ -266,6 +269,7 @@ describe("track analysis and aligned transitions", () => {
     stub(oldVer.id, "2.0.0", null);
     stub(noRef.id, DSP_ANALYZER_VERSION, null);
     stub(v210.id, "2.1.0", 174);
+    stub(noKey.id, DSP_ANALYZER_VERSION, 174);
 
     const unanalyzed = catalog.analyses.listIdsForScope("unanalyzed");
     expect(unanalyzed).toEqual([plain.id]);
@@ -275,11 +279,23 @@ describe("track analysis and aligned transitions", () => {
     expect(stale.has(noRef.id)).toBe(true);
     expect(stale.has(v210.id)).toBe(true);
     expect(stale.has(fresh.id)).toBe(false);
+    expect(stale.has(noKey.id)).toBe(false);
     const all = catalog.analyses.listIdsForScope("all");
-    expect(all).toHaveLength(5);
+    expect(all).toHaveLength(6);
 
+    catalog.analyses.setStage(fresh.id, "key", {
+      state: "succeeded",
+      fingerprint: catalog.repository.findById(fresh.id)!.fileFingerprint,
+      identity: "keyfinder-test",
+      reason: null,
+    });
     const started = catalog.service.startTrackAnalysis({ scope: "unanalyzed" });
     expect(started.job.trackIds).toEqual([plain.id]);
+    const staleJob = catalog.service.startTrackAnalysis({ scope: "stale" });
+    expect(new Set(staleJob.job.trackIds)).toEqual(
+      new Set([plain.id, oldVer.id, noRef.id, v210.id, noKey.id]),
+    );
+    expect(staleJob.job.trackIds).not.toContain(fresh.id);
   });
 
   it("stores bpmHint on a rejected in-range analysis and keeps published 176 over free 175", async () => {

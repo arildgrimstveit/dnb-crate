@@ -2,6 +2,8 @@
 export type CliWorkerNeed = "none" | "enqueue" | "process";
 
 const JOB_COMMANDS = new Set([
+  "mix:create",
+  "mix:resume",
   "analysis:start",
   "analysis:run",
   "enrich:run",

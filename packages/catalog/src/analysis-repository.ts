@@ -113,8 +113,43 @@ export type TrackEvidenceSelection = {
   reason: string | null;
 };
 
+export type AnalysisStage = {
+  state: "pending" | "running" | "succeeded" | "failed" | "skipped";
+  fingerprint: string;
+  identity: string;
+  reason: string | null;
+  analyzedAt: string;
+};
+
 export class AnalysisRepository {
   constructor(private readonly db: SqliteDatabase) {}
+
+  getStage(trackId: string, stage: "key" | "dsp"): AnalysisStage | null {
+    const row = this.db
+      .prepare(
+        "SELECT state, fingerprint, identity, reason, analyzed_at AS analyzedAt FROM analysis_stages WHERE track_id = ? AND stage = ?",
+      )
+      .get(trackId, stage);
+    return (row as AnalysisStage | undefined) ?? null;
+  }
+
+  setStage(trackId: string, stage: "key" | "dsp", value: Omit<AnalysisStage, "analyzedAt">): void {
+    this.db
+      .prepare(
+        `INSERT INTO analysis_stages VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(track_id, stage) DO UPDATE SET state=excluded.state, fingerprint=excluded.fingerprint,
+      identity=excluded.identity, reason=excluded.reason, analyzed_at=excluded.analyzed_at`,
+      )
+      .run(
+        trackId,
+        stage,
+        value.state,
+        value.fingerprint,
+        value.identity,
+        value.reason,
+        new Date().toISOString(),
+      );
+  }
 
   listByTrackId(trackId: string): StoredTrackAnalysis[] {
     const rows = this.db
@@ -225,7 +260,26 @@ export class AnalysisRepository {
   findKeyAnalysis(trackId: string): StoredTrackAnalysis | null {
     const selected = this.getSelection(trackId)?.keyEngine;
     if (selected) {
-      return this.findByTrackId(trackId, selected);
+      const row = this.findByTrackId(trackId, selected);
+      if (selected === "keyfinder" && row) {
+        const stage = this.getStage(trackId, "key");
+        const track = this.db
+          .prepare("SELECT file_fingerprint FROM tracks WHERE id=?")
+          .get(trackId) as { file_fingerprint: string } | undefined;
+        if (
+          stage &&
+          (stage.state !== "succeeded" || stage.fingerprint !== track?.file_fingerprint)
+        ) {
+          return {
+            ...row,
+            musicalKey: null,
+            keyConfidence: null,
+            camelotKey: null,
+            keyCandidates: null,
+          };
+        }
+      }
+      return row;
     }
     return this.findByTrackId(trackId);
   }

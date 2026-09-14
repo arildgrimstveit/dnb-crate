@@ -15,6 +15,10 @@ import { migration013HourFeedback } from "./migrations/013_hour_feedback.ts";
 import { migration014HourFeedbackHistory } from "./migrations/014_hour_feedback_history.ts";
 import { migration015WorkerOwner } from "./migrations/015_worker_owner.ts";
 
+import { migration016AnalysisStages } from "./migrations/016_analysis_stages.ts";
+
+import { migration017MixWorkflows } from "./migrations/017_mix_workflows.ts";
+
 export type Migration = {
   id: number;
   name: string;
@@ -38,6 +42,8 @@ const MIGRATIONS: Migration[] = [
   migration013HourFeedback,
   migration014HourFeedbackHistory,
   migration015WorkerOwner,
+  migration016AnalysisStages,
+  migration017MixWorkflows,
 ];
 
 export function runMigrations(db: SqliteDatabase): void {

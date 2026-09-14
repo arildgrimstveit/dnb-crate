@@ -10,7 +10,7 @@ Canonical BPM/key order: **manual > published > analyzed > tag**. A general libr
 | --------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `dnb-crate-dsp` | The only `analysis:run` / `start_track_analysis` engine. Onsets, tempogram, beat grid, downbeats, sections, descriptors. |
 
-KeyFinder is a script (`tools/scripts/fill-crate-keys-and-bpm.mts`, `promote-keyfinder.mts`), not an analysis engine. Older catalogs may still have `dnb-crate-envelope` rows or `gridSource: "sidecar"`; those are read so existing plans keep working, and they are not written again.
+KeyFinder runs as an internal key stage during ordinary analysis and stores a separate evidence row; it is not a public rhythm engine. Older catalogs may still have `dnb-crate-envelope` rows or `gridSource: "sidecar"`; those are read so existing plans keep working, and they are not written again.
 
 Planning, previews, rendering and reports resolve rhythm, structure and key independently from
 `track_evidence_selection`. Rhythm supplies BPM and the beat grid; structure supplies sections and
@@ -32,7 +32,7 @@ Descriptors (`energy`, `danceability`, `acousticness`, `melodicness`, `valence`)
 - Analyzed keys write only when `keyConfidence ≥ 0.5`.
 - KeyFinder is the local key route. DSP chroma stays unused.
 - Unknown is not compatible for harmonic scoring.
-- Optional: `tools/scripts/fill-crate-keys-and-bpm.mts` measures missing KeyFinder rows and promotes them.
+- `analysis:run --scope stale --wait` measures missing/stale KeyFinder evidence and promotes it when no conflicting explicit evidence choice exists. The maintenance scripts are retired.
 
 ## Sections and cues
 
@@ -46,10 +46,14 @@ pnpm cli analysis:get --track-id UUID
 pnpm cli analysis:report
 ```
 
-| Scope           | Selects                                                               |
-| --------------- | --------------------------------------------------------------------- |
-| `ids`           | Explicit `trackIds`                                                   |
-| `unanalyzed`    | Incomplete analysis, file present                                     |
-| `stale`         | Missing DSP row, old analyzer version, failed, or reference BPM drift |
-| `planningReady` | Tracks that already pass readiness                                    |
-| `all`           | Every non-missing file                                                |
+| Scope           | Selects                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------- |
+| `ids`           | Explicit `trackIds`                                                                                |
+| `unanalyzed`    | Incomplete analysis, file present                                                                  |
+| `stale`         | Missing DSP row, old analyzer version, failed, reference BPM drift, or missing/stale automatic key |
+| `planningReady` | Tracks that already pass readiness                                                                 |
+| `all`           | Every non-missing file                                                                             |
+
+## Automatic KeyFinder stage
+
+Ordinary analysis includes separately persisted key work by default. Use `analysis.keyAnalysis: "off"` to disable it, and `keyfinderPath` / `DNB_CRATE_KEYFINDER_PATH` to select an executable. KeyFinder remains internal: the public rhythm-engine enum still contains only `dnb-crate-dsp`. `analysis:run --scope stale --wait` replaces the key maintenance scripts. Job `keyStages` distinguish key failures/skips from successful DSP work. The fixed recognized-key confidence is a 0.7 heuristic, not measured probability. See [first-mix configuration, freshness, recovery and native tests](first-mix.md).

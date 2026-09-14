@@ -6,6 +6,7 @@ import {
 } from "@dnb-crate/audio-analysis";
 import {
   DEFAULT_ANALYSIS_ENGINE,
+  DSP_ANALYZER_VERSION,
   DomainError,
   isDomainError,
   MIN_ANALYSIS_CONFIDENCE,
@@ -28,10 +29,15 @@ import type { AnalysisRepository, StoredTrackAnalysis } from "../analysis-reposi
 import { loadPcmForAnalysis } from "./load-pcm.ts";
 import type { TrackRepository } from "../repository.ts";
 
+import { probeKeyEngine, type KeyEngineProbe } from "./key-engine.ts";
+import { KeyAnalysisService } from "./key-service.ts";
+
 export class AnalysisCoordinator {
   canRun: () => boolean = () => true;
   private readonly active = new Set<Promise<void>>();
   private running = 0;
+  private abort = new AbortController();
+  private activeJobId: string | null = null;
   private stopped = false;
   private binaries: FfmpegBinaries | null | undefined;
 
@@ -50,11 +56,19 @@ export class AnalysisCoordinator {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.abort.abort();
     await Promise.all(this.active);
   }
 
   kick(): void {
+    if (this.activeJobId && this.jobs.require(this.activeJobId).status === "cancelled")
+      this.abort.abort();
     this.pump();
+  }
+
+  cancel(id: string): void {
+    this.jobs.cancel(id);
+    if (this.activeJobId === id) this.abort.abort();
   }
 
   start(trackIds: string[]): { job: AnalysisJob } {
@@ -66,7 +80,6 @@ export class AnalysisCoordinator {
       if (!track) {
         throw new DomainError("TRACK_NOT_FOUND", `No track with id ${id}`);
       }
-      this.tracks.setAnalysisStatus(id, "pending");
     }
     const resolved = [DEFAULT_ANALYSIS_ENGINE];
     const job = this.jobs.insertQueued(trackIds, resolved);
@@ -145,6 +158,8 @@ export class AnalysisCoordinator {
       return;
     }
     this.running += 1;
+    this.activeJobId = claimed.id;
+    this.abort = new AbortController();
     const task = this.execute(claimed)
       .catch((error: unknown) => {
         this.logger.error({ err: error, jobId: claimed.id }, "Analysis job crashed");
@@ -152,6 +167,7 @@ export class AnalysisCoordinator {
       .finally(() => {
         this.active.delete(task);
         this.running -= 1;
+        this.activeJobId = null;
         this.pump();
       });
     this.active.add(task);
@@ -162,23 +178,40 @@ export class AnalysisCoordinator {
     const failed: string[] = [];
     const pcmCache = new Map<string, Promise<PcmAudio>>();
     try {
+      this.binaries = undefined;
       const binaries = await this.detect();
+      let keyProbe: KeyEngineProbe = { engine: null, command: null, available: false };
+      if (this.config.analysis?.keyAnalysis !== "off") {
+        try {
+          keyProbe = await probeKeyEngine(this.config, this.runner);
+        } catch (error) {
+          keyProbe.reason =
+            "CONFIG_INVALID: keyfinderPath is not a usable KeyFinder executable. Correct keyfinderPath and retry analysis.";
+          this.logger.warn({ err: error }, "KeyFinder configuration invalid");
+        }
+      }
+      const keys = new KeyAnalysisService(this.config, this.tracks, this.analyses, this.runner);
       const prefetchN = this.config.analysis?.prefetch ?? 1;
       const queueDecode = (trackId: string): void => {
         if (pcmCache.has(trackId)) {
           return;
         }
         const track = this.tracks.findById(trackId);
-        if (!track || track.fileMissing) {
+        if (!track || track.fileMissing || this.dspCurrent(trackId)) {
           return;
         }
-        const decoded = loadPcmForAnalysis(track.filePath, this.runner, binaries);
+        const decoded = loadPcmForAnalysis(
+          track.filePath,
+          this.runner,
+          binaries,
+          this.abort.signal,
+        );
         // Observe failures immediately, but preserve the rejection for this track's turn.
         void decoded.catch(() => undefined);
         pcmCache.set(trackId, decoded);
       };
       for (let i = 0; i < job.trackIds.length; i += 1) {
-        if (this.stopped) {
+        if (this.stopped || this.jobs.require(job.id).status === "cancelled") {
           this.jobs.markFailed(
             job.id,
             {
@@ -198,13 +231,23 @@ export class AnalysisCoordinator {
           }
         }
         try {
-          await this.analyzeTrack(trackId, binaries, pcmCache.get(trackId));
+          if (!this.dspCurrent(trackId)) {
+            await this.analyzeTrack(trackId, binaries, pcmCache.get(trackId));
+            this.analyses.setStage(trackId, "dsp", {
+              state: "succeeded",
+              fingerprint: this.tracks.findById(trackId)!.fileFingerprint,
+              identity: DSP_ANALYZER_VERSION,
+              reason: null,
+            });
+          }
           completed.push(trackId);
         } catch (error) {
           failed.push(trackId);
           this.tracks.setAnalysisStatus(trackId, "failed");
           this.logger.warn({ err: error, trackId }, "Track analysis failed");
         }
+        if (this.tracks.findById(trackId) && !this.abort.signal.aborted)
+          await keys.analyze(trackId, keyProbe, this.abort.signal);
         pcmCache.delete(trackId);
         this.jobs.updateProgress(job.id, (i + 1) / job.trackIds.length, completed, failed);
         if ((i + 1) % 25 === 0) {
@@ -235,6 +278,31 @@ export class AnalysisCoordinator {
     }
   }
 
+  private dspCurrent(trackId: string): boolean {
+    const track = this.tracks.findById(trackId);
+    const stage = this.analyses.getStage(trackId, "dsp");
+    const row = this.analyses.findByTrackId(trackId, "dnb-crate-dsp");
+    if (
+      !track ||
+      !row ||
+      row.analyzerVersion !== DSP_ANALYZER_VERSION ||
+      track.analysisStatus === "pending" ||
+      track.analysisStatus === "failed"
+    )
+      return false;
+    if (
+      (track.bpmSource === "manual" || track.bpmSource === "published") &&
+      track.bpm != null &&
+      (row.referenceBpm == null || Math.abs(row.referenceBpm - track.bpm) > 0.01)
+    )
+      return false;
+    return stage
+      ? stage.state === "succeeded" &&
+          stage.fingerprint === track.fileFingerprint &&
+          stage.identity === DSP_ANALYZER_VERSION
+      : track.analysisStatus === "complete";
+  }
+
   private async analyzeTrack(
     trackId: string,
     binaries: FfmpegBinaries | null,
@@ -247,7 +315,8 @@ export class AnalysisCoordinator {
     if (track.fileMissing) {
       throw new DomainError("AUDIO_FILE_UNAVAILABLE", `${track.title} is marked missing`);
     }
-    const pcm = await (preloaded ?? loadPcmForAnalysis(track.filePath, this.runner, binaries));
+    const pcm = await (preloaded ??
+      loadPcmForAnalysis(track.filePath, this.runner, binaries, this.abort.signal));
     const anchor = this.analyses.getBeatAnchorMs(trackId);
     const referenceBpm =
       track.bpm != null &&
@@ -264,6 +333,8 @@ export class AnalysisCoordinator {
     const loudnessPromise = binaries
       ? this.runner.run({
           executable: binaries.ffmpegPath,
+          timeoutMs: 180_000,
+          abortSignal: this.abort.signal,
           args: [
             "-nostdin",
             "-hide_banner",
@@ -292,8 +363,8 @@ export class AnalysisCoordinator {
     if (preferred) {
       this.tracks.applyAnalyzedMetadata(trackId, {
         bpm: preferred.gridRejected ? null : preferred.bpm,
-        musicalKey: preferred.musicalKey,
-        keyConfidence: preferred.keyConfidence,
+        musicalKey: null,
+        preserveKey: true,
         gridRejected: preferred.gridRejected,
       });
     } else {

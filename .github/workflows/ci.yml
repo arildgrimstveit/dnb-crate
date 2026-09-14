@@ -19,7 +19,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg cmake libfftw3-dev rubberband-cli
+      - name: Build pinned KeyFinder CLI
+        run: |
+          git clone https://github.com/mixxxdj/libkeyfinder.git tools/libkeyfinder
+          git -C tools/libkeyfinder checkout b33b5a88e04a5182dd19c38c57762925631118fd
+          cmake -S tools/keyfinder-wav -B tools/keyfinder-cli/build -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build tools/keyfinder-cli/build --parallel 2
+          cp tools/keyfinder-cli/build/keyfinder-cli tools/keyfinder-cli/keyfinder-cli
       - name: Verify FFmpeg
         run: ffmpeg -version && ffprobe -version
       - run: pnpm typecheck
@@ -28,3 +35,4 @@ jobs:
       - run: pnpm test
         env:
           CI: true
+          DNB_CRATE_RUBBERBAND_PATH: /usr/bin/rubberband

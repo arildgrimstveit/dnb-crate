@@ -126,7 +126,16 @@ export type SuggestedCue = {
 
 export type AnalysisJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
+export type KeyStageOutcome = {
+  trackId: string;
+  state: "pending" | "running" | "succeeded" | "failed" | "skipped";
+  fingerprint: string;
+  identity: string;
+  reason: string | null;
+  analyzedAt: string;
+};
 export type AnalysisJob = {
+  keyStages?: KeyStageOutcome[];
   id: string;
   status: AnalysisJobStatus;
   progress: number;

@@ -91,7 +91,10 @@ import {
 } from "./evidence.ts";
 import type { FrozenRenderRequest } from "./render-job-repository.ts";
 
+import type { MixWorkflowCoordinator } from "./mix-workflow.ts";
+
 export class CatalogService {
+  workflows!: MixWorkflowCoordinator;
   constructor(
     private readonly config: AppConfig,
     private readonly repository: TrackRepository,
@@ -255,6 +258,11 @@ export class CatalogService {
         ids.add(id);
       }
     }
+    if (scope === "stale" && this.config.analysis?.keyAnalysis !== "off") {
+      for (const track of this.repository.listAll()) {
+        if (this.needsKeyBackfill(track)) ids.add(track.id);
+      }
+    }
     if (scope === "planningReady" || input.planningReadyOnly === true) {
       for (const row of this.getPlanningReadiness().tracks) {
         if (row.ready) {
@@ -269,6 +277,14 @@ export class CatalogService {
       );
     }
     return this.analysis.start([...ids]);
+  }
+
+  private needsKeyBackfill(track: Track): boolean {
+    if (track.fileMissing || track.keySource === "manual" || track.keySource === "published") {
+      return false;
+    }
+    const stage = this.analyses.getStage(track.id, "key");
+    return stage?.state !== "succeeded" || stage.fingerprint !== track.fileFingerprint;
   }
 
   getAnalysisStatus(analysisJobId?: string): { jobs: AnalysisJob[] } {
@@ -858,7 +874,10 @@ export class CatalogService {
     };
   }
 
-  createSetPlan(input: CreateSetPlanInput): CreateSetPlanResult {
+  createSetPlan(
+    input: CreateSetPlanInput,
+    candidateTrackIds?: ReadonlySet<string>,
+  ): CreateSetPlanResult {
     try {
       const referencePlans = (input.variety?.referencePlanIds ?? []).map(
         (id) => this.requirePlan(id).plan,
@@ -886,7 +905,9 @@ export class CatalogService {
           ),
       );
       const drafted = draftSetPlan(
-        this.repository.listAll(),
+        this.repository
+          .listAll()
+          .filter((track) => !candidateTrackIds || candidateTrackIds.has(track.id)),
         {
           ...input,
           descriptors: resolveDescriptorFilters(
@@ -1031,8 +1052,14 @@ export class CatalogService {
     return this.qualityFor(stored.plan, { validation });
   }
 
+  refreshRenderDependencies(): void {
+    this.renders.resetDependencyCache();
+  }
+
   startSetRender(input: {
     setPlanId: string;
+    workflowJobId?: string;
+    shouldEnqueue?: () => boolean;
     edgeFadeMs?: number;
     allowLowConfidence?: boolean;
     allowExcessiveTempo?: boolean;
@@ -1100,8 +1127,8 @@ export class CatalogService {
     return this.renders.getManifest(renderJobId);
   }
 
-  checkRender(renderJobId: string) {
-    return this.renders.checkRender(renderJobId);
+  checkRender(renderJobId: string, abortSignal?: AbortSignal) {
+    return this.renders.checkRender(renderJobId, abortSignal);
   }
 
   listRenderJobs(limit?: number, cursor?: string, setPlanId?: string) {

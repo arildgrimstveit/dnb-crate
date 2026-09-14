@@ -110,6 +110,7 @@ export type RenderManifestV1 = {
   outputDurationMs: number;
   outputChecksumSha256: string;
   listenRootRelativePath?: string;
+  listenChecksumSha256?: string;
   listenBitDepth?: 16;
   integratedLufs: number | null;
   truePeakDb: number | null;

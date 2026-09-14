@@ -10,11 +10,11 @@ An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server. The same ser
 
 ## Ask for a mix
 
-Talk to the MCP host (Cursor, Codex). Mood or energy plus a length is enough. The host maps that onto `create_set_plan` and can scan, analyze, plan, validate, and render. The planner picks the order and joins; it does not write audio. The renderer prints a gapless **24-bit 48 kHz master** and a **16-bit listen** FLAC named from the plan.
+Talk to the MCP host (Cursor, Codex). Mood or energy plus a length is enough. The host maps that onto `start_mix_workflow` using `create_set_plan` brief fields. The planner picks the order and joins; it does not write audio. The renderer prints a gapless **24-bit 48 kHz master** and a **16-bit listen** FLAC named from the plan.
 
 Say whatever else you care about: preferred moods, subgenres, or artists; how the energy should move; a start or closer by title; a seed; genres to include or exclude; how pretty, danceable, or heavy the tracks should stay. Named titles are resolved with `search_tracks` (your catalog only). If you omit a length, the plan is **60 minutes**. Allowed range is 1 minute–8 hours.
 
-The catalog must already be configured and migrated (`libraryRoots`, `db:migrate`). New or unanalyzed files need `scan_library` / `library:scan` and `start_track_analysis` / `analysis:run` before a full-length plan is likely. A crate that cannot fill the length returns a **partial** plan.
+Configure `libraryRoots`, `databasePath`, and `outputRoot`, then use `mix:create --wait` / `start_mix_workflow` for preflight, scanning, rhythm/key analysis, strict planning, rendering and verification. Migrations run automatically. A crate that cannot satisfy the brief returns an actionable blocker or inspectable partial plan. See [folder to first mix](docs/first-mix.md).
 
 Examples:
 
@@ -62,7 +62,7 @@ pnpm cli plan:create --name "Named closer" --duration-min 60 --end-query "title 
 - A folder of audio you own (`.wav`, `.flac`, `.mp3`, `.m4a`, `.aiff`)
 - FFmpeg and ffprobe on `PATH` (see `docs/rendering.md`)
 - Optional: Rubber Band 4 CLI under `tools/rubberband-cli/` for join-only R3 stretch
-- Optional: KeyFinder CLI under `tools/keyfinder-cli/` for musical keys (DSP chroma keys are unused)
+- KeyFinder CLI for automatic musical keys, under `tools/keyfinder-cli/`, on PATH, or configured with `keyfinderPath` (manual/published keys can be used without it)
 
 ## Setup
 
@@ -73,23 +73,19 @@ copy dnb-crate.config.example.json dnb-crate.config.json
 
 Set `libraryRoots` to your music folder and `outputRoot` to a directory **outside** that folder. Config and `data/` are gitignored. Environment variables: `.env.example`.
 
-Keep the default `supportedExtensions` to include MP3 and M4A. After adding music, run `library:scan` and `analysis:run` below. Scanning reports malformed or unreadable files and continues with readable files. If a file fails, check that it plays locally and that the app can read it; replace or re-export damaged files. Changing the filename extension does not convert audio. DRM-protected downloads cannot be used. If non-WAV analysis reports missing FFmpeg, install FFmpeg/ffprobe or set `ffmpegPath`/`ffprobePath` in the config.
+Keep the default `supportedExtensions` to include MP3 and M4A. Use `pnpm cli mix:create --name "First mix" --duration-min 60 --wait` to scan and prepare the folder automatically. The individual commands below remain available. Scanning reports malformed or unreadable files and continues with readable files. If a file fails, check that it plays locally and that the app can read it; replace or re-export damaged files. Changing the filename extension does not convert audio. DRM-protected downloads cannot be used. If non-WAV analysis reports missing FFmpeg, install FFmpeg/ffprobe or set `ffmpegPath`/`ffprobePath` in the config.
 
 ## Typical flow
 
 ```bash
-pnpm cli db:migrate
-pnpm cli library:scan
-pnpm cli analysis:run --scope unanalyzed --wait --timeout-min 90
-pnpm cli plan:create --brief-json docs/examples/liquid-hour.example.brief.json
-pnpm cli plan:quality --id UUID
-pnpm cli render:start --plan-id UUID --wait
-pnpm cli render:check --id JOB
+pnpm cli mix:create --name "First mix" --duration-min 60 --seed 1 --wait
 ```
+
+That preflights, scans, analyzes rhythm and keys, plans, renders, and checks the master/listen files. Use `--brief-json` for moods, arc, descriptors, and genres. Migrations run on open.
 
 JSON goes to stdout. Diagnostics go to stderr.
 
-Other useful commands: `library:stats`, `track:search`, `analysis:get`, `transition:plan`, `plan:list`, `plan:validate`.
+Individual stage commands remain available (`library:scan`, `analysis:run`, `plan:create`, `render:start`). Other useful commands: `library:stats`, `track:search`, `analysis:get`, `transition:plan`, `plan:list`, `plan:validate`.
 
 ## MCP server (stdio)
 
@@ -126,12 +122,12 @@ Tool contracts: `docs/tool-contracts.md`. Prompt: `build-dnb-set` (see **Ask for
 
 ## How it fits together
 
-| Part         | Job                                                                                                                                                             |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Catalog**  | Scan configured roots. Source files stay read-only.                                                                                                             |
-| **Analyzer** | `dnb-crate-dsp` measures BPM/grid, sections, and loudness. Advisory until confidence clears the floor. KeyFinder is an optional script, not an analysis engine. |
-| **Planner**  | Same catalog + brief + seed → same mix. Picks order and joins; does not write audio.                                                                            |
-| **Renderer** | Prints the plan: beatmatched overlaps, 3-band fades, −14 LUFS, 24-bit master + 16-bit listen FLAC.                                                              |
+| Part         | Job                                                                                                                                                                                          |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Catalog**  | Scan configured roots. Source files stay read-only.                                                                                                                                          |
+| **Analyzer** | `dnb-crate-dsp` measures BPM/grid, sections, and loudness. Advisory until confidence clears the floor. KeyFinder runs as an internal, separately tracked key stage during ordinary analysis. |
+| **Planner**  | Same catalog + brief + seed → same mix. Picks order and joins; does not write audio.                                                                                                         |
+| **Renderer** | Prints the plan: beatmatched overlaps, 3-band fades, −14 LUFS, 24-bit master + 16-bit listen FLAC.                                                                                           |
 
 Docs: [analysis](docs/analysis.md), [scoring](docs/scoring.md), [mixing](docs/mixing.md), [rendering](docs/rendering.md). Example briefs: `docs/examples/liquid-hour.example.brief.json`, `docs/examples/peak-hour.example.brief.json`.
 
@@ -167,7 +163,7 @@ runtimes, so they never recover or claim jobs. Recovery runs only after ownershi
 an exited process or released by a closing runtime. This coordination is for processes on the same
 machine, consistent with the local SQLite catalog.
 
-CLI job commands (`analysis:run`, `enrich:run`, `render:start`, and previews) enqueue only unless
+CLI job commands (`mix:create`, `mix:resume`, `analysis:run`, `enrich:run`, `render:start`, and previews) enqueue only unless
 you pass `--wait`. Enqueue-only exits immediately and requires a live worker such as `pnpm mcp`.
 `--wait` and `analysis:gate` start a worker in the CLI process and keep it until those jobs finish.
 Do not submit work and then shut down the only worker that claimed it.

@@ -137,6 +137,10 @@ export const renderManifestV1Schema = z.object({
   outputDurationMs: z.number().int(),
   outputChecksumSha256: z.string(),
   listenRootRelativePath: z.string().optional(),
+  listenChecksumSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   listenBitDepth: z.literal(16).optional(),
   integratedLufs: z.number().nullable(),
   truePeakDb: z.number().nullable(),

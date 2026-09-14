@@ -71,6 +71,11 @@ describe("MCP tool handlers", () => {
     expect(names).toEqual(
       [
         "cancel_render_job",
+        "cancel_mix_workflow",
+        "resume_mix_workflow",
+        "start_mix_workflow",
+        "get_mix_workflow",
+        "get_mix_preflight",
         "compare_track_analyses",
         "create_cue_preview",
         "create_set_plan",

@@ -212,4 +212,14 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## Prompt
 
-- `build-dnb-set` argument `request`: natural-language brief → structured `create_set_plan`, then optional preview/render
+- `build-dnb-set` argument `request`: natural-language brief → `start_mix_workflow`, then poll until verified or blocked
+
+## First-mix workflows
+
+- `start_mix_workflow`: `{requestToken, brief}`. The brief uses `create_set_plan` fields and requires strict quality. Starts asynchronously and returns a persisted workflow. Reusing a token with a different brief fails.
+- `get_mix_workflow`: `{id}`. Returns status/stage, stage-local progress, immutable brief, effective settings, dependency identities, candidate fingerprints, analysis IDs, plan ID, render attempt IDs, structured issues and final master/listen references.
+- `resume_mix_workflow`: `{id}`. Reuses completed valid work and child jobs. Never silently replaces an existing plan.
+- `cancel_mix_workflow`: `{id}`. Stops further scheduling and cancels exclusively owned children.
+- `get_mix_preflight`: `{}`. Checks configured roots, output access and native prerequisites. Conditional Rubber Band requirements are checked against the actual plan.
+
+Every issue has `code`, `severity`, `stage`, `retryable`, `message`, and `nextAction`; affected IDs/counts are included where known. New workflow results use logical IDs and output-root-relative references, without exposing configured absolute paths. `succeeded` requires both verified deliverables. Analysis jobs include optional `keyStages`; a successful batch can still contain key-stage failures. See [first-mix onboarding](first-mix.md) for CLI equivalents and recovery semantics.

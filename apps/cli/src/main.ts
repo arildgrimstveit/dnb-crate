@@ -45,6 +45,12 @@ function usage(): string {
   return `Usage: ${APP_NAME} <command>
 
 Commands:
+  mix:create --brief-json FILE [--request-token TOKEN] [--wait]
+  mix:create --name TEXT [--duration-min N | --duration-ms N] [--seed N] [--wait]
+  mix:status --id UUID
+  mix:resume --id UUID [--wait]
+  mix:cancel --id UUID
+  mix:preflight
   db:migrate              Apply catalog migrations
   library:scan [--dry-run]
   library:stats
@@ -105,6 +111,62 @@ async function main(): Promise<void> {
       throw new Error(NO_WORKER_MESSAGE);
     }
     switch (command) {
+      case "mix:preflight": {
+        printJson({ ok: true, data: await runtime.workflows.preflight.check() });
+        break;
+      }
+      case "mix:create":
+      case "mix:resume":
+      case "mix:status":
+      case "mix:cancel": {
+        const id = option(args, "--id");
+        if (command !== "mix:create" && !id) throw new Error(`${command} requires --id`);
+        let workflow: ReturnType<typeof runtime.workflows.get>;
+        if (command === "mix:create") {
+          const briefPath = option(args, "--brief-json");
+          const numberOption = (name: string) =>
+            option(args, name) === undefined ? undefined : Number(option(args, name));
+          const brief = createSetPlanInputSchema.parse(
+            briefPath
+              ? JSON.parse(readFileSync(briefPath, "utf8"))
+              : {
+                  name: option(args, "--name"),
+                  targetDurationMinutes: numberOption("--duration-min"),
+                  targetDurationMs: numberOption("--duration-ms"),
+                  seed: numberOption("--seed"),
+                },
+          );
+          workflow = runtime.workflows.start({
+            brief,
+            requestToken: option(args, "--request-token") ?? crypto.randomUUID(),
+          });
+        } else if (command === "mix:resume") workflow = await runtime.workflows.resume(id!);
+        else if (command === "mix:cancel") workflow = runtime.workflows.cancel(id!);
+        else workflow = runtime.workflows.get(id!);
+        if (flag(args, "--wait") && (command === "mix:create" || command === "mix:resume")) {
+          process.stderr.write(`Mix workflow ${workflow.id} started.\n`);
+          let last = "";
+          const progress = setInterval(() => {
+            const current = runtime.workflows.get(workflow.id);
+            const message = `${current.stage}${current.progress ? ` ${current.progress.completed}/${current.progress.total}` : ""}`;
+            if (message !== last) {
+              process.stderr.write(`${message}\n`);
+              last = message;
+            }
+          }, 1000);
+          try {
+            workflow = await runtime.workflows.wait(workflow.id);
+          } finally {
+            clearInterval(progress);
+          }
+        }
+        printJson({
+          ok: workflow.status !== "failed" && workflow.status !== "blocked",
+          data: workflow,
+        });
+        if (workflow.status === "failed" || workflow.status === "blocked") process.exitCode = 1;
+        break;
+      }
       case "db:migrate":
         printJson({ ok: true, databasePath: "[configured]" });
         break;

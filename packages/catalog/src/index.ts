@@ -23,6 +23,9 @@ import { CatalogService } from "./service.ts";
 import { RenderJobRepository } from "./render-job-repository.ts";
 import { RenderCoordinator } from "./render/coordinator.ts";
 import { SetPlanRepository } from "./set-plan-repository.ts";
+import { MixWorkflowCoordinator } from "./mix-workflow.ts";
+import { MixWorkflowRepository } from "./mix-workflow-repository.ts";
+import { PreflightService } from "./preflight.ts";
 import { WorkerOwner } from "./worker-owner.ts";
 export { hasLiveWorker, WorkerOwner } from "./worker-owner.ts";
 export {
@@ -59,6 +62,7 @@ export function createCatalogRuntime(
   setPlans: SetPlanRepository;
   analyses: AnalysisRepository;
   analysisJobs: AnalysisJobRepository;
+  workflows: MixWorkflowCoordinator;
   close: () => Promise<void>;
 } {
   const db = openDatabase(config.databasePath);
@@ -86,6 +90,7 @@ export function createCatalogRuntime(
         ? null
         : resolveRubberbandCli(config.rubberbandPath),
   );
+  renders.refreshNativeDependencies = !options.processRunner && !options.useFakeFfmpeg;
   const analysis = new AnalysisCoordinator(
     config,
     repository,
@@ -131,6 +136,19 @@ export function createCatalogRuntime(
     logger,
     new HourFeedbackRepository(db),
   );
+  const workflows = new MixWorkflowCoordinator(
+    config,
+    new MixWorkflowRepository(db),
+    service,
+    repository,
+    analyses,
+    analysisJobs,
+    analysis,
+    renderJobs,
+    new PreflightService(config, runner),
+  );
+  workflows.canRun = canRun;
+  service.workflows = workflows;
   renders.validateFullPlan = (plan, options) => service.assertPlanReadyForRender(plan, options);
   const pump = () => {
     if (!ownsWorker) {
@@ -140,6 +158,7 @@ export function createCatalogRuntime(
       analysis.recoverInterrupted();
       enrichment.recoverInterrupted();
     }
+    workflows.kick();
     renders.kick();
     analysis.kick();
     enrichment.kick();
@@ -165,10 +184,16 @@ export function createCatalogRuntime(
     setPlans,
     analyses,
     analysisJobs,
+    workflows,
     close: () => {
       if (closing) return closing;
       clearInterval(timer);
-      closing = Promise.all([renders.stop(), analysis.stop(), enrichment.stop()]).then(() => {
+      closing = Promise.all([
+        workflows.stop(),
+        renders.stop(),
+        analysis.stop(),
+        enrichment.stop(),
+      ]).then(() => {
         owner.release();
         ownsWorker = false;
         db.close();
@@ -214,5 +239,10 @@ export {
 } from "./enrichment/http-client.ts";
 export { RateLimiter } from "./enrichment/rate-limiter.ts";
 export { pickBestMatch, scoreMatch } from "./enrichment/matcher.ts";
-export { buildSineWav, writeSineWav, type WavFixtureOptions } from "./wav-fixture.ts";
+export {
+  buildDnbFixtureWav,
+  buildSineWav,
+  writeSineWav,
+  type WavFixtureOptions,
+} from "./wav-fixture.ts";
 export { buildClickTrackPcm, encodeMonoWav } from "@dnb-crate/audio-analysis";
