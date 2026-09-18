@@ -17,6 +17,7 @@ import { DEFAULT_SUPPORTED_EXTENSIONS, type SetPlanV1 } from "@dnb-crate/domain"
 
 import { createCatalogRuntime } from "../src/index.ts";
 import { loadPcmForAnalysis } from "../src/analysis/load-pcm.ts";
+import { extractAudioMetadata } from "../src/metadata.ts";
 
 const runner = createNodeProcessRunner();
 const durationMs = 12_000;
@@ -53,7 +54,7 @@ function peakMs(pcm: PcmAudio, expectedMs: number): number {
   return (peak * 1000) / pcm.sampleRateHz;
 }
 
-describe("real compressed audio integration (requires FFmpeg and libmp3lame)", () => {
+describe("real compressed audio integration (requires FFmpeg, libmp3lame, libvorbis and libopus)", () => {
   beforeAll(async () => {
     binaries = requireFfmpeg(
       await detectFfmpeg(runner, { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" }),
@@ -71,6 +72,9 @@ describe("real compressed audio integration (requires FFmpeg and libmp3lame)", (
       ["vbr", "mp3", ["-c:a", "libmp3lame", "-q:a", "2"]],
       ["aac", "m4a", ["-c:a", "aac", "-b:a", "192k"]],
       ["flac", "flac", ["-c:a", "flac"]],
+      ["vorbis", "ogg", ["-c:a", "libvorbis", "-q:a", "5"]],
+      ["oga", "oga", ["-c:a", "libvorbis", "-q:a", "5"]],
+      ["opus", "opus", ["-c:a", "libopus", "-b:a", "128k"]],
     ] as const) {
       files[name] = path.join(library, `${name}.${extension}`);
       await ffmpeg([
@@ -81,6 +85,9 @@ describe("real compressed audio integration (requires FFmpeg and libmp3lame)", (
         `title=${name}`,
         "-metadata",
         "artist=Codec fixture",
+        ...(["vorbis", "oga", "opus"].includes(name)
+          ? ["-metadata", "BPM=174", "-metadata", `${name === "oga" ? "KEY" : "INITIALKEY"}=F#m`]
+          : []),
         files[name],
       ]);
     }
@@ -112,7 +119,7 @@ describe("real compressed audio integration (requires FFmpeg and libmp3lame)", (
     if (root) await rm(root, { recursive: true, force: true });
   });
 
-  it("scans tags, analyzes real CBR/VBR MP3s and renders a mixed-format catalog set", async () => {
+  it("scans tags, analyzes compressed audio, previews Ogg and renders a mixed-format catalog set", async () => {
     catalog = createCatalogRuntime(
       {
         databasePath: path.join(root, "catalog.sqlite"),
@@ -125,18 +132,20 @@ describe("real compressed audio integration (requires FFmpeg and libmp3lame)", (
       { rubberbandCliPath: null },
     );
     await writeFile(path.join(library, "broken.mp3"), "This is not audio");
+    await writeFile(path.join(library, "broken.ogg"), "This is not audio");
     const hash = async (file: string) =>
       createHash("sha256")
         .update(await readFile(file))
         .digest("hex");
     const before = await Promise.all(Object.values(files).map(hash));
     const scan = await catalog.service.scanLibrary();
-    expect(scan.result.upserted).toBe(5);
-    expect(scan.result.skippedMalformed).toBe(1);
+    expect(scan.result.upserted).toBe(8);
+    expect(scan.result.skippedMalformed).toBe(2);
     expect(scan.warnings.join(" ")).toContain("broken.mp3");
+    expect(scan.warnings.join(" ")).toContain("broken.ogg");
     expect(scan.warnings.join(" ")).toContain("replace or re-export");
     const tracks = catalog.service.searchTracks({ limit: 20 }).tracks;
-    for (const name of ["cbr", "vbr", "aac", "flac"]) {
+    for (const name of ["cbr", "vbr", "aac", "flac", "vorbis", "oga", "opus"]) {
       expect(tracks.find((track) => track.title === name)?.artist).toBe("Codec fixture");
     }
     const started = catalog.service.startTrackAnalysis({
@@ -150,12 +159,36 @@ describe("real compressed audio integration (requires FFmpeg and libmp3lame)", (
       expect(Math.abs((analysis.bpm ?? 0) - 174)).toBeLessThan(1);
       expect(analysis.suggestedCues.length).toBeGreaterThan(0);
     }
+    for (const name of ["vorbis", "oga", "opus"]) {
+      expect(await extractAudioMetadata(files[name]!)).toMatchObject({
+        title: name,
+        artist: "Codec fixture",
+        bpm: 174,
+        bpmSource: "tag",
+        musicalKey: "F#m",
+        camelotKey: "11A",
+        keySource: "tag",
+      });
+      const track = tracks.find((item) => item.title === name)!;
+      const preview = await catalog.service.createCuePreview({
+        trackId: track.id,
+        cue: "intro_start",
+        windowMs: 2000,
+      });
+      const pcm = await loadPcmForAnalysis(
+        path.join(root, "output", preview.outputRelpath),
+        runner,
+        binaries,
+      );
+      expect(Math.abs(pcm.durationMs - 2000)).toBeLessThan(2);
+    }
+    const setDurationMs = (tracks.length - 1) * 11_000 + durationMs;
     const now = new Date().toISOString();
     const plan: SetPlanV1 = {
       schemaVersion: 1,
       id: randomUUID(),
       name: "Mixed format fixture",
-      targetDurationMs: 56_000,
+      targetDurationMs: setDurationMs,
       targetBpm: 174,
       requestedArc: [
         { atFraction: 0, targetEnergy: 3 },
@@ -200,13 +233,13 @@ describe("real compressed audio integration (requires FFmpeg and libmp3lame)", (
       runner,
       binaries,
     );
-    expect(Math.abs(master.durationMs - 56_000)).toBeLessThan(5);
+    expect(Math.abs(master.durationMs - setDurationMs)).toBeLessThan(5);
     expect(done.listenRootRelativePath).toBeTruthy();
     expect(await Promise.all(Object.values(files).map(hash))).toEqual(before);
   }, 120_000);
 
-  it.each(["cbr", "vbr"])(
-    "keeps %s MP3 analysis, nonzero cues and transition landmarks on the WAV timeline",
+  it.each(["cbr", "vbr", "vorbis", "oga", "opus"])(
+    "keeps %s analysis, nonzero cues and transition landmarks on the WAV timeline",
     async (name) => {
       const reference = await loadPcmForAnalysis(files.wav!, runner, binaries);
       const decoded = await loadPcmForAnalysis(files[name]!, runner, binaries);
@@ -263,14 +296,17 @@ describe("real compressed audio integration (requires FFmpeg and libmp3lame)", (
     60_000,
   );
 
-  it("reports an actionable decode error for an unreadable MP3", async () => {
-    const broken = path.join(root, "unreadable.mp3");
-    await writeFile(broken, "not an MP3");
-    await expect(loadPcmForAnalysis(broken, runner, binaries)).rejects.toThrow(
-      "Cannot decode audio for analysis: unreadable.mp3",
-    );
-    await expect(loadPcmForAnalysis(broken, runner, binaries)).rejects.toThrow(
-      "replace or re-export",
-    );
-  });
+  it.each(["mp3", "ogg", "oga", "opus"])(
+    "reports an actionable decode error for unreadable %s",
+    async (extension) => {
+      const broken = path.join(root, `unreadable.${extension}`);
+      await writeFile(broken, "not audio");
+      await expect(loadPcmForAnalysis(broken, runner, binaries)).rejects.toThrow(
+        `Cannot decode audio for analysis: unreadable.${extension}`,
+      );
+      await expect(loadPcmForAnalysis(broken, runner, binaries)).rejects.toThrow(
+        "replace or re-export",
+      );
+    },
+  );
 });

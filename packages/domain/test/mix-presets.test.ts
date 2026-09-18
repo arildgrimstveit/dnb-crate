@@ -254,6 +254,27 @@ describe("mix presets", () => {
     expect(isMonotoneBand(thirtyTwo)).toBe(true);
   });
 
+  it("glides bass-swap lows over bars instead of dumping them", () => {
+    const events = expandPreset("bass_swap", { lowFadeBars: 12, swapAtBar: 16 }, 32, BAR_MS);
+    const outLow = events.filter((ev) => ev.target === "outgoing_low");
+    expect(outLow).toHaveLength(1);
+    expect(outLow[0]?.atBar).toBe(16);
+    expect(outLow[0]?.durationBars).toBe(12);
+    expect(outLow[0]?.fromDb).toBe(0);
+    expect(outLow[0]?.toDb).toBeNull();
+    const inLow = events.filter((ev) => ev.target === "incoming_low");
+    expect(inLow).toHaveLength(1);
+    expect(inLow[0]?.atBar).toBe(16);
+    expect(inLow[0]?.durationBars).toBe(12);
+    expect(isMonotoneBand(events)).toBe(true);
+  });
+
+  it("drops an invalid lowFadeBars rather than inventing one", () => {
+    const clamped = clampMixPresetParams({ lowFadeBars: 7 } as never, 32);
+    expect("lowFadeBars" in clamped).toBe(false);
+    expect(clampMixPresetParams({ lowFadeBars: 12 }, 32).lowFadeBars).toBe(12);
+  });
+
   it("clamps invalid preset params", () => {
     const clamped = clampMixPresetParams(
       {

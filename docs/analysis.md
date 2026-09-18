@@ -6,9 +6,9 @@ Canonical BPM/key order: **manual > published > analyzed > tag**. A general libr
 
 ## Engines
 
-| Engine          | Role                                                                                                                     |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `dnb-crate-dsp` | The only `analysis:run` / `start_track_analysis` engine. Onsets, tempogram, beat grid, downbeats, sections, descriptors. |
+| Engine          | Role                                                                                                                                                                       |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dnb-crate-dsp` | The only `analysis:run` / `start_track_analysis` engine. Onsets, tempogram, beat grid, downbeats, sections, descriptors, per-beat kick/snare profiles for join onset-lock. |
 
 KeyFinder runs as an internal key stage during ordinary analysis and stores a separate evidence row; it is not a public rhythm engine. Older catalogs may still have `dnb-crate-envelope` rows or `gridSource: "sidecar"`; those are read so existing plans keep working, and they are not written again.
 

@@ -189,6 +189,9 @@ export const sonicDescriptorsSchema = z.object({
       sub: z.array(z.number()),
       midFlux: z.array(z.number()),
       onsetDensity: z.array(z.number()),
+      beatKick: z.array(z.number()).optional(),
+      beatSnare: z.array(z.number()).optional(),
+      beatOnset: z.array(z.number()).optional(),
     })
     .nullable()
     .optional(),

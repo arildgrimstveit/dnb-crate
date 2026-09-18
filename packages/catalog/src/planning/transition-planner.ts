@@ -1,6 +1,7 @@
 import {
   DEFAULT_BASS_CROSSOVER_HZ,
   DEFAULT_PHRASE_BARS,
+  MAX_TEMPO_DEVIATION,
   MIN_ANALYSIS_CONFIDENCE,
   assertPlaybackRate,
   clampMixPresetParams,
@@ -102,6 +103,8 @@ function propose(
     allowLowConfidence?: boolean;
     preferredType?: PlanTransitionInput["preferredType"];
     allowDropIn?: boolean;
+    /** Explicit window cap. Null follows the planner's window policy. */
+    maxBars?: 8 | 16 | 32 | null;
   },
 ): TransitionProposal {
   const reasons: string[] = [];
@@ -137,6 +140,7 @@ function propose(
       : chooseTransition(outTl, inTl, {
           dropAnchored: true,
           chainTargetBpm: targetBpm,
+          ...(options.maxBars ? { maxBars: options.maxBars } : {}),
         });
   if (
     shared &&
@@ -157,7 +161,7 @@ function propose(
           targetBpm,
           outgoingRate,
           incomingRate,
-          ...(barCount ? { maxBars: barCount } : {}),
+          ...(options.maxBars ? { maxBars: options.maxBars } : {}),
         }));
   const resolvedBars = window?.barCount ?? barCount ?? DEFAULT_PHRASE_BARS;
   const durationMs =
@@ -310,6 +314,9 @@ export function planTransition(
     allowLowConfidence: input.allowLowConfidence,
     preferredType: input.preferredType,
     allowDropIn: input.allowDropIn,
+    // Only an explicit request caps the window; the default follows the same
+    // window policy as set-plan joins so the two paths stay consistent.
+    maxBars: input.barCount ?? null,
   };
   const energyUp = (incoming.track.energy ?? 0) > (outgoing.track.energy ?? 0);
   const bothHot = (outgoing.track.energy ?? 0) >= 7 && (incoming.track.energy ?? 0) >= 7;
@@ -394,6 +401,43 @@ export function validateTransition(
         code: "PLAYBACK_RATE_OUT_OF_RANGE",
         message: error instanceof Error ? error.message : "Incoming playback rate invalid",
       });
+    }
+  }
+  // Joint check: individually valid rates can still leave the decks on different
+  // tempos (e.g. 1.02 vs 0.98 on two 174 BPM grids ≈ 177.5 vs 170.5 BPM output).
+  if (!input.allowExcessiveTempo && match.type !== "crossfade") {
+    const outCanon = resolveCanonicalBpm(outgoing.track, outgoing.analysis);
+    const inCanon = resolveCanonicalBpm(incoming.track, incoming.analysis);
+    const outGrid =
+      outgoing.analysis && !outgoing.analysis.gridRejected ? outgoing.analysis.bpm : null;
+    const inGrid =
+      incoming.analysis && !incoming.analysis.gridRejected ? incoming.analysis.bpm : null;
+    const outSource = sourceBpmForRate(outGrid, outCanon.bpm);
+    const inSource = sourceBpmForRate(inGrid, inCanon.bpm);
+    const effOutRate = input.outgoingPlaybackRate ?? match.outgoingPlaybackRate;
+    const effInRate = input.incomingPlaybackRate ?? match.incomingPlaybackRate;
+    if (
+      outSource != null &&
+      inSource != null &&
+      Number.isFinite(effOutRate) &&
+      Number.isFinite(effInRate) &&
+      effOutRate > 0 &&
+      effInRate > 0
+    ) {
+      const outTempo = outSource * effOutRate;
+      const inTempo = inSource * effInRate;
+      const reference = planned.targetBpm ?? (outTempo + inTempo) / 2;
+      const deviation = Math.abs(outTempo - inTempo) / (reference > 0 ? reference : 1);
+      const maxDeviation = input.maxTempoDeviation ?? MAX_TEMPO_DEVIATION;
+      if (deviation > maxDeviation + 1e-9) {
+        errors.push({
+          code: "TEMPO_MISMATCH",
+          message:
+            `Outgoing plays at ${outTempo.toFixed(2)} BPM but incoming plays at ` +
+            `${inTempo.toFixed(2)} BPM (relative drift ${(deviation * 100).toFixed(2)}% ` +
+            `exceeds ±${(maxDeviation * 100).toFixed(1)}%).`,
+        });
+      }
     }
   }
   if (input.durationMs !== undefined && match.barCount && planned.targetBpm) {

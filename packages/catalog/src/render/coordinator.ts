@@ -135,6 +135,7 @@ export type RenderCheckJoin = {
   downbeatOffsetMs: number | null;
   alignmentPeriodMs: number | null;
   alignmentMode: "bar" | "beat" | "phrase" | null;
+  onsetLockBeats: number | null;
   windowInSilence: boolean;
   overlapAtMs: number | null;
 };
@@ -172,6 +173,7 @@ export type PreparedSegment = MixSegment & {
   downbeatOffsetMs: number | null;
   alignmentPeriodMs: number | null;
   alignmentMode: "bar" | "beat" | "phrase" | null;
+  onsetLockBeats: number | null;
   downbeatConfidence: number | null;
   mixParams: Partial<MixPresetParams> | null;
   mixOutMs: number | null;
@@ -628,11 +630,14 @@ export class RenderCoordinator {
       const audioEnd = evidence?.outgoingAudioEndMs ?? null;
       const overlap = outgoing.overlapToNextMs ?? 0;
       const windowInSilence = audioEnd !== null && outgoing.sourceEndMs > audioEnd + 250;
+      // Join i's alignment lives on the outgoing manifest track (same convention
+      // as mixOutMs/mixInMs/barCount): toManifestTrack stores it there via the
+      // next segment. Reading the incoming track would attribute join i+1.
       const alignmentMode =
-        incoming.alignmentMode === "bar" ||
-        incoming.alignmentMode === "beat" ||
-        incoming.alignmentMode === "phrase"
-          ? incoming.alignmentMode
+        outgoing.alignmentMode === "bar" ||
+        outgoing.alignmentMode === "beat" ||
+        outgoing.alignmentMode === "phrase"
+          ? outgoing.alignmentMode
           : null;
       const prevOverlap = i > 0 ? (manifest.tracks[i - 1]!.overlapToNextMs ?? 0) : 0;
       const outgoingPlayable = analyzerVersionLessThan(manifest.rendererVersion, "6.10.0")
@@ -658,8 +663,9 @@ export class RenderCoordinator {
         incoming.sourceStartMs,
         outgoing.playbackRate,
         incoming.playbackRate,
-        incoming.downbeatOffsetMs,
-        incoming.alignmentPeriodMs ?? null,
+        outgoing.downbeatOffsetMs,
+        outgoing.alignmentPeriodMs ?? null,
+        outgoing.onsetLockBeats ?? null,
       );
       const tailEnergy = evidence?.outgoingTailEnergy ?? 0;
       const headEnergy = evidence?.incomingHeadEnergy ?? 0;
@@ -708,9 +714,10 @@ export class RenderCoordinator {
         lowOverlapSec,
         outgoingRate: outgoing.playbackRate,
         incomingRate: incoming.playbackRate,
-        downbeatOffsetMs: incoming.downbeatOffsetMs,
-        alignmentPeriodMs: incoming.alignmentPeriodMs ?? null,
+        downbeatOffsetMs: outgoing.downbeatOffsetMs,
+        alignmentPeriodMs: outgoing.alignmentPeriodMs ?? null,
         alignmentMode,
+        onsetLockBeats: outgoing.onsetLockBeats ?? null,
         windowInSilence,
         overlapAtMs,
       });
@@ -1024,6 +1031,10 @@ export class RenderCoordinator {
           recipe?.parameters.alignmentMode === "phrase"
             ? recipe.parameters.alignmentMode
             : aligned.mode;
+        incoming.onsetLockBeats =
+          typeof recipe?.parameters.onsetLockBeats === "number"
+            ? recipe.parameters.onsetLockBeats
+            : null;
         if (recipe?.parameters.recipeVersion === 1) {
           continue;
         }
@@ -1515,6 +1526,7 @@ export class RenderCoordinator {
       downbeatOffsetMs: 0,
       alignmentPeriodMs: null,
       alignmentMode: null,
+      onsetLockBeats: null,
       downbeatConfidence: analysis?.downbeatConfidence ?? null,
       mixParams: mixParamsFromEntry(entry),
       mixOutMs: paramNumber(entry.transitionToNext?.parameters, "mixOutMs"),
@@ -1720,6 +1732,9 @@ function toManifestTrack(
     downbeatOffsetMs: incoming?.downbeatOffsetMs ?? segment.downbeatOffsetMs,
     alignmentPeriodMs: incoming?.alignmentPeriodMs ?? segment.alignmentPeriodMs,
     alignmentMode: incoming?.alignmentMode ?? segment.alignmentMode,
+    // Null is a real value here (lock stayed out); falling back to the
+    // segment's own field would attribute the previous join's slip.
+    onsetLockBeats: incoming?.onsetLockBeats ?? null,
     barCount: segment.mixParams?.barCount ?? mix?.barCount ?? null,
     phraseShape: segment.mixParams?.phraseShape ?? null,
     sequentialHandoff: segment.mixParams?.sequentialHandoff ?? "legacy",
@@ -1783,6 +1798,13 @@ function mixParamsFromEntry(entry: SetPlanEntry): Partial<MixPresetParams> | nul
     raw.landingIncomingFadeBars === 16 ||
     raw.landingIncomingFadeBars === 32
       ? { landingIncomingFadeBars: raw.landingIncomingFadeBars }
+      : {}),
+    ...(raw.lowFadeBars === 2 ||
+    raw.lowFadeBars === 4 ||
+    raw.lowFadeBars === 8 ||
+    raw.lowFadeBars === 12 ||
+    raw.lowFadeBars === 16
+      ? { lowFadeBars: raw.lowFadeBars }
       : {}),
     phraseShape:
       raw.phraseShape === "sequential" ||

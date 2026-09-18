@@ -34,8 +34,11 @@ export function firstDropMs(
  * render is beatmatched.
  *
  * A one-beat period-add (~345 ms at 174) is still reported so the Peak v3.3
- * failure mode stays visible. Phrase/bar wraps do not fall back to the raw
- * nudge — that offset is the applied correction, not leftover error.
+ * failure mode stays visible — unless onset-lock deliberately slipped whole
+ * beats on drum evidence, in which case a near-period total is the designed
+ * correction and only the cross-correlation residual judges it. Phrase/bar
+ * wraps do not fall back to the raw nudge — that offset is the applied
+ * correction, not leftover error.
  */
 export function storedGridResidualMs(
   downbeatOffsetMs: number | null,
@@ -46,6 +49,7 @@ export function storedGridResidualMs(
   outgoingRate: number,
   incomingRate: number,
   periodMs: number | null,
+  onsetLockBeats: number | null = null,
 ): number | null {
   const wrapMs = periodMs && periodMs > 0 ? periodMs : 345;
   const beatPeriodMs = wrapMs > 2000 ? null : wrapMs;
@@ -59,6 +63,7 @@ export function storedGridResidualMs(
     wrapMs,
   );
   if (
+    onsetLockBeats == null &&
     beatPeriodMs != null &&
     downbeatOffsetMs != null &&
     Math.abs(downbeatOffsetMs) >= 20 &&
@@ -163,6 +168,7 @@ export function storedGridFromEvidence(
   incomingRate: number,
   downbeatOffsetMs: number | null,
   periodMs: number | null,
+  onsetLockBeats: number | null = null,
 ): {
   residualMs: number | null;
   source: "frozen-manifest" | "missing";
@@ -181,6 +187,7 @@ export function storedGridFromEvidence(
       outgoingRate,
       incomingRate,
       periodMs,
+      onsetLockBeats,
     ),
     source: "frozen-manifest",
     kind: "stored-grid-consistency",

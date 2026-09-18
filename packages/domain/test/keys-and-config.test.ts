@@ -67,6 +67,9 @@ describe("loadConfig", () => {
     expect(config.libraryRoots).toEqual([path.resolve(cwd, "records")]);
     expect(config.outputRoot).toBe(path.resolve(cwd, "output"));
     expect(config.rubberbandPath).toBe(path.resolve(cwd, "tools/rubberband.exe"));
+    expect(config.supportedExtensions).toEqual(
+      expect.arrayContaining([".mp3", ".flac", ".ogg", ".oga", ".opus"]),
+    );
   });
 
   it("overlays AcoustID key and enrichment contact from the environment", () => {

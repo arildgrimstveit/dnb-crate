@@ -1,4 +1,8 @@
-import { planAlignmentOffsetMs, type DownbeatAlignment } from "@dnb-crate/audio-renderer";
+import {
+  planAlignmentOffsetMs,
+  wrapDelta,
+  type DownbeatAlignment,
+} from "@dnb-crate/audio-renderer";
 import {
   outputToSourceMs,
   MIN_PLAYABLE_DURATION_MS,
@@ -13,6 +17,7 @@ import {
 
 import { pickMixIn, pickMixOut } from "./cues.ts";
 import { pickHandoffCandidate, scoreHandoff } from "./handoff.ts";
+import { searchOnsetLockOffset } from "./onset-lock.ts";
 
 export type WindowTrack = {
   id: string;
@@ -27,6 +32,8 @@ export type WindowTrack = {
     audioEndMs?: number | null;
     downbeatTimesMs?: number[];
     downbeatConfidence?: number | null;
+    /** Absolute beat grid; beat-profile index 0 is beatTimesMs[0]. */
+    beatTimesMs?: number[];
     manualMixInMs?: number | null;
     manualMixOutMs?: number | null;
     bars?: {
@@ -34,6 +41,9 @@ export type WindowTrack = {
       sub?: number[];
       midFlux?: number[];
       onsetDensity?: number[];
+      beatKick?: number[];
+      beatSnare?: number[];
+      beatOnset?: number[];
     } | null;
   } | null;
 };
@@ -53,6 +63,8 @@ export type PhraseWindow = {
   alignmentOffsetMs: number;
   alignmentPeriodMs: number | null;
   alignmentMode: DownbeatAlignment["mode"] | null;
+  /** Whole-beat drum slip applied by onset-lock; null when it stayed out. */
+  onsetLockBeats: number | null;
   continuity?: {
     energyFloor: number;
     valleyBars: number;
@@ -204,6 +216,31 @@ function largestPhraseNotAfter(bar: number): PhraseBarCount {
   return 8;
 }
 
+/**
+ * A 32-bar blend may open on a drum exit even when the section label calls the
+ * prefix quiet: mixes routinely ride a breakdown from its last grooving bars,
+ * with the outgoing groove carrying the airy stretch until the drop lands. A
+ * sustained groove is not an exit — those prefixes keep competing normally.
+ * Without measured bars there is nothing to admit on.
+ */
+export function breakdownEntry(track: WindowTrack, mixInBar: number): boolean {
+  const onset = track.analysis?.bars?.onsetDensity;
+  if (!onset || onset.length === 0) {
+    return false;
+  }
+  const start = Math.max(0, Math.round(mixInBar));
+  if ((onset[start] ?? 0) < 0.25) {
+    return false;
+  }
+  let dense = 0;
+  for (let i = start; i < Math.min(onset.length, start + 8); i += 1) {
+    if ((onset[i] ?? 0) >= 0.25) {
+      dense += 1;
+    }
+  }
+  return dense <= 4;
+}
+
 function pickOutgoingExit(
   outgoing: WindowTrack,
   barCount: PhraseBarCount,
@@ -301,6 +338,47 @@ export function phraseOriginMs(track: WindowTrack): number | null {
   return drop.startMs;
 }
 
+/**
+ * Beat-array index of bar 0: bars are collected from the first downbeat, while
+ * beat profiles are indexed from beatTimesMs[0]. Without this bridge a
+ * downbeat phase of N beats misaligns every onset-lock comparison by N beats.
+ */
+export function downbeatBeatOffset(
+  beatTimesMs: number[] | null | undefined,
+  downbeatTimesMs: number[] | null | undefined,
+): number {
+  if (
+    !beatTimesMs ||
+    beatTimesMs.length === 0 ||
+    !downbeatTimesMs ||
+    downbeatTimesMs.length === 0
+  ) {
+    return 0;
+  }
+  const first = downbeatTimesMs[0]!;
+  let best = 0;
+  for (let i = 1; i < beatTimesMs.length; i += 1) {
+    if (Math.abs(beatTimesMs[i]! - first) < Math.abs(beatTimesMs[best]! - first)) {
+      best = i;
+    }
+  }
+  return best;
+}
+
+/**
+ * Bar number for an ms position in bar-0 coordinates (bar 0 starts at the
+ * first downbeat, matching bars collected by the analyzer).
+ */
+export function lockBarForMs(
+  positionMs: number,
+  downbeatTimesMs: number[] | null | undefined,
+  beatMs: number,
+): number {
+  const barMs = beatMs * 4;
+  const anchor = downbeatTimesMs && downbeatTimesMs.length > 0 ? downbeatTimesMs[0]! : 0;
+  return Math.max(0, Math.round((positionMs - anchor) / barMs));
+}
+
 export function bakeWindowAlignment(
   outgoing: WindowTrack,
   incoming: WindowTrack,
@@ -315,16 +393,15 @@ export function bakeWindowAlignment(
       alignmentOffsetMs: window.alignmentOffsetMs,
       alignmentPeriodMs: window.alignmentPeriodMs,
       alignmentMode: window.alignmentMode,
+      onsetLockBeats: window.onsetLockBeats,
     };
   }
   const targetBpm = options.targetBpm ?? incoming.analysis?.canonicalBpm ?? incoming.bpm;
   const outgoingRate = options.outgoingRate && options.outgoingRate > 0 ? options.outgoingRate : 1;
   const incomingRate = options.incomingRate && options.incomingRate > 0 ? options.incomingRate : 1;
-  const aligned = planAlignmentOffsetMs({
+  const geometricInput = {
     outgoingDownbeatsMs: outDownbeats,
     incomingDownbeatsMs: inDownbeats,
-    outgoingOverlapStartMs: window.mixOutMs,
-    incomingOverlapStartMs: window.mixInMs,
     bpm: targetBpm,
     outgoingRate,
     incomingRate,
@@ -333,7 +410,42 @@ export function bakeWindowAlignment(
     incomingDownbeatConfidence: incoming.analysis?.downbeatConfidence ?? null,
     outgoingPhraseOriginMs: phraseOriginMs(outgoing),
     incomingPhraseOriginMs: phraseOriginMs(incoming),
+  };
+  const beatMs = 60_000 / (targetBpm && targetBpm > 0 ? targetBpm : 174);
+  // Whole-beat drum-pattern slip first, anchored so beat profiles and bar
+  // numbers share the bar-0 origin.
+  const locked = searchOnsetLockOffset({
+    outgoing: outgoing.analysis?.bars,
+    incoming: incoming.analysis?.bars,
+    mixOutBar: window.mixOutBar ?? lockBarForMs(window.mixOutMs, outDownbeats, beatMs),
+    mixInBar: window.mixInBar ?? lockBarForMs(window.mixInMs, inDownbeats, beatMs),
+    barCount: window.barCount,
+    beatMs,
+    incomingRate,
+    outBeatOffset: downbeatBeatOffset(outgoing.analysis?.beatTimesMs, outDownbeats),
+    inBeatOffset: downbeatBeatOffset(incoming.analysis?.beatTimesMs, inDownbeats),
   });
+  // Geometric residual at the original positions. When the lock fires only its
+  // sub-beat part is added: remeasuring after a whole-beat lock shift reflects
+  // the lock movement back (verified: +345 ms lock remeasures as +345 ms), and
+  // whole-beat label disagreements are the lock's drum evidence to overrule.
+  const geometric = planAlignmentOffsetMs({
+    ...geometricInput,
+    outgoingOverlapStartMs: window.mixOutMs,
+    incomingOverlapStartMs: window.mixInMs,
+  });
+  const beatSourceMs = beatMs * incomingRate;
+  const subBeatMs = wrapDelta(geometric.offsetMs, beatSourceMs > 0 ? beatSourceMs : beatMs);
+  // Both offsets are in incoming-source ms, so they add directly.
+  const totalOffsetMs = locked.applied ? locked.offsetMs + subBeatMs : geometric.offsetMs;
+  const aligned = locked.applied
+    ? {
+        offsetMs: Math.round(totalOffsetMs),
+        periodMs: locked.periodMs,
+        mode: "bar" as const,
+        onsetLockBeats: locked.beats,
+      }
+    : { ...geometric, onsetLockBeats: null as number | null };
   const inStart = incoming.analysis?.audioStartMs ?? 0;
   const inEnd = incoming.analysis?.audioEndMs ?? incoming.durationMs;
   const nextMixIn = window.mixInMs + aligned.offsetMs;
@@ -344,6 +456,7 @@ export function bakeWindowAlignment(
       alignmentOffsetMs: aligned.offsetMs,
       alignmentPeriodMs: aligned.periodMs,
       alignmentMode: aligned.mode,
+      onsetLockBeats: aligned.onsetLockBeats,
     };
   }
   return {
@@ -358,6 +471,7 @@ export function bakeWindowAlignment(
     alignmentOffsetMs: aligned.offsetMs,
     alignmentPeriodMs: aligned.periodMs,
     alignmentMode: aligned.mode,
+    onsetLockBeats: aligned.onsetLockBeats,
   };
 }
 
@@ -518,6 +632,7 @@ export function planPhraseWindow(
         alignmentOffsetMs: 0,
         alignmentPeriodMs: null,
         alignmentMode: null,
+        onsetLockBeats: null,
       },
       { ...options, targetBpm: options.targetBpm ?? inBpm },
     );
@@ -548,8 +663,9 @@ export function planPhraseWindow(
       if (energy < 0.12) {
         continue;
       }
-      // Late first drop: keep the 16-bar cut unless the last 32 already has body.
-      if (drop.startMs >= 90_000 && energy < 0.28) {
+      // Late first drop: keep the 16-bar cut unless the last 32 already has body,
+      // or the blend opens on a drum bar (breakdown entry) the labels miss.
+      if (drop.startMs >= 90_000 && energy < 0.28 && !breakdownEntry(incoming, mixInBar)) {
         continue;
       }
     }
@@ -683,6 +799,7 @@ export function planPhraseWindow(
       alignmentOffsetMs: 0,
       alignmentPeriodMs: null,
       alignmentMode: null,
+      onsetLockBeats: null,
       continuity: (() => {
         const scored = scoreHandoff({
           barCount: chosen.barCount,

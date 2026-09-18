@@ -490,6 +490,8 @@ export async function renderMix(
       "-vn",
       "-map_metadata",
       "-1",
+      "-rf64",
+      "auto",
       partialPath,
     ];
     if (estimateArgvChars(args) > FFMPEG_ARGV_SOFT_LIMIT && request.segments.length > 2) {
@@ -538,6 +540,8 @@ export async function renderMix(
           `volume=${gainDb}dB`,
           "-c:a",
           INTERMEDIATE_PCM_CODEC,
+          "-rf64",
+          "auto",
           attenuated,
         ];
         invocation = `${invocation} ; ${redactInvocation(binaries.ffmpegPath, volumeArgs)}`;
@@ -573,6 +577,8 @@ export async function renderMix(
           oversampledLimiterAf(limiterAmplitude, sampleRateHz),
           "-c:a",
           INTERMEDIATE_PCM_CODEC,
+          "-rf64",
+          "auto",
           limited,
         ];
         invocation = `${invocation} ; ${redactInvocation(binaries.ffmpegPath, peakArgs)}`;
@@ -821,6 +827,8 @@ async function stitchPreservedPrefix(
     "[out]",
     "-c:a",
     INTERMEDIATE_PCM_CODEC,
+    "-rf64",
+    "auto",
     outputPath,
   ];
   const result = await runner.run({
@@ -909,8 +917,12 @@ async function renderPairwise(
         request.abortSignal,
       );
       invocation = `${invocation} ; pairwise-preserve-prefix`;
-      accPath = stitched;
       const probe = await probeAudioFile(runner, binaries, stitched, request.abortSignal);
+      // The new prefix contains both inputs. Release them now so a long set
+      // retains only the current prefix, instead of every growing copy.
+      await removeIfPresent(accPath);
+      await removeIfPresent(joinPath);
+      accPath = stitched;
       accDurationMs = probe.durationMs;
     }
     if (!accPath) {

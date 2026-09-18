@@ -74,6 +74,7 @@ Commands:
   plan:list
   plan:get --id UUID
   plan:quality --id UUID
+  plan:delete --id UUID --confirm
   hour:feedback --id RENDER_UUID --checksum SHA256 --accepted true|false --quote TEXT
   hour:history [--id RENDER_UUID]
   plan:validate --id UUID
@@ -482,6 +483,17 @@ async function main(): Promise<void> {
           throw new Error("plan:quality requires --id");
         }
         printJson({ ok: true, data: runtime.service.reportSetPlanQuality(id) });
+        break;
+      }
+      case "plan:delete": {
+        const id = option(args, "--id");
+        if (!id) {
+          throw new Error("plan:delete requires --id");
+        }
+        if (!flag(args, "--confirm")) {
+          throw new Error("plan:delete requires --confirm");
+        }
+        printJson({ ok: true, data: runtime.service.deleteSetPlan(id, true) });
         break;
       }
       case "hour:feedback": {

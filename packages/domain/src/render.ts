@@ -63,6 +63,8 @@ export type RenderManifestTrack = {
   downbeatOffsetMs: number | null;
   alignmentPeriodMs: number | null;
   alignmentMode?: "bar" | "beat" | "phrase" | null;
+  /** Whole-beat drum slip applied by onset-lock; null when it stayed out. */
+  onsetLockBeats?: number | null;
   barCount?: number | null;
   phraseShape?: string | null;
   sequentialHandoff?: "legacy" | "early" | "supported" | null;

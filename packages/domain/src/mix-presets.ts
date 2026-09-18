@@ -39,6 +39,11 @@ export type MixPresetParams = BassSwapParams & {
   landingCarryBars?: 2 | 3.5 | 4 | 4.5;
   /** Incoming mids/highs fade over the final bars of overlap, independently of bass arrival. */
   landingIncomingFadeBars?: PhraseBarCount;
+  /**
+   * Bass-swap low crossfade length in bars from swapAtBar. Absent preserves the
+   * historical fast dump/restore; set to glide the sub out instead of cutting it.
+   */
+  lowFadeBars?: 2 | 4 | 8 | 12 | 16;
   /** Incoming mix-in and first drop, used to time landing bass to the drop. */
   mixInMs?: number;
   incomingDropMs?: number;
@@ -139,6 +144,13 @@ export function clampMixPresetParams(
             barCount,
           ) as PhraseBarCount,
         }
+      : {}),
+    ...(input?.lowFadeBars === 2 ||
+    input?.lowFadeBars === 4 ||
+    input?.lowFadeBars === 8 ||
+    input?.lowFadeBars === 12 ||
+    input?.lowFadeBars === 16
+      ? { lowFadeBars: input.lowFadeBars }
       : {}),
     barCount,
     targetBpm:
@@ -364,23 +376,42 @@ function phraseEvents(params: MixPresetParams, barMs: number): AutomationEvent[]
 
 function bassSwapEvents(params: MixPresetParams, barMs: number): AutomationEvent[] {
   const dipBar = params.barCount === 32 ? 8 : 4;
+  const lowFade =
+    params.lowFadeBars != null
+      ? Math.max(1, Math.min(params.lowFadeBars, params.barCount - params.swapAtBar))
+      : null;
   return [
     event("outgoing_high", 0, params.barCount, 0, null, barMs),
     event("incoming_high", 0, params.barCount, null, 0, barMs),
     event("outgoing_mid", dipBar, 0, 0, params.midDipDb, barMs, params.rampMs),
     event("outgoing_mid", dipBar, params.barCount - dipBar, params.midDipDb, null, barMs),
     event("incoming_mid", 0, params.barCount, null, 0, barMs),
-    event("outgoing_low", params.swapAtBar, 0, 0, params.lowAttenuationDb, barMs, params.rampMs),
-    event(
-      "outgoing_low",
-      params.lowHandoverBar,
-      0,
-      params.lowAttenuationDb,
-      null,
-      barMs,
-      params.rampMs,
-    ),
-    event("incoming_low", params.swapAtBar, 0, null, 0, barMs, params.rampMs),
+    ...(lowFade != null
+      ? [
+          event("outgoing_low", params.swapAtBar, lowFade, 0, null, barMs),
+          event("incoming_low", params.swapAtBar, lowFade, null, 0, barMs),
+        ]
+      : [
+          event(
+            "outgoing_low",
+            params.swapAtBar,
+            0,
+            0,
+            params.lowAttenuationDb,
+            barMs,
+            params.rampMs,
+          ),
+          event(
+            "outgoing_low",
+            params.lowHandoverBar,
+            0,
+            params.lowAttenuationDb,
+            null,
+            barMs,
+            params.rampMs,
+          ),
+          event("incoming_low", params.swapAtBar, 0, null, 0, barMs, params.rampMs),
+        ]),
   ];
 }
 

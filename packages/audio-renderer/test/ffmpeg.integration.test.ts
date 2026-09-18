@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -295,13 +295,31 @@ describe("FFmpeg integration", () => {
     await writeFile(a, buildSineWav(8000, 220));
     await writeFile(b, buildSineWav(8000, 330));
     await writeFile(c, buildSineWav(8000, 440));
-    const result = await renderMix(runner, binaries, {
+    let checkedCleanup = false;
+    const checkedRunner: typeof runner = {
+      async run(request) {
+        const output = request.args.at(-1);
+        if (output === `${out}.stitch-3.wav`) {
+          const files = await readdir(root);
+          expect(files).toContain("mix.wav.stitch-2.wav");
+          expect(files).not.toContain("mix.wav.join-1.wav");
+          expect(files).not.toContain("mix.wav.join-2.wav");
+          checkedCleanup = true;
+        }
+        if (output?.endsWith(".wav") && request.args.includes("-c:a")) {
+          expect(request.args[request.args.indexOf("-rf64") + 1]).toBe("auto");
+        }
+        return runner.run(request);
+      },
+    };
+    const result = await renderMix(checkedRunner, binaries, {
       segments: [
         { filePath: a, sourceStartMs: 0, sourceEndMs: 8000, gainDb: 0 },
         { filePath: b, sourceStartMs: 0, sourceEndMs: 8000, gainDb: 0 },
         { filePath: c, sourceStartMs: 0, sourceEndMs: 8000, gainDb: 0 },
+        { filePath: a, sourceStartMs: 0, sourceEndMs: 8000, gainDb: 0 },
       ],
-      overlapMs: [2000, 2000],
+      overlapMs: [2000, 2000, 2000],
       outputPath: out,
       truePeakCeilingDb: -1,
       loudnessTargetLufs: -14,
@@ -309,12 +327,14 @@ describe("FFmpeg integration", () => {
       transitions: [
         { type: "phrase_mix", barCount: 16, params: { targetBpm: 174 } },
         { type: "phrase_mix", barCount: 16, params: { targetBpm: 174 } },
+        { type: "phrase_mix", barCount: 16, params: { targetBpm: 174 } },
       ],
     });
-    expect(Math.abs(result.durationMs - 20_000)).toBeLessThan(400);
+    expect(checkedCleanup).toBe(true);
+    expect(Math.abs(result.durationMs - 26_000)).toBeLessThan(400);
     expect(result.invocation).toContain("pairwise");
     expect(result.invocation).toContain("preserve-prefix");
-    expect(result.stretchEngines).toEqual(["none", "none"]);
+    expect(result.stretchEngines).toEqual(["none", "none", "none"]);
   }, 90_000);
 
   it("keeps an earlier impulse body when later silent joins are appended", async (ctx) => {

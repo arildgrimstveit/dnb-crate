@@ -96,8 +96,6 @@ export async function extractAudioMetadata(filePath: string): Promise<ExtractedA
 
   const bpmRaw = parsed.common.bpm;
   const bpm = typeof bpmRaw === "number" && Number.isFinite(bpmRaw) && bpmRaw > 0 ? bpmRaw : null;
-  const keyRaw = blankToNull(parsed.common.key);
-  const normalized = normalizeKey(keyRaw);
   const native: Record<string, unknown[] | undefined> = {};
   for (const [ns, tags] of Object.entries(parsed.native ?? {})) {
     void ns;
@@ -111,6 +109,8 @@ export async function extractAudioMetadata(filePath: string): Promise<ExtractedA
     }
   }
 
+  const keyRaw = blankToNull(parsed.common.key) ?? firstString(nativeValue(native, ["INITIALKEY"]));
+  const normalized = normalizeKey(keyRaw);
   const common = parsed.common as unknown as Record<string, unknown>;
   const recordingMbid =
     firstString(common.musicbrainz_recordingid) ??

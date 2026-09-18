@@ -13,6 +13,17 @@ import type { TransitionType } from "./planning.ts";
 
 export type TrackSectionType = "intro" | "build" | "drop" | "breakdown" | "bridge" | "outro";
 
+/** Per-bar energy plus optional per-beat drum profiles for join onset-lock. */
+export type BarEnergySeries = {
+  rms: number[];
+  sub?: number[];
+  midFlux?: number[];
+  onsetDensity?: number[];
+  beatKick?: number[];
+  beatSnare?: number[];
+  beatOnset?: number[];
+};
+
 export type TrackSection = {
   type: TrackSectionType;
   startMs: number;
@@ -75,12 +86,7 @@ export type SonicDescriptors = {
   tempoEvidence: TempoEvidence | null;
   audioStartMs?: number | null;
   audioEndMs?: number | null;
-  bars?: {
-    rms: number[];
-    sub: number[];
-    midFlux: number[];
-    onsetDensity: number[];
-  } | null;
+  bars?: BarEnergySeries | null;
   keyCandidates?: string[] | null;
 };
 

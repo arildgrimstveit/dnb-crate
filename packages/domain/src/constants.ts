@@ -8,7 +8,7 @@ export const DJ_HANDOFF_POLICY = "dj-continuity-v1" as const;
 export const DEFAULT_RENDER_OUTPUT_FORMAT = "flac" as const;
 export const DEFAULT_RENDER_OUTPUT_EXTENSION = ".flac";
 export const DSP_ANALYZER_NAME = "dnb-crate-dsp";
-export const DSP_ANALYZER_VERSION = "3.2.0";
+export const DSP_ANALYZER_VERSION = "3.3.0";
 export const ANALYSIS_ENGINE_IDS = ["dnb-crate-dsp"] as const;
 export const DEFAULT_ANALYSIS_ENGINE = "dnb-crate-dsp" as const;
 export const ANALYSIS_SAMPLE_RATE_HZ = 22_050;
@@ -18,6 +18,9 @@ export const DEFAULT_SUPPORTED_EXTENSIONS = [
   ".flac",
   ".mp3",
   ".m4a",
+  ".ogg",
+  ".oga",
+  ".opus",
   ".aiff",
   ".aif",
 ] as const;

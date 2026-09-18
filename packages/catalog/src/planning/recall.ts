@@ -94,6 +94,10 @@ export function recallApprovedHandoff(
             payload.parameters.alignmentMode === "phrase"
               ? payload.parameters.alignmentMode
               : null,
+          onsetLockBeats:
+            typeof payload.parameters.onsetLockBeats === "number"
+              ? payload.parameters.onsetLockBeats
+              : null,
         },
       },
       reason: `approved ${picked.recipe.status}`,

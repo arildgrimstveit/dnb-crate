@@ -44,6 +44,12 @@ describe("dnb-crate-dsp", () => {
     expect(firstDown < 10 || Math.abs(firstDown - beatMs) < 10).toBe(true);
     const dropSection = result.sections.find((section) => section.type === "drop");
     expect(dropSection).toBeDefined();
+    expect(result.descriptors?.bars?.beatKick?.length).toBe(result.beatTimesMs.length);
+    expect(result.descriptors?.bars?.beatSnare?.length).toBe(result.beatTimesMs.length);
+    expect((result.descriptors?.bars?.beatKick?.length ?? 0) / 4).toBeCloseTo(
+      result.descriptors?.bars?.rms.length ?? 0,
+      0,
+    );
   });
 
   it("labels sections on the synthetic fixture within one bar", () => {
@@ -392,9 +398,9 @@ describe("dnb-crate-dsp", () => {
     const bars = result.descriptors?.bars;
     expect(bars).toBeTruthy();
     expect(bars?.rms.length).toBeGreaterThan(8);
-    expect(bars?.rms.length).toBe(bars?.sub.length);
-    expect(bars?.rms.length).toBe(bars?.midFlux.length);
-    expect(bars?.rms.length).toBe(bars?.onsetDensity.length);
+    expect(bars?.rms.length).toBe(bars?.sub?.length);
+    expect(bars?.rms.length).toBe(bars?.midFlux?.length);
+    expect(bars?.rms.length).toBe(bars?.onsetDensity?.length);
   });
 
   it("does not trim a 4s musical fade-out", () => {

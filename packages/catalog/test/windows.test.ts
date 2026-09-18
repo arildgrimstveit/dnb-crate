@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import { expandPreset, type TrackSection } from "@dnb-crate/domain";
 import { applyAlignmentOffset } from "@dnb-crate/audio-renderer";
 
-import { bakeWindowAlignment, landingErrorMs, planPhraseWindow } from "../src/planning/windows.ts";
+import {
+  bakeWindowAlignment,
+  breakdownEntry,
+  landingErrorMs,
+  planPhraseWindow,
+} from "../src/planning/windows.ts";
 import type { PhraseWindow, WindowTrack } from "../src/planning/windows.ts";
 
 const BPM = 174;
@@ -332,6 +337,7 @@ describe("phrase windows", () => {
       alignmentOffsetMs: 0,
       alignmentPeriodMs: null,
       alignmentMode: null,
+      onsetLockBeats: null,
     };
     const drop = incoming.analysis!.sections.find((item) => item.type === "drop");
     if (drop) {
@@ -344,6 +350,49 @@ describe("phrase windows", () => {
     expect(baked.mixOutMs).toBeGreaterThan(base.mixOutMs);
     expect(Math.abs(baked.alignmentOffsetMs)).toBeLessThan(BAR_MS / 2);
     expect(Math.abs(baked.alignmentOffsetMs)).not.toBeCloseTo(BAR_MS * 8, 0);
+  });
+
+  it("moves mix-out by one beat when incoming kicks sit on the outgoing snare", () => {
+    const outgoing = track("out", [section("drop", 16, 80, 0.9)], 80);
+    const incoming = track("in", [section("intro", 0, 16, 0.2), section("drop", 16, 64, 0.9)], 64);
+    const drum = (lengthBars: number, kickShift: number) => {
+      const beats = lengthBars * 4;
+      const beatKick: number[] = [];
+      const beatSnare: number[] = [];
+      for (let i = 0; i < beats; i += 1) {
+        const pos = (((i - kickShift) % 4) + 4) % 4;
+        beatKick.push(pos === 0 ? 1 : 0.02);
+        beatSnare.push(pos === 2 ? 1 : 0.05);
+      }
+      return {
+        rms: Array(lengthBars).fill(0.8),
+        beatKick,
+        beatSnare,
+        beatOnset: beatKick.map((value, i) => value + (beatSnare[i] ?? 0)),
+      };
+    };
+    outgoing.analysis!.bars = drum(80, 0);
+    incoming.analysis!.bars = drum(64, 1);
+    const base: PhraseWindow = {
+      mixInMs: 0,
+      mixOutMs: Math.round(32 * BAR_MS),
+      mixInBar: 0,
+      mixOutBar: 32,
+      barCount: 16,
+      exitKind: "dropLanding",
+      phraseShape: "landing",
+      incomingDropMs: Math.round(16 * BAR_MS),
+      dropAnchored: true,
+      alignmentOffsetMs: 0,
+      alignmentPeriodMs: null,
+      alignmentMode: null,
+      onsetLockBeats: null,
+    };
+    const baked = bakeWindowAlignment(outgoing, incoming, base);
+    expect(baked.mixInMs).toBe(0);
+    expect(baked.alignmentMode).toBe("bar");
+    expect(Math.abs(baked.alignmentOffsetMs - BAR_MS / 4)).toBeLessThan(5);
+    expect(base.mixOutMs - baked.mixOutMs).toBeCloseTo(BAR_MS / 4, 0);
   });
 
   it("never applies a one-beat period nudge at source start 0", () => {
@@ -415,5 +464,227 @@ describe("phrase windows", () => {
     expect(window.exitKind).toBe("dropLanding");
     expect(window.phraseShape).toBe("landing");
     expect(window.barCount).toBeGreaterThanOrEqual(16);
+  });
+});
+
+describe("onset-lock composition", () => {
+  const BEAT_MS = BAR_MS / 4;
+
+  function drumTrack(
+    id: string,
+    options: { phaseBeats?: number; patternShift?: number; gridOffsetMs?: number } = {},
+  ): WindowTrack {
+    const phase = options.phaseBeats ?? 0;
+    const pattern = options.patternShift ?? 0;
+    const gridOffset = options.gridOffsetMs ?? 0;
+    const beats = 160;
+    const beatTimesMs = Array.from({ length: beats }, (_, i) => gridOffset + i * BEAT_MS);
+    const downbeatTimesMs = beatTimesMs.filter((_, i) => (i - phase) % 4 === 0);
+    const pos = (i: number): number => (((i - pattern) % 4) + 4) % 4;
+    const totalBars = Math.floor((beats - phase) / 4);
+    return {
+      id,
+      durationMs: gridOffset + beats * BEAT_MS,
+      bpm: BPM,
+      analysis: {
+        sections: [],
+        canonicalBpm: BPM,
+        audioStartMs: 0,
+        audioEndMs: gridOffset + beats * BEAT_MS,
+        beatTimesMs,
+        downbeatTimesMs,
+        downbeatConfidence: 1,
+        bars: {
+          rms: new Array<number>(totalBars).fill(0.7),
+          beatKick: beatTimesMs.map((_, i) => (pos(i) === 0 ? 1 : 0.02)),
+          beatSnare: beatTimesMs.map((_, i) => (pos(i) === 2 ? 1 : 0.05)),
+          beatOnset: beatTimesMs.map((_, i) => (pos(i) === 0 || pos(i) === 2 ? 1 : 0.05)),
+        },
+      },
+    };
+  }
+
+  function dropWindow(outMixOutMs: number, inMixInMs: number): PhraseWindow {
+    return {
+      mixInMs: Math.round(inMixInMs),
+      mixOutMs: Math.round(outMixOutMs),
+      mixInBar: 8,
+      mixOutBar: 8,
+      barCount: 16,
+      exitKind: "dropLanding",
+      phraseShape: "sequential",
+      incomingDropMs: null,
+      dropAnchored: true,
+      alignmentOffsetMs: 0,
+      alignmentPeriodMs: null,
+      alignmentMode: null,
+      onsetLockBeats: null,
+    };
+  }
+
+  const downbeat = (t: WindowTrack, index: number): number =>
+    t.analysis?.downbeatTimesMs?.[index] ?? 0;
+
+  describe("breakdown entry", () => {
+    const entryTrack = (onset: number[]): WindowTrack => ({
+      id: "in",
+      durationMs: Math.round(120 * BAR_MS),
+      bpm: BPM,
+      analysis: {
+        sections: [],
+        canonicalBpm: BPM,
+        audioStartMs: 0,
+        audioEndMs: Math.round(120 * BAR_MS),
+        downbeatTimesMs: Array.from({ length: 121 }, (_, i) => Math.round(i * BAR_MS)),
+        downbeatConfidence: 1,
+        bars: { rms: new Array<number>(120).fill(0.3), onsetDensity: onset },
+      },
+    });
+
+    it("admits a drum exit: one grooving bar then air", () => {
+      const onset = new Array<number>(120).fill(0.05);
+      onset[48] = 0.4;
+      expect(breakdownEntry(entryTrack(onset), 48)).toBe(true);
+    });
+
+    it("rejects a sustained groove", () => {
+      expect(breakdownEntry(entryTrack(new Array<number>(120).fill(0.4)), 48)).toBe(false);
+    });
+
+    it("rejects a dead bar and missing bars", () => {
+      const onset = new Array<number>(120).fill(0.05);
+      expect(breakdownEntry(entryTrack(onset), 48)).toBe(false);
+      expect(breakdownEntry({ id: "x", durationMs: 1000, bpm: BPM, analysis: null }, 48)).toBe(
+        false,
+      );
+    });
+  });
+
+  describe("late-drop 32-bar breakdown landing", () => {
+    // Mirrors a real liquid build: late drop, quiet-labeled build, drums that
+    // stop ~30 bars before the drop. The blend should open at the drum exit.
+    function buildIncoming(): WindowTrack {
+      const dropBar = 80;
+      const totalBars = 100;
+      const onset = new Array<number>(totalBars).fill(0.05);
+      onset[48] = 0.4;
+      onset[49] = 0.3;
+      const beat = BAR_MS / 4;
+      const totalBeats = totalBars * 4;
+      const section = (
+        type: TrackSection["type"],
+        startBar: number,
+        endBar: number,
+        sectionEnergy: number,
+      ): TrackSection => ({
+        type,
+        startMs: Math.round(startBar * BAR_MS),
+        endMs: Math.round(endBar * BAR_MS),
+        startBar,
+        endBar,
+        confidence: 0.8,
+        sectionEnergy,
+      });
+      return {
+        id: "in",
+        durationMs: Math.round(totalBars * BAR_MS),
+        bpm: BPM,
+        analysis: {
+          sections: [
+            section("intro", 0, 16, 0.1),
+            section("build", 16, dropBar, 0.15),
+            section("drop", dropBar, totalBars, 0.9),
+          ],
+          canonicalBpm: BPM,
+          audioStartMs: 0,
+          audioEndMs: Math.round(totalBars * BAR_MS),
+          beatTimesMs: Array.from({ length: totalBeats }, (_, i) => i * beat),
+          downbeatTimesMs: Array.from({ length: totalBars + 1 }, (_, i) => i * BAR_MS),
+          downbeatConfidence: 1,
+          bars: {
+            rms: new Array<number>(totalBars).fill(0.2),
+            onsetDensity: onset,
+          },
+        },
+      };
+    }
+
+    function buildOutgoing(): WindowTrack {
+      const totalBars = 200;
+      const beat = BAR_MS / 4;
+      const totalBeats = totalBars * 4;
+      const bar = (n: number): number => Math.round(n * BAR_MS);
+      return {
+        id: "out",
+        durationMs: bar(totalBars),
+        bpm: BPM,
+        analysis: {
+          sections: [
+            {
+              type: "drop",
+              startMs: bar(16),
+              endMs: bar(180),
+              startBar: 16,
+              endBar: 180,
+              confidence: 0.8,
+              sectionEnergy: 0.9,
+            },
+          ],
+          canonicalBpm: BPM,
+          audioStartMs: 0,
+          audioEndMs: bar(totalBars),
+          beatTimesMs: Array.from({ length: totalBeats }, (_, i) => i * beat),
+          downbeatTimesMs: Array.from({ length: totalBars + 1 }, (_, i) => i * BAR_MS),
+          downbeatConfidence: 1,
+          bars: {
+            rms: new Array<number>(totalBars).fill(0.7),
+            onsetDensity: new Array<number>(totalBars).fill(0.4),
+          },
+        },
+      };
+    }
+
+    it("takes 32 bars from the drum exit instead of 16 from dead air", () => {
+      const window = planPhraseWindow(buildOutgoing(), buildIncoming());
+      expect(window.barCount).toBe(32);
+      expect(window.mixInBar).toBe(48);
+    });
+  });
+
+  it("leaves an already drum-aligned join alone when grids carry a downbeat phase", () => {
+    // Same absolute grid; the incoming tracker started two beats before the
+    // first downbeat. Drums sit on labeled downbeats on both decks, so the
+    // overlap content already coincides. An unanchored lock reads the wrong
+    // slice and invents a +2-beat slip (+690 ms) that ruins the join.
+    const outgoing = drumTrack("out");
+    const incoming = drumTrack("in", { phaseBeats: 2, patternShift: 2 });
+    const base = dropWindow(downbeat(outgoing, 8), downbeat(incoming, 8));
+    const baked = bakeWindowAlignment(outgoing, incoming, base, { targetBpm: BPM });
+    expect(baked.alignmentOffsetMs).toBeCloseTo(0, 5);
+    expect(baked.mixOutMs).toBe(base.mixOutMs);
+    expect(baked.mixInMs).toBe(base.mixInMs);
+  });
+
+  it("slips two beats when the drums sit off the labeled downbeats", () => {
+    // Same absolute grid, but the incoming kicks sit two beats before its
+    // labeled downbeats. The drum evidence must overrule the labels.
+    const outgoing = drumTrack("out");
+    const incoming = drumTrack("in", { phaseBeats: 2, patternShift: 0 });
+    const base = dropWindow(downbeat(outgoing, 8), downbeat(incoming, 8));
+    const baked = bakeWindowAlignment(outgoing, incoming, base, { targetBpm: BPM });
+    expect(baked.alignmentOffsetMs).toBe(Math.round(-2 * BEAT_MS));
+    // Drop-anchored: the outgoing mix-out moves, the incoming drop stays put.
+    expect(baked.mixInMs).toBe(base.mixInMs);
+    expect(baked.mixOutMs).toBe(base.mixOutMs + Math.round(2 * BEAT_MS));
+  });
+
+  it("adds the sub-beat residual on top of a whole-beat drum slip", () => {
+    // One-beat kick/snare swap plus a 37 ms grid offset with the mix-in placed
+    // off the incoming grid. The lock used to discard the 37 ms entirely.
+    const outgoing = drumTrack("out");
+    const incoming = drumTrack("in", { patternShift: 1, gridOffsetMs: 37 });
+    const base = dropWindow(downbeat(outgoing, 8), downbeat(incoming, 8) - 37);
+    const baked = bakeWindowAlignment(outgoing, incoming, base, { targetBpm: BPM });
+    expect(baked.alignmentOffsetMs).toBe(Math.round(BEAT_MS + 37));
   });
 });

@@ -171,6 +171,7 @@ export type {
   AnalysisJobStatus,
   AutomationEvent,
   AutomationTarget,
+  BarEnergySeries,
   BassSwapParams,
   BeatGrid,
   BeatGridSummary,

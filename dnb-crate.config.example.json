@@ -3,7 +3,17 @@
   "libraryRoots": ["./library"],
   "outputRoot": "./output",
   "logLevel": "info",
-  "supportedExtensions": [".wav", ".flac", ".mp3", ".m4a", ".aiff", ".aif"],
+  "supportedExtensions": [
+    ".wav",
+    ".flac",
+    ".mp3",
+    ".m4a",
+    ".ogg",
+    ".oga",
+    ".opus",
+    ".aiff",
+    ".aif"
+  ],
   "loudnessTargetLufs": -14,
   "truePeakCeilingDb": -1,
   "renderWorkerLimit": 1,

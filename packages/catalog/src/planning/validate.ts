@@ -92,10 +92,13 @@ export function validateSetPlan(
         track.durationMs,
         options?.firstDropStartMsByTrackId?.get(entry.trackId),
       ) ?? MIN_PLAYABLE_DURATION_MS;
-    if (playableMs(entry) < minPlayable && track.durationMs >= MIN_PLAYABLE_DURATION_MS) {
+    const playable = playableMs(entry);
+    if (playable < minPlayable && track.durationMs >= MIN_PLAYABLE_DURATION_MS) {
       errors.push({
         code: "INVALID_TRIM",
-        message: `Playable duration is below ${MIN_PLAYABLE_DURATION_MS}ms`,
+        message:
+          `${track.title} plays ${playable}ms but needs at least ${minPlayable}ms ` +
+          `(short by ${minPlayable - playable}ms; extend the source window or move the mix-in earlier)`,
         entryId: entry.id,
         trackId: track.id,
       });

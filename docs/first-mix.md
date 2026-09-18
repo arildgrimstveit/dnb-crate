@@ -1,6 +1,6 @@
 # Folder to first mix
 
-Install Node.js 24+, pnpm, FFmpeg/ffprobe, KeyFinder CLI, and standalone Rubber Band 3+ before starting. Configure `databasePath`, `libraryRoots`, and a separate writable `outputRoot` in `dnb-crate.config.json`. The application never installs native tools or enables metadata enrichment. Musical analysis remains DnB-specific (160–190 BPM), although input formats include WAV, FLAC, MP3, unprotected M4A, and AIFF.
+Install Node.js 24+, pnpm, FFmpeg/ffprobe, KeyFinder CLI, and standalone Rubber Band 3+ before starting. Configure `databasePath`, `libraryRoots`, and a separate writable `outputRoot` in `dnb-crate.config.json`. The application never installs native tools or enables metadata enrichment. Musical analysis remains DnB-specific (160–190 BPM), although input formats include WAV, FLAC, MP3, unprotected M4A, Ogg Vorbis (`.ogg`/`.oga`), Ogg Opus (`.opus`), and AIFF. Existing configs with an explicit `supportedExtensions` list must add `.ogg`, `.oga`, and `.opus` (or omit the list to use defaults). Restart after changing config and scan again. Mix exports remain FLAC.
 
 ```sh
 pnpm install --frozen-lockfile

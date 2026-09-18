@@ -66,6 +66,8 @@ export type TimelineAnalysis = {
   sections: TrackSection[];
   downbeatTimesMs: number[];
   downbeatConfidence: number | null;
+  /** Absolute beat grid; beat-profile index 0 is beatTimesMs[0]. */
+  beatTimesMs?: number[];
   audioStartMs: number | null;
   audioEndMs: number | null;
   mixInMs: number | null;
@@ -80,6 +82,9 @@ export type TimelineAnalysis = {
     sub?: number[];
     midFlux?: number[];
     onsetDensity?: number[];
+    beatKick?: number[];
+    beatSnare?: number[];
+    beatOnset?: number[];
   } | null;
   manualMixInMs?: number | null;
   manualMixOutMs?: number | null;
@@ -97,6 +102,9 @@ export type TimelineAnalysis = {
       sub?: number[];
       midFlux?: number[];
       onsetDensity?: number[];
+      beatKick?: number[];
+      beatSnare?: number[];
+      beatOnset?: number[];
     } | null;
   } | null;
 };
@@ -247,6 +255,7 @@ export function chooseTransition(
     liveIdentity?: RecipeLiveIdentity | null;
     outgoingSourceStartMs?: number;
     outgoingHeadEndMs?: number;
+    maxBars?: PhraseBarCount | null;
   } = {},
 ): ChosenTransition {
   const outCanon = options.outgoingEffectiveBpm ?? tempoBpm(outgoing);
@@ -254,8 +263,15 @@ export function chooseTransition(
   if (outCanon == null || inCanon == null || !(outCanon > 0) || !(inCanon > 0)) {
     return crossfade("missing-bpm");
   }
-  const pairRate = playbackRateForBpm(inCanon, outCanon);
-  const tempoMismatch = Math.abs(pairRate - 1) > MAX_TEMPO_DEVIATION + 1e-9;
+  // Feasibility first: opposite-end pairs (170/178) can still meet at 174 with
+  // each deck inside ±3%. A direct out→in ratio would wrongly reject them.
+  const target = pairTargetBpm(outCanon, inCanon, {
+    chainTargetBpm: options.chainTargetBpm,
+    outgoingLocked: options.outgoingEffectiveBpm != null,
+  });
+  const tempoMismatch =
+    Math.abs(playbackRateForBpm(outCanon, target) - 1) > MAX_TEMPO_DEVIATION + 1e-9 ||
+    Math.abs(playbackRateForBpm(inCanon, target) - 1) > MAX_TEMPO_DEVIATION + 1e-9;
   const outGrid = outgoing.analysis?.gridOk === true;
   const inGrid = incoming.analysis?.gridOk === true;
   if (!outGrid || !inGrid) {
@@ -268,10 +284,6 @@ export function chooseTransition(
   if (tempoMismatch) {
     return crossfade("tempo-out-of-range", SHORT_CROSSFADE_MS);
   }
-  const target = pairTargetBpm(outCanon, inCanon, {
-    chainTargetBpm: options.chainTargetBpm,
-    outgoingLocked: options.outgoingEffectiveBpm != null,
-  });
   const outSource = gridBpm(outgoing) ?? outCanon;
   const inSource = gridBpm(incoming) ?? inCanon;
   const outgoingRate = playbackRateForBpm(outSource, target);
@@ -320,6 +332,7 @@ export function chooseTransition(
       outgoingSourceStartMs: options.outgoingSourceStartMs,
       outgoingHeadEndMs: options.outgoingHeadEndMs,
       ...(forcedBars ? { maxBars: forcedBars } : {}),
+      ...(!forcedBars && options.maxBars ? { maxBars: options.maxBars } : {}),
     });
   const leftConfidence = outgoing.analysis?.keyConfidence ?? (outgoing.camelotKey ? 1 : 0);
   const rightConfidence = incoming.analysis?.keyConfidence ?? (incoming.camelotKey ? 1 : 0);
@@ -382,6 +395,9 @@ export function chooseTransition(
         mixOutMs: resolvedWindow.mixOutMs,
         mixInMs: resolvedWindow.mixInMs,
         downbeatOffsetMs: resolvedWindow.alignmentOffsetMs,
+        ...(resolvedWindow.onsetLockBeats != null
+          ? { onsetLockBeats: resolvedWindow.onsetLockBeats }
+          : {}),
         ...(resolvedWindow.alignmentPeriodMs != null
           ? { alignmentPeriodMs: resolvedWindow.alignmentPeriodMs }
           : {}),
@@ -776,6 +792,9 @@ export function analysisToTimeline(
         sub?: number[];
         midFlux?: number[];
         onsetDensity?: number[];
+        beatKick?: number[];
+        beatSnare?: number[];
+        beatOnset?: number[];
       } | null;
     } | null;
     sections: Array<{
@@ -843,6 +862,7 @@ export function analysisToTimeline(
     sections,
     downbeatTimesMs: analysis.downbeatTimesMs ?? [],
     downbeatConfidence: analysis.downbeatConfidence ?? null,
+    beatTimesMs: analysis.beatTimesMs ?? [],
     audioStartMs: analysis.descriptors?.audioStartMs ?? null,
     audioEndMs: analysis.descriptors?.audioEndMs ?? null,
     mixInMs: mixIn.ms,

@@ -607,6 +607,16 @@ function downbeatConfidenceFromMargin(marginZ: number): number {
   return clamp(1 / (1 + Math.exp(-(marginZ - 0.12) * 10)), 0, 1);
 }
 
+function samplePeak(series: number[], ms: number, hopMs: number): number {
+  const start = Math.round((ms - hopMs) / hopMs);
+  const end = Math.round((ms + hopMs * 2) / hopMs);
+  let peak = 0;
+  for (let idx = start; idx <= end; idx += 1) {
+    peak = Math.max(peak, series[clamp(idx, 0, Math.max(0, series.length - 1))] ?? 0);
+  }
+  return peak;
+}
+
 function downbeatPhase(
   beats: number[],
   kick: number[],
@@ -1393,6 +1403,19 @@ export const dspAnalyzer: AudioAnalyzer = {
           sub: bars.map((bar) => Number(bar.sub.toFixed(2))),
           midFlux: bars.map((bar) => Number(bar.midFlux.toFixed(2))),
           onsetDensity: bars.map((bar) => Number(bar.onsetDensity.toFixed(2))),
+          ...(beatTimesMs.length >= 8
+            ? {
+                beatKick: beatTimesMs.map((time) =>
+                  Number(samplePeak(kickOnset, time, hopMs).toFixed(3)),
+                ),
+                beatSnare: beatTimesMs.map((time) =>
+                  Number(samplePeak(snareOnset, time, hopMs).toFixed(3)),
+                ),
+                beatOnset: beatTimesMs.map((time) =>
+                  Number(samplePeak(onset, time, hopMs).toFixed(3)),
+                ),
+              }
+            : {}),
         },
       },
       engineRuntimeMs: Date.now() - started,

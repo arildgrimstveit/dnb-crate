@@ -24,7 +24,7 @@ import {
   type TimelineAnalysis,
   type TimelineTrack,
 } from "../src/planning/timeline.ts";
-import { planTransition } from "../src/planning/transition-planner.ts";
+import { planTransition, validateTransition } from "../src/planning/transition-planner.ts";
 import type { SetPlanV1, Track, TrackSection } from "@dnb-crate/domain";
 
 function testConfig(root: string): AppConfig {
@@ -263,6 +263,65 @@ describe("set planning", () => {
     expect(first.plan.handoffPolicy).toBe("dj-continuity-v1");
     expect(first.plan.rateRegionsVersion).toBe(2);
     expect(first.plan.targetBpm).toBeNull();
+  });
+
+  it("reports actual versus required durations on a short trim", () => {
+    const track = {
+      id: "short-trim",
+      filePath: "short.wav",
+      fileFingerprint: "short",
+      artist: "A",
+      title: "Short Trim",
+      album: null,
+      durationMs: 180_000,
+      sampleRateHz: 44100,
+      channels: 2,
+      bpm: 174,
+      bpmSource: "manual" as const,
+      musicalKey: null,
+      camelotKey: null,
+      keySource: null,
+      energy: 5,
+      rating: 4,
+      subgenres: [],
+      moods: [],
+      tags: [],
+      notes: null,
+      analysisStatus: "complete" as const,
+      fileMissing: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const result = validateSetPlan(
+      {
+        schemaVersion: 1,
+        id: crypto.randomUUID(),
+        name: "Short",
+        targetDurationMs: 60_000,
+        targetBpm: null,
+        requestedArc: [],
+        entries: [
+          {
+            id: crypto.randomUUID(),
+            trackId: track.id,
+            order: 0,
+            sourceStartMs: 0,
+            sourceEndMs: 60_000,
+            timelineStartMs: 0,
+            playbackRate: 1,
+            gainDb: 0,
+            transitionToNext: null,
+          },
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      new Map([[track.id, track]]),
+    );
+    const trim = result.errors.find((issue) => issue.code === "INVALID_TRIM");
+    expect(trim?.message).toContain("60000ms");
+    expect(trim?.message).toContain("90000ms");
+    expect(trim?.message).toContain("short by 30000ms");
   });
 
   it("stores a minutes duration request on the plan", () => {
@@ -623,8 +682,26 @@ describe("planner tempo matching", () => {
     expect(planDurationMs(entries)).toBeGreaterThan(0);
   });
 
-  it("falls back to an 8s crossfade when 174/182 cannot lock within 3%", () => {
+  it("meets a 170/178 pair at 174 instead of crossfading", () => {
+    // Each deck is within ±3% of the meeting tempo even though the decks are
+    // 4.5% apart. The old direct-ratio gate rejected this pair.
+    const chosen = chooseTransition(gridTrack(170), gridTrack(178));
+    expect(["bass_swap", "phrase_mix"]).toContain(chosen.transition.type);
+    expect(chosen.targetBpm).toBe(174);
+    expect(chosen.outgoingRate).toBeCloseTo(174 / 170, 5);
+    expect(chosen.incomingRate).toBeCloseTo(174 / 178, 5);
+  });
+
+  it("meets a 174/182 pair at 178 with both decks inside 3%", () => {
     const chosen = chooseTransition(gridTrack(174), gridTrack(182));
+    expect(["bass_swap", "phrase_mix"]).toContain(chosen.transition.type);
+    expect(chosen.targetBpm).toBe(178);
+    expect(chosen.outgoingRate).toBeCloseTo(178 / 174, 5);
+    expect(chosen.incomingRate).toBeCloseTo(178 / 182, 5);
+  });
+
+  it("falls back to an 8s crossfade when 174/186 cannot lock within 3%", () => {
+    const chosen = chooseTransition(gridTrack(174), gridTrack(186));
     expect(chosen.transition.type).toBe("crossfade");
     expect(chosen.outgoingRate).toBe(1);
     expect(chosen.incomingRate).toBe(1);
@@ -1600,6 +1677,107 @@ describe("analyzed cue provenance", () => {
     });
     const proposal = planned.proposals.find((item) => item.type === "crossfade")!;
     expect(proposal.reasons.some((reason) => /analyzer-derived/i.test(reason))).toBe(false);
+  });
+});
+
+describe("transition tempo validation", () => {
+  function bundle(id: string, bpm: number) {
+    return {
+      track: {
+        id,
+        filePath: `${id}.wav`,
+        fileFingerprint: id,
+        artist: "A",
+        title: id,
+        album: null,
+        durationMs: 180_000,
+        sampleRateHz: 44100,
+        channels: 2,
+        bpm,
+        bpmSource: "manual" as const,
+        musicalKey: "Fm",
+        camelotKey: "4A",
+        keySource: "manual" as const,
+        energy: 5,
+        rating: 4,
+        subgenres: [],
+        moods: [],
+        tags: [],
+        notes: null,
+        analysisStatus: "complete" as const,
+        fileMissing: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      analysis: {
+        trackId: id,
+        analyzerName: "dnb-crate-dsp",
+        analyzerVersion: "3.3.0",
+        bpm,
+        bpmConfidence: 0.9,
+        bpmRaw: bpm,
+        beatTimesMs: [0, 345, 689],
+        downbeatTimesMs: [0, 1379],
+        gridRejected: false,
+        gridRejectionReason: null,
+        musicalKey: "Fm",
+        keyConfidence: 0.7,
+        keyMode: "minor" as const,
+        camelotKey: "4A",
+        tempoStability: 0.8,
+        downbeatConfidence: 0.7,
+        integratedLufs: null,
+        truePeakDb: null,
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        waveformSummary: null,
+        beatAnchorMs: null,
+        descriptors: testSonicDescriptors({ audioStartMs: 0, audioEndMs: 180_000 }),
+        engineRuntimeMs: 1,
+        analyzedAt: new Date().toISOString(),
+        suggestedCues: [],
+        sections: [],
+      },
+      cues: [],
+    };
+  }
+
+  it("honors an explicit 8-bar request instead of returning 16 bars", () => {
+    const planned = planTransition(bundle("out", 174), bundle("in", 174), {
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      preferredType: "phrase_mix",
+      barCount: 8,
+    });
+    const proposal = planned.proposals.find((item) => item.type === "phrase_mix")!;
+    expect(proposal.barCount).toBe(8);
+  });
+
+  it("rejects individually valid rates that leave the decks on different tempos", () => {
+    // 1.02 vs 0.98 on two 174 BPM grids: each rate is inside ±3%, but the
+    // outputs sit at ~177.5 vs ~170.5 BPM.
+    const result = validateTransition(bundle("out", 174), bundle("in", 174), {
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      type: "phrase_mix",
+      outgoingPlaybackRate: 1.02,
+      incomingPlaybackRate: 0.98,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.feasible).toBe(false);
+    expect(result.errors.some((error) => error.code === "TEMPO_MISMATCH")).toBe(true);
+  });
+
+  it("accepts consistent planned rates without explicit overrides", () => {
+    const result = validateTransition(bundle("out", 174), bundle("in", 176), {
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      type: "phrase_mix",
+    });
+    expect(result.errors).toHaveLength(0);
+    expect(result.valid).toBe(true);
+    expect(result.feasible).toBe(true);
   });
 });
 

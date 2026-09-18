@@ -4,7 +4,7 @@
 
 Point this at a local drum & bass folder. It catalogs the files, measures grids and keys, plans a deterministic mix of the length you ask for, and renders a gapless 24-bit master plus a 16-bit listen FLAC.
 
-**Use your existing MP3/M4A library.** You can mix MP3 (including variable-bitrate), unprotected M4A, WAV, FLAC, and AIFF files in the same set. No manual conversion is needed: FFmpeg decodes your sources for analysis and mixing, and the original files stay unchanged. FLAC is the output format; it avoids another lossy encoding step but cannot restore detail already lost in a compressed source.
+**Use your existing audio library.** You can mix MP3 (including variable-bitrate), unprotected M4A, Ogg Vorbis (`.ogg`/`.oga`), Ogg Opus (`.opus`), WAV, FLAC, and AIFF files in the same set. No manual conversion is needed: FFmpeg decodes your sources for analysis and mixing, and the original files stay unchanged. FLAC is the output format; it avoids another lossy encoding step but cannot restore detail already lost in a compressed source.
 
 An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server. The same services are on the CLI. The model interprets requests; this app owns scanning, storage, search, planning, and rendering.
 
@@ -59,7 +59,7 @@ pnpm cli plan:create --name "Named closer" --duration-min 60 --end-query "title 
 
 - Node.js 24+
 - [pnpm](https://pnpm.io/) 11+
-- A folder of audio you own (`.wav`, `.flac`, `.mp3`, `.m4a`, `.aiff`)
+- A folder of audio you own (`.wav`, `.flac`, `.mp3`, `.m4a`, `.ogg`, `.oga`, `.opus`, `.aiff`, `.aif`)
 - FFmpeg and ffprobe on `PATH` (see `docs/rendering.md`)
 - Optional: Rubber Band 4 CLI under `tools/rubberband-cli/` for join-only R3 stretch
 - KeyFinder CLI for automatic musical keys, under `tools/keyfinder-cli/`, on PATH, or configured with `keyfinderPath` (manual/published keys can be used without it)
@@ -73,7 +73,7 @@ copy dnb-crate.config.example.json dnb-crate.config.json
 
 Set `libraryRoots` to your music folder and `outputRoot` to a directory **outside** that folder. Config and `data/` are gitignored. Environment variables: `.env.example`.
 
-Keep the default `supportedExtensions` to include MP3 and M4A. Use `pnpm cli mix:create --name "First mix" --duration-min 60 --wait` to scan and prepare the folder automatically. The individual commands below remain available. Scanning reports malformed or unreadable files and continues with readable files. If a file fails, check that it plays locally and that the app can read it; replace or re-export damaged files. Changing the filename extension does not convert audio. DRM-protected downloads cannot be used. If non-WAV analysis reports missing FFmpeg, install FFmpeg/ffprobe or set `ffmpegPath`/`ffprobePath` in the config.
+Keep the default `supportedExtensions` to include all supported inputs. If an existing config has an explicit extension list, add `.ogg`, `.oga`, and `.opus`, or remove `supportedExtensions` to use the defaults. Restart the app after changing config, then scan again to import previously skipped files. Ogg support is for Vorbis and Opus audio; video (`.ogv`) and Speex are outside the supported input set. Use `pnpm cli mix:create --name "First mix" --duration-min 60 --wait` to scan and prepare the folder automatically. The individual commands below remain available. Scanning reports malformed or unreadable files and continues with readable files. If a file fails, check that it plays locally and that the app can read it; replace or re-export damaged files. Changing the filename extension does not convert audio. DRM-protected downloads cannot be used. If non-WAV analysis reports missing FFmpeg, install FFmpeg/ffprobe or set `ffmpegPath`/`ffprobePath` in the config.
 
 ## Typical flow
 
@@ -140,7 +140,7 @@ pnpm lint
 pnpm format:check
 ```
 
-Tests use generated audio fixtures. The compressed-audio integration suite encodes real CBR/VBR MP3, AAC/M4A, and FLAC files with FFmpeg, then checks scanning, analysis, mixing, and cue timing. It requires FFmpeg/ffprobe with the `libmp3lame` encoder (also installed in CI). Tests never read a private library.
+Tests use generated audio fixtures. The compressed-audio integration suite encodes real CBR/VBR MP3, AAC/M4A, FLAC, Ogg Vorbis (`.ogg`/`.oga`), and Ogg Opus (`.opus`) files with FFmpeg, then checks scanning, tags, analysis, Ogg cue previews, mixed-format FLAC rendering, and cue timing. MP3 and Ogg transition landmarks must stay within 2 ms of the WAV reference. It requires FFmpeg/ffprobe with the `libmp3lame`, `libvorbis`, and `libopus` encoders (verified by fixture generation in CI); normal use only needs the corresponding decoders. Tests never read a private library.
 
 ## Layout
 
