@@ -157,6 +157,8 @@ export function createCatalogRuntime(
       renders.recoverInterrupted();
       analysis.recoverInterrupted();
       enrichment.recoverInterrupted();
+    } else {
+      owner.heartbeat();
     }
     workflows.kick();
     renders.kick();

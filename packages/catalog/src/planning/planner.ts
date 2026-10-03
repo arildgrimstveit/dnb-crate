@@ -268,15 +268,28 @@ export function draftSetPlan(
   }
 
   const byId = new Map(pool.map((track) => [track.id, track]));
-  for (const id of compiled.lockedTrackIds) {
+  // Explicit pins — required tracks, locked transition ends, and the named
+  // start/end — override brief filters. Naming a closer must survive a
+  // descriptor, mood, or genre filter that would otherwise drop it; only a
+  // missing file or an explicit exclusion still rejects the pin.
+  const pinLabels = new Map<string, string>();
+  if (input.startTrackId) pinLabels.set(input.startTrackId, "start");
+  if (input.endTrackId) pinLabels.set(input.endTrackId, "end");
+  for (const id of requiredIds) pinLabels.set(id, "required");
+  for (const [id, label] of pinLabels) {
     const found = catalog.find((track) => track.id === id);
-    if (
-      found &&
-      (found.fileMissing || excludedIds.has(id) || excludedArtists.has(artistKey(found) ?? ""))
-    ) {
-      throw new PlanningConstraintError(`Required track ${id} is excluded or missing`);
+    if (!found) {
+      throw new Error(`TRACK_NOT_FOUND:${id}:${label}`);
     }
-    if (found && !byId.has(id)) {
+    if (found.fileMissing || excludedIds.has(id) || excludedArtists.has(artistKey(found) ?? "")) {
+      throw new PlanningConstraintError(`Required ${label} track ${id} is excluded or missing`);
+    }
+    // An explicitly excluded genre contradicts the brief; a missing include
+    // match (GENRE_MISMATCH) does not — the pin overrides it.
+    if (genresMatchFilter(found.genres, input.genres).reason === "GENRE_EXCLUDED") {
+      throw new PlanningConstraintError(`Required ${label} track ${id} is excluded or missing`);
+    }
+    if (!byId.has(id)) {
       byId.set(id, found);
       pool = [...pool, found];
     }

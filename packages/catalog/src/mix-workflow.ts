@@ -128,6 +128,30 @@ export class MixWorkflowCoordinator {
     if (this.activeId === id) this.abort.abort();
     row.status = "cancelled";
     this.repository.save(row);
+    // A step may still be settling (awaiting a child or a final guarded save).
+    // Wait for it, then re-assert cancellation so a late save or a child job
+    // registered after this point cannot resurrect the workflow.
+    const active = this.activeId === id ? this.active : null;
+    if (active) {
+      void active.catch(() => {});
+    }
+    const finalize = () => {
+      const current = this.get(id);
+      if (current.status !== "cancelled") {
+        current.status = "cancelled";
+        this.repository.save(current);
+      }
+      for (const child of current.analysisJobIds) this.analysis.cancel(child);
+      if (current.renderJobId && this.renders.findById(current.renderJobId))
+        this.service.cancelRenderJob(current.renderJobId, true);
+      return current;
+    };
+    // cancel() is synchronous from the caller's perspective; the settle pass
+    // runs as a microtask so ownership of `active` cannot deadlock the caller.
+    if (active) {
+      void active.then(finalize, finalize);
+      return row;
+    }
     for (const child of row.analysisJobIds) this.analysis.cancel(child);
     if (row.renderJobId && this.renders.findById(row.renderJobId))
       this.service.cancelRenderJob(row.renderJobId, true);
@@ -236,6 +260,9 @@ export class MixWorkflowCoordinator {
     }
   }
   private async step(row: MixWorkflow): Promise<void> {
+    // A cancel may have landed between kick()'s read and this step; never
+    // resurrect a cancelled workflow by writing "running" over it.
+    if (this.get(row.id).status === "cancelled") return;
     row.status = "running";
     this.repository.save(row);
     if (row.settingsIdentity !== this.settingsIdentity) {
@@ -294,28 +321,32 @@ export class MixWorkflowCoordinator {
         });
       this.advance(row, "analysis");
     } else if (row.stage === "analysis") {
-      const ids = Object.keys(row.candidates ?? {});
+      const candidateIds = Object.keys(row.candidates ?? {});
+      const trackFor = (id: string) => {
+        const track = this.tracks.findById(id);
+        return track && !track.fileMissing ? track : null;
+      };
+      const ids = candidateIds.filter((id) => trackFor(id) != null);
       const missingKeys = ids.filter(
         (id) =>
-          resolveCanonicalKeyConfidence(
-            this.tracks.findById(id)!,
-            this.analyses.findKeyAnalysis(id),
-          ) < 0.5,
+          resolveCanonicalKeyConfidence(trackFor(id)!, this.analyses.findKeyAnalysis(id)) < 0.5,
       );
       const missingKeySet = new Set(missingKeys);
       const keyedDuration = ids.reduce(
-        (sum, id) => sum + (missingKeySet.has(id) ? 0 : this.tracks.findById(id)!.durationMs),
+        (sum, id) => sum + (missingKeySet.has(id) ? 0 : trackFor(id)!.durationMs),
         0,
       );
       const requestedDuration = row.brief.targetDurationMinutes
         ? row.brief.targetDurationMinutes * 60000
         : (row.brief.targetDurationMs ?? 3600000);
+      // Without a KeyFinder executable the key stage never runs, so missing keys
+      // cannot be filled by any amount of analysis: block immediately instead
+      // of after chunked jobs have spun up.
       if (
         !row.dependencies.keyfinder &&
         row.effectiveSettings.keyAnalysis !== "off" &&
         missingKeys.length > 0 &&
-        keyedDuration < requestedDuration &&
-        !row.analysisJobIds.length
+        keyedDuration < requestedDuration
       ) {
         row.status = "blocked";
         row.issues.push(
@@ -350,6 +381,7 @@ export class MixWorkflowCoordinator {
           );
         } else {
           if (remaining.length) {
+            if (this.get(row.id).status === "cancelled" || this.stopped) return;
             this.repository.db.transaction(() => {
               const job = this.jobs.insertQueued(remaining.slice(0, 100));
               row.analysisJobIds.push(job.id);
@@ -357,8 +389,8 @@ export class MixWorkflowCoordinator {
             })();
           } else {
             const missing = ids.filter((id) => {
-              const track = this.tracks.findById(id)!;
-              return !track.musicalKey || this.analyses.getStage(id, "key")?.state === "failed";
+              const track = trackFor(id);
+              return !track?.musicalKey || this.analyses.getStage(id, "key")?.state === "failed";
             });
             if (missing.length)
               row.issues.push({

@@ -161,6 +161,37 @@ describe("required transitions and strict quality", () => {
       }),
     ).toThrow("excluded or missing");
   });
+  it("a named end track overrides descriptor filters that would exclude it", () => {
+    const catalog = runtime();
+    const end = seedTrack(catalog, { title: "Closer", artist: "Z", camelot: "8A", energy: 2 });
+    seedTrack(catalog, { title: "Opener", artist: "A", camelot: "8A", energy: 8 });
+    seedTrack(catalog, { title: "Middle", artist: "B", camelot: "8A", energy: 8 });
+    const result = catalog.service.createSetPlan({
+      name: "pinned-closer",
+      targetDurationMinutes: 6,
+      // Excludes the closer (descriptor energy 0.2) from the ordinary pool.
+      descriptors: { energy: { min: 0.5 } },
+      endTrackId: end,
+    });
+    const entries = result.plan.entries;
+    expect(entries[entries.length - 1]!.trackId).toBe(end);
+  });
+  it("a required track excluded by genre is an explicit error, not a silent drop", () => {
+    const catalog = runtime();
+    const a = seedTrack(catalog, { title: "A", artist: "A", camelot: "8A" });
+    const b = seedTrack(catalog, { title: "B", artist: "B", camelot: "8A" });
+    catalog.service.updateTrackMetadata(b, { genres: ["dnb"] });
+    expect(() =>
+      catalog.service.createSetPlan({
+        name: "genre-conflict",
+        requiredTrackIds: [b],
+        genres: { exclude: ["dnb"] },
+        requiredTransitions: [
+          { outgoingTrackId: a, incomingTrackId: b, strength: "required", reuse: "pair" },
+        ],
+      }),
+    ).toThrow("excluded or missing");
+  });
   it("keeps an unconstrained seed free of a weaker neighbour", () => {
     const catalog = runtime();
     const start = seedTrack(catalog, { title: "Start", artist: "A", camelot: "8A" });

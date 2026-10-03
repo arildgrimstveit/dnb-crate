@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createFakeFfmpegRunner, type ProcessRunner } from "@dnb-crate/audio-renderer";
 import type { AppConfig } from "@dnb-crate/domain";
 import { createCatalogRuntime, writeSineWav } from "../src/index.ts";
-import { hasLiveWorker, WorkerOwner } from "../src/worker-owner.ts";
+import { hasLiveWorker, WorkerOwner, WORKER_HEARTBEAT_STALE_MS } from "../src/worker-owner.ts";
 
 function deferred() {
   let resolve!: () => void;
@@ -94,6 +94,53 @@ describe("runtime ownership and shutdown", () => {
     const owner = new WorkerOwner(passive.db);
     expect(owner.acquire()).toBe(true);
     owner.release();
+  });
+
+  it("takes over an alive-but-stale-heartbeat owner (pid-reuse wedge)", async () => {
+    const config = await workspace();
+    const passive = open(config, { passive: true, useFakeFfmpeg: true });
+    // This test process is alive but never refreshes the heartbeat: exactly the
+    // shape of an exited owner whose pid was recycled by an unrelated process.
+    const stale = new Date(Date.now() - 2 * WORKER_HEARTBEAT_STALE_MS).toISOString();
+    passive.db
+      .prepare(
+        "INSERT INTO worker_owner (id, token, pid, heartbeat_at) VALUES (1, 'recycled', ?, ?)",
+      )
+      .run(process.pid, stale);
+    expect(hasLiveWorker(passive.db)).toBe(false);
+    const owner = new WorkerOwner(passive.db);
+    expect(owner.acquire()).toBe(true);
+    owner.release();
+    expect(hasLiveWorker(passive.db)).toBe(false);
+  });
+
+  it("respects an alive owner with a fresh heartbeat", async () => {
+    const config = await workspace();
+    const passive = open(config, { passive: true, useFakeFfmpeg: true });
+    passive.db
+      .prepare("INSERT INTO worker_owner (id, token, pid, heartbeat_at) VALUES (1, 'live', ?, ?)")
+      .run(process.pid, new Date().toISOString());
+    const owner = new WorkerOwner(passive.db);
+    expect(owner.acquire()).toBe(false);
+    expect(hasLiveWorker(passive.db)).toBe(true);
+  });
+
+  it("refreshes the ownership heartbeat while pumping", async () => {
+    const config = await workspace();
+    const first = open(config);
+    const readHeartbeat = () =>
+      (
+        first.db.prepare("SELECT heartbeat_at FROM worker_owner WHERE id = 1").get() as {
+          heartbeat_at: string | null;
+        }
+      ).heartbeat_at;
+    const before = readHeartbeat();
+    await new Promise((resolve) => setTimeout(resolve, 1400));
+    const after = readHeartbeat();
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    expect(Date.parse(after!)).toBeGreaterThan(Date.parse(before!));
+    expect(hasLiveWorker(first.db)).toBe(true);
   });
 
   it("the owner picks up jobs enqueued by another runtime", async () => {

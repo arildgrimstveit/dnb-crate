@@ -160,7 +160,10 @@ Generated files go under `outputRoot`. Tools never accept arbitrary paths, SQL, 
 One local runtime owns background jobs for each catalog database. Other runtimes can submit jobs;
 the owner polls for them every 250 ms. Reporting CLI commands and maintenance reports use passive
 runtimes, so they never recover or claim jobs. Recovery runs only after ownership is acquired from
-an exited process or released by a closing runtime. This coordination is for processes on the same
+an exited process or released by a closing runtime. The owner refreshes a heartbeat while polling;
+if a recorded owner's pid still looks alive but its heartbeat has been stale for five minutes
+(for example, a crashed owner whose pid was recycled by an unrelated process), another runtime
+takes the ownership over. This coordination is for processes on the same
 machine, consistent with the local SQLite catalog.
 
 CLI job commands (`mix:create`, `mix:resume`, `analysis:run`, `enrich:run`, `render:start`, and previews) enqueue only unless

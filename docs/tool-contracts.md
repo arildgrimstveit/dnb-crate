@@ -127,7 +127,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 - Input: name, optional `targetDurationMinutes` or `targetDurationMs` (default 60 minutes; 1 minute–8 hours), BPM/arc/required/excluded/preferences/start/end/seed, `descriptors` 0–1 ranges, `genres` include/exclude, `qualityPolicy`, `requiredTransitions`
 - Output: `{ plan, explanation, validation, partial, quality }`
-- Errors: `TRACK_NOT_FOUND` when a required/start/end id is not eligible
+- Errors: `TRACK_NOT_FOUND` when a required/start/end id does not exist. Named start/end and required tracks override pool filters (descriptors, moods, genres include, BPM, rating); an explicitly excluded track/artist/genre or a missing file still rejects the plan
 - Hard-rejects briefs with `NO_ANALYSIS`, `DESCRIPTOR_OUT_OF_RANGE`, `GENRE_EXCLUDED`, `DUPLICATE_RECORDING`; these surface as validation issue codes in the response, not as tool-level error envelopes
 - New plans default to `qualityPolicy: "strict"`. Joins always use continuity windows, supported sequential, and timing version 2.
 

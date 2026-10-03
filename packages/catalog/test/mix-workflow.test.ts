@@ -146,6 +146,30 @@ describe("durable mix workflows", () => {
     cleanup.push(() => reader.close());
     expect(reader.workflows.get(row.id).status).toBe("cancelled");
   });
+  it("cannot resurrect a cancelled workflow from an in-flight step", async () => {
+    const { runtime } = await fixture(false);
+    let release!: () => void;
+    const gate = new Promise<void>((done) => {
+      release = done;
+    });
+    let entered = false;
+    const original = runtime.workflows.preflight.check.bind(runtime.workflows.preflight);
+    const spy = vi.spyOn(runtime.workflows.preflight, "check").mockImplementation(async () => {
+      if (!entered) {
+        entered = true;
+        await gate;
+      }
+      return original();
+    });
+    const first = runtime.workflows.start({ brief, requestToken: "cancel-race" });
+    await expect.poll(() => runtime.workflows.get(first.id).status).toBe("running");
+    expect(runtime.workflows.cancel(first.id).status).toBe("cancelled");
+    release();
+    const settled = await runtime.workflows.wait(first.id);
+    expect(settled.status).toBe("cancelled");
+    expect(runtime.workflows.get(first.id).status).toBe("cancelled");
+    spy.mockRestore();
+  });
   it("does not requeue analysis when KeyFinder becomes unavailable", async () => {
     const { runtime } = await fixture();
     const row = runtime.workflows.start({ brief, requestToken: "key-gone" });
