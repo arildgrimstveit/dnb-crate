@@ -41,35 +41,44 @@ import {
   APP_NAME,
   recordHourFeedbackSchema,
   APP_VERSION,
-  COMPATIBLE_TRACKS_LIMIT_MAX,
   DomainError,
-  MIN_ANALYSIS_CONFIDENCE,
   RESOURCE_LIST_LIMIT,
-  assertPlaybackRate,
-  DNB_BPM_MAX,
-  DNB_BPM_MIN,
-  keyAgreement,
-  normalizeDnbBpm,
   resolveBpmHint,
   recipeFingerprint,
   renderJoinFingerprint,
   renderSequenceFingerprint,
   resolveCanonicalBpm,
   resolveCanonicalKeyConfidence,
-  scoreCandidate,
-  effectiveEnergy,
-  genresMatchFilter,
-  matchesDescriptorFilters,
   resolveDescriptorFilters,
   toPublicTrack,
 } from "@dnb-crate/domain";
-import { ffmpegMixReady, sha256Json } from "@dnb-crate/audio-renderer";
+import { ffmpegMixReady } from "@dnb-crate/audio-renderer";
 import type { HourFeedbackRepository } from "./hour-feedback-repository.ts";
 
+import { buildAnalysisReport, type AnalysisReport } from "./service/analysis-report.ts";
+import {
+  findCompatibleTracks as searchCompatibleTracks,
+  type CompatibleTracksInput,
+} from "./service/compatible-tracks.ts";
+import {
+  applySetPlanUpdate,
+  cloneSetPlanInto,
+  type UpdateSetPlanInput,
+} from "./service/plan-editor.ts";
+import {
+  audioEndMsByTrackId,
+  effectiveEnergyByTrackId,
+  firstDropStartMsByTrackId,
+  keyConfidenceByTrackId,
+  qualityFor,
+  qualityForPlan,
+  type QualityEvidenceContext,
+} from "./service/quality-evidence.ts";
+import type { RecipeRecallLookup } from "./planning/recall.ts";
 import { draftSetPlan } from "./planning/planner.ts";
 import { PlanningConstraintError } from "./planning/constraints.ts";
-import { reportSetPlanQuality, type TrackQualityEvidence } from "./planning/quality.ts";
-import { analysisToTimeline, buildEntries } from "./planning/timeline.ts";
+import type { TrackQualityEvidence } from "./planning/quality.ts";
+import { analysisToTimeline } from "./planning/timeline.ts";
 import { validateSetPlan } from "./planning/validate.ts";
 import type { TrackRepository } from "./repository.ts";
 import { resolveLibraryRoots } from "./scanner.ts";
@@ -86,7 +95,6 @@ import type { TrackEvidenceSelection } from "./analysis-repository.ts";
 import {
   analysisForTimeline,
   assertEvidenceEnginesExist,
-  isFrozenSnapshot,
   resolveTrackEvidence,
 } from "./evidence.ts";
 import type { FrozenRenderRequest } from "./render-job-repository.ts";
@@ -97,8 +105,8 @@ export class CatalogService {
   workflows!: MixWorkflowCoordinator;
   constructor(
     private readonly config: AppConfig,
-    private readonly repository: TrackRepository,
-    private readonly setPlans: SetPlanRepository,
+    readonly repository: TrackRepository,
+    readonly setPlans: SetPlanRepository,
     private readonly renders: RenderCoordinator,
     private readonly analysis: AnalysisCoordinator,
     private readonly analyses: AnalysisRepository,
@@ -397,214 +405,9 @@ export class CatalogService {
     };
   }
 
-  getAnalysisReport(): {
-    trackCount: number;
-    engineCounts: Record<string, number>;
-    inRange: { count: number; withinHalf: number; accepted: number; acceptedExact: number };
-    outOfRange: { count: number };
-    publishedOrManualCompared: number;
-    dspWithinHalfBpm: number;
-    engines: Array<{
-      trackId: string;
-      title: string;
-      analyzerName: string;
-      bpm: number | null;
-      bpmConfidence: number | null;
-      gridRejected: boolean;
-      gridSource: "analyzed" | "reference" | "anchor" | "sidecar" | null;
-      keyAgreement: "exact" | "relative" | "number_pm1" | "clash" | null;
-      sectionCount: number;
-    }>;
-    gridSourceCounts: { analyzed: number; reference: number; anchor: number; sidecar: number };
-    keyAgreementCounts: {
-      exact: number;
-      relative: number;
-      number_pm1: number;
-      clash: number;
-      unknown: number;
-    };
-    needsReview: Array<{
-      trackId: string;
-      title: string;
-      reason: "out-of-range" | "disagreement";
-      canonicalBpm: number | null;
-      canonicalSource: string | null;
-      publishedFolded: number | null;
-      dspBpm: number | null;
-      engines: Record<string, number | null>;
-    }>;
-    disagreements: Array<{
-      trackId: string;
-      title: string;
-      canonicalBpm: number | null;
-      canonicalSource: string | null;
-      engines: Record<string, number | null>;
-    }>;
-  } {
-    const engineCounts: Record<string, number> = {};
-    const disagreements: Array<{
-      trackId: string;
-      title: string;
-      canonicalBpm: number | null;
-      canonicalSource: string | null;
-      engines: Record<string, number | null>;
-    }> = [];
-    const needsReview: Array<{
-      trackId: string;
-      title: string;
-      reason: "out-of-range" | "disagreement";
-      canonicalBpm: number | null;
-      canonicalSource: string | null;
-      publishedFolded: number | null;
-      dspBpm: number | null;
-      engines: Record<string, number | null>;
-    }> = [];
-    const engineRows: Array<{
-      trackId: string;
-      title: string;
-      analyzerName: string;
-      bpm: number | null;
-      bpmConfidence: number | null;
-      gridRejected: boolean;
-      gridSource: "analyzed" | "reference" | "anchor" | "sidecar" | null;
-      keyAgreement: "exact" | "relative" | "number_pm1" | "clash" | null;
-      sectionCount: number;
-    }> = [];
-    const gridSourceCounts = { analyzed: 0, reference: 0, anchor: 0, sidecar: 0 };
-    const keyAgreementCounts = {
-      exact: 0,
-      relative: 0,
-      number_pm1: 0,
-      clash: 0,
-      unknown: 0,
-    };
-    let inRangeCount = 0;
-    let withinHalf = 0;
-    let accepted = 0;
-    let acceptedExact = 0;
-    let outOfRangeCount = 0;
-    const allTracks = this.repository.listAll();
-    for (const track of allTracks) {
-      const rows = this.analyses.listByTrackId(track.id);
-      if (rows.length === 0) {
-        continue;
-      }
-      for (const row of rows) {
-        engineCounts[row.analyzerName] = (engineCounts[row.analyzerName] ?? 0) + 1;
-      }
-      const view = this.analyses.toView(track, this.analyses.findByTrackId(track.id));
-      if (!view) {
-        continue;
-      }
-      const engines: Record<string, number | null> = {};
-      for (const row of rows) {
-        engines[row.analyzerName] = row.bpm;
-        const refKey =
-          view.canonicalKeySource === "manual" || view.canonicalKeySource === "published"
-            ? view.canonicalKey
-            : null;
-        engineRows.push({
-          trackId: track.id,
-          title: track.title,
-          analyzerName: row.analyzerName,
-          bpm: row.bpm,
-          bpmConfidence: row.bpmConfidence,
-          gridRejected: row.gridRejected,
-          gridSource: row.gridSource ?? "analyzed",
-          keyAgreement: keyAgreement(row.musicalKey, refKey),
-          sectionCount: row.sections.length,
-        });
-        const agreement = keyAgreement(row.musicalKey, refKey);
-        if (agreement) {
-          keyAgreementCounts[agreement] += 1;
-        } else {
-          keyAgreementCounts.unknown += 1;
-        }
-        const source = row.gridSource ?? "analyzed";
-        if (
-          source === "reference" ||
-          source === "anchor" ||
-          source === "analyzed" ||
-          source === "sidecar"
-        ) {
-          gridSourceCounts[source] += 1;
-        }
-      }
-      const ref =
-        view.canonicalBpmSource === "manual" || view.canonicalBpmSource === "published"
-          ? view.canonicalBpm
-          : null;
-      if (ref == null) {
-        continue;
-      }
-      const dsp = engines["dnb-crate-dsp"];
-      const inRange = ref >= DNB_BPM_MIN - 1e-6 && ref <= DNB_BPM_MAX + 1e-6;
-      const folded = normalizeDnbBpm(ref)?.bpm ?? null;
-      if (!inRange) {
-        outOfRangeCount += 1;
-        needsReview.push({
-          trackId: track.id,
-          title: track.title,
-          reason: "out-of-range",
-          canonicalBpm: view.canonicalBpm,
-          canonicalSource: view.canonicalBpmSource,
-          publishedFolded: folded,
-          dspBpm: dsp ?? null,
-          engines,
-        });
-        continue;
-      }
-      inRangeCount += 1;
-      if (dsp != null && Math.abs(dsp - ref) <= 0.5) {
-        withinHalf += 1;
-      }
-      const dspRow = rows.find((row) => row.analyzerName === "dnb-crate-dsp");
-      const dspAccepted =
-        dspRow != null &&
-        !dspRow.gridRejected &&
-        (dspRow.bpmConfidence ?? 0) >= MIN_ANALYSIS_CONFIDENCE &&
-        dspRow.bpm != null;
-      if (dspAccepted) {
-        accepted += 1;
-        if (Math.abs(dspRow.bpm! - ref) <= 0.5) {
-          acceptedExact += 1;
-        }
-      }
-      const values = Object.values(engines).filter((bpm): bpm is number => bpm != null);
-      const spread = values.length >= 2 && Math.max(...values) - Math.min(...values) > 1;
-      const off = dsp != null && Math.abs(dsp - ref) > 0.5;
-      if (spread || off) {
-        const row = {
-          trackId: track.id,
-          title: track.title,
-          canonicalBpm: view.canonicalBpm,
-          canonicalSource: view.canonicalBpmSource,
-          engines,
-        };
-        disagreements.push(row);
-        needsReview.push({
-          ...row,
-          reason: "disagreement",
-          publishedFolded: folded,
-          dspBpm: dsp ?? null,
-        });
-      }
-    }
-    return {
-      trackCount: allTracks.length,
-      engineCounts,
-      inRange: { count: inRangeCount, withinHalf, accepted, acceptedExact },
-      outOfRange: { count: outOfRangeCount },
-      publishedOrManualCompared: inRangeCount + outOfRangeCount,
-      dspWithinHalfBpm: withinHalf,
-      gridSourceCounts,
-      keyAgreementCounts,
-      engines: engineRows.slice(0, 200),
-      needsReview: needsReview.slice(0, 50),
-      disagreements: disagreements.slice(0, 50),
-    };
+  getAnalysisReport(): AnalysisReport {
+    return buildAnalysisReport(this.repository, this.analyses);
   }
-
   async createCuePreview(input: {
     trackId: string;
     cue?: "intro_start" | "drop" | "breakdown" | "outro_start";
@@ -773,123 +576,12 @@ export class CatalogService {
     };
   }
 
-  findCompatibleTracks(input: {
+  findCompatibleTracks(input: CompatibleTracksInput): {
     sourceTrackId: string;
-    direction?: "up" | "down" | "any";
-    limit?: number;
-    preferredMoods?: string[];
-    preferredSubgenres?: string[];
-    preferredTags?: string[];
-    harmonicImportance?: number;
-    subBassMin?: number;
-    brightnessMin?: number;
-    energyMin?: number;
-    energyMax?: number;
-    descriptors?: CreateSetPlanInput["descriptors"];
-    genres?: CreateSetPlanInput["genres"];
-  }): { sourceTrackId: string; candidates: CompatibleTrack[] } {
+    candidates: CompatibleTrack[];
+  } {
     const source = this.requireTrack(input.sourceTrackId);
-    const limit = Math.min(input.limit ?? 10, COMPATIBLE_TRACKS_LIMIT_MAX);
-    const analysisOf = (trackId: string) =>
-      analysisForTimeline(resolveTrackEvidence(this.analyses, trackId));
-    const srcA = analysisOf(source.id);
-    const sectionMs = (
-      analysis: ReturnType<typeof analysisOf>,
-      type: "intro" | "outro",
-    ): number | null => {
-      const section = analysis?.sections.find((row) => row.type === type);
-      return section ? section.endMs - section.startMs : null;
-    };
-    const scored = this.repository
-      .listAll()
-      .map((track) => ({ track, analysis: analysisOf(track.id) }))
-      .filter(({ track, analysis }) => {
-        if (track.id === source.id || track.fileMissing) {
-          return false;
-        }
-        const desc = analysis?.descriptors ?? null;
-        if (input.energyMin !== undefined) {
-          const energy = track.energy ?? desc?.suggestedEnergy;
-          if (energy == null || energy < input.energyMin) {
-            return false;
-          }
-        }
-        if (input.energyMax !== undefined) {
-          const energy = track.energy ?? desc?.suggestedEnergy;
-          if (energy == null || energy > input.energyMax) {
-            return false;
-          }
-        }
-        if (input.subBassMin !== undefined && (desc?.subBassRatio ?? -1) < input.subBassMin) {
-          return false;
-        }
-        if (input.brightnessMin !== undefined && (desc?.brightness ?? -1) < input.brightnessMin) {
-          return false;
-        }
-        const descriptorMatch = matchesDescriptorFilters(track, desc, input.descriptors);
-        if (!descriptorMatch.ok) {
-          return false;
-        }
-        const genreMatch = genresMatchFilter(track.genres, input.genres);
-        if (!genreMatch.ok) {
-          return false;
-        }
-        return true;
-      })
-      .map(({ track, analysis: candA }) => {
-        return {
-          track,
-          score: scoreCandidate({
-            source,
-            candidate: track,
-            targetEnergy: null,
-            direction: input.direction ?? "any",
-            preferredMoods: input.preferredMoods ?? [],
-            preferredSubgenres: input.preferredSubgenres ?? [],
-            preferredTags: input.preferredTags ?? [],
-            preferredArtists: [],
-            recentArtistIds: [source.artist],
-            artistRepeatSpacing: 1,
-            harmonicImportance: input.harmonicImportance ?? 1,
-            explorationWeight: 0,
-            seed: 1,
-            alreadyUsed: false,
-            suggestedEnergy: candA?.descriptors?.suggestedEnergy ?? null,
-            sourceSuggestedEnergy: srcA?.descriptors?.suggestedEnergy ?? null,
-            outgoingOutroMs: sectionMs(srcA, "outro"),
-            incomingIntroMs: sectionMs(candA, "intro"),
-            bpmHint: candA ? resolveBpmHint(candA).bpm : null,
-            sourceBpmHint: srcA ? resolveBpmHint(srcA).bpm : null,
-            descriptors: candA?.descriptors ?? null,
-            sourceDescriptors: srcA?.descriptors ?? null,
-            candidateKeyConfidence: resolveCanonicalKeyConfidence(track, candA),
-            sourceKeyConfidence: resolveCanonicalKeyConfidence(source, srcA),
-            candidateGridOk: Boolean(candA && !candA.gridRejected),
-            sourceGridOk: Boolean(srcA && !srcA.gridRejected),
-            candidateLufs: candA?.integratedLufs ?? null,
-            sourceLufs: srcA?.integratedLufs ?? null,
-            candidateGenres: track.genres,
-          }),
-        };
-      })
-      .sort((a, b) => b.score.total - a.score.total || a.track.id.localeCompare(b.track.id))
-      .slice(0, limit);
-    return {
-      sourceTrackId: source.id,
-      candidates: scored.map((item) => ({
-        track: {
-          id: item.track.id,
-          artist: item.track.artist,
-          title: item.track.title,
-          bpm: item.track.bpm,
-          musicalKey: item.track.musicalKey,
-          camelotKey: item.track.camelotKey,
-          energy: item.track.energy,
-          rating: item.track.rating,
-        },
-        score: item.score,
-      })),
-    };
+    return searchCompatibleTracks(this.repository, this.analyses, source, input);
   }
 
   createSetPlan(
@@ -988,64 +680,8 @@ export class CatalogService {
   }
 
   cloneSetPlan(input: { setPlanId: string; name: string; replan?: boolean }): CreateSetPlanResult {
-    const stored = this.requirePlan(input.setPlanId);
-    const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
-    const ordered = [...stored.plan.entries].sort((a, b) => a.order - b.order);
-    const orderedTracks = ordered.map((entry) => {
-      const track = tracksById.get(entry.trackId);
-      if (!track) {
-        throw new DomainError("TRACK_NOT_FOUND", `Track ${entry.trackId} is missing`);
-      }
-      return track;
-    });
-    const now = new Date().toISOString();
-    const entries = input.replan
-      ? buildEntries(
-          this.timelineTracksFor(orderedTracks),
-          undefined,
-          new Map(
-            ordered
-              .filter((entry) => entry.gainDb !== 0)
-              .map((entry) => [entry.trackId, { gainDb: entry.gainDb }]),
-          ),
-          {
-            dropAnchored: true,
-            targetBpm: stored.plan.targetBpm,
-            recall: this.recipeLookupFor(stored.plan),
-          },
-        )
-      : ordered.map((entry) => ({
-          ...entry,
-          id: crypto.randomUUID(),
-          transitionToNext: entry.transitionToNext
-            ? { ...entry.transitionToNext, id: crypto.randomUUID() }
-            : null,
-        }));
-    const plan: SetPlanV1 = {
-      ...stored.plan,
-      id: crypto.randomUUID(),
-      name: input.name,
-      entries,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const validation = validateSetPlan(plan, tracksById, {
-      audioEndMsByTrackId: this.audioEndMsByTrackId(),
-      effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
-      keyConfidenceByTrackId: this.keyConfidenceByTrackId(),
-      firstDropStartMsByTrackId: this.firstDropStartMsByTrackId(),
-    });
-    const saved = this.setPlans.save(plan, stored.seed, stored.explanation);
-    const quality = this.qualityFor(saved.plan, { validation, partial: false });
-    return {
-      plan: saved.plan,
-      explanation: saved.explanation,
-      validation: { ...validation, quality },
-      partial: quality.partial,
-      quality,
-    };
+    return cloneSetPlanInto(this, input);
   }
-
   async validateSavedSetPlan(setPlanId: string): Promise<ValidateSetPlanResult> {
     const validation = await this.renders.validatePlan(setPlanId);
     const plan = this.requirePlan(setPlanId).plan;
@@ -1181,199 +817,10 @@ export class CatalogService {
     return { deleted, setPlanId };
   }
 
-  updateSetPlan(input: {
-    setPlanId: string;
-    name?: string;
-    replaceTrack?: { entryId: string; trackId: string };
-    setTrim?: { entryId: string; sourceStartMs: number; sourceEndMs: number };
-    setTransition?: {
-      entryId: string;
-      type: "crossfade" | "phrase_mix" | "bass_swap" | "double_drop";
-      durationMs: number;
-      outgoingCuePointId?: string | null;
-      incomingCuePointId?: string | null;
-      parameters?: Record<string, number | string | boolean>;
-    };
-    setPlaybackRate?: { entryId: string; playbackRate: number };
-    applyTransition?: {
-      entryId: string;
-      type: "crossfade" | "phrase_mix" | "bass_swap";
-      durationMs: number;
-      outgoingCuePointId?: string | null;
-      incomingCuePointId?: string | null;
-      outgoingPlaybackRate: number;
-      incomingPlaybackRate: number;
-      outgoingSourceStartMs: number;
-      outgoingSourceEndMs: number;
-      incomingSourceStartMs: number;
-      incomingSourceEndMs: number;
-      parameters?: Record<string, number | string | boolean>;
-    };
-    moveEntry?: { entryId: string; toOrder: number };
-  }): CreateSetPlanResult {
-    const stored = this.requirePlan(input.setPlanId);
-    const entries = [...stored.plan.entries].sort((a, b) => a.order - b.order);
-    if (input.replaceTrack) {
-      const entry = entries.find((item) => item.id === input.replaceTrack!.entryId);
-      if (!entry) {
-        throw new DomainError("INVALID_SET_PLAN", `No entry ${input.replaceTrack.entryId}`);
-      }
-      const track = this.requireTrack(input.replaceTrack.trackId);
-      const index = entries.indexOf(entry);
-      if (index > 0) {
-        entries[index - 1] = { ...entries[index - 1]!, transitionToNext: null };
-      }
-      if (index + 1 < entries.length) {
-        const next = { ...entries[index + 1]! };
-        delete (next as { sourceStartMs?: number }).sourceStartMs;
-        entries[index + 1] = next;
-      }
-      entries[index] = {
-        id: entry.id,
-        trackId: track.id,
-        order: entry.order,
-        timelineStartMs: entry.timelineStartMs,
-        playbackRate: 1,
-        gainDb: entry.gainDb,
-        transitionToNext: null,
-      } as (typeof entries)[number];
-    }
-    if (input.setTrim) {
-      const entry = entries.find((item) => item.id === input.setTrim!.entryId);
-      if (!entry) {
-        throw new DomainError("INVALID_SET_PLAN", `No entry ${input.setTrim.entryId}`);
-      }
-      entry.sourceStartMs = input.setTrim.sourceStartMs;
-      entry.sourceEndMs = input.setTrim.sourceEndMs;
-    }
-    if (input.setTransition) {
-      const entry = entries.find((item) => item.id === input.setTransition!.entryId);
-      if (!entry) {
-        throw new DomainError("INVALID_SET_PLAN", `No entry ${input.setTransition.entryId}`);
-      }
-      if (entry.transitionToNext === null) {
-        throw new DomainError("INVALID_SET_PLAN", "The last entry has no transition to next");
-      }
-      entry.transitionToNext = {
-        ...entry.transitionToNext,
-        type: input.setTransition.type,
-        durationMs: input.setTransition.durationMs,
-        outgoingCuePointId:
-          input.setTransition.outgoingCuePointId !== undefined
-            ? input.setTransition.outgoingCuePointId
-            : entry.transitionToNext.outgoingCuePointId,
-        incomingCuePointId:
-          input.setTransition.incomingCuePointId !== undefined
-            ? input.setTransition.incomingCuePointId
-            : entry.transitionToNext.incomingCuePointId,
-        parameters: input.setTransition.parameters ?? entry.transitionToNext.parameters,
-      };
-    }
-    if (input.setPlaybackRate) {
-      const entry = entries.find((item) => item.id === input.setPlaybackRate!.entryId);
-      if (!entry) {
-        throw new DomainError("INVALID_SET_PLAN", `No entry ${input.setPlaybackRate.entryId}`);
-      }
-      assertPlaybackRate(input.setPlaybackRate.playbackRate, { allowExcessive: true });
-      entry.playbackRate = input.setPlaybackRate.playbackRate;
-    }
-    if (input.applyTransition) {
-      const index = entries.findIndex((item) => item.id === input.applyTransition!.entryId);
-      if (index < 0 || index >= entries.length - 1) {
-        throw new DomainError(
-          "INVALID_SET_PLAN",
-          `No transition from entry ${input.applyTransition.entryId}`,
-        );
-      }
-      const outgoing = entries[index]!;
-      const incoming = entries[index + 1]!;
-      if (outgoing.transitionToNext === null) {
-        throw new DomainError("INVALID_SET_PLAN", "The last entry has no transition to next");
-      }
-      assertPlaybackRate(input.applyTransition.outgoingPlaybackRate, { allowExcessive: true });
-      assertPlaybackRate(input.applyTransition.incomingPlaybackRate, { allowExcessive: true });
-      outgoing.sourceStartMs = Math.min(
-        outgoing.sourceStartMs,
-        input.applyTransition.outgoingSourceStartMs,
-      );
-      outgoing.sourceEndMs = input.applyTransition.outgoingSourceEndMs;
-      outgoing.playbackRate = input.applyTransition.outgoingPlaybackRate;
-      incoming.sourceStartMs = input.applyTransition.incomingSourceStartMs;
-      if (incoming.transitionToNext === null) {
-        incoming.sourceEndMs = input.applyTransition.incomingSourceEndMs;
-      }
-      incoming.playbackRate = input.applyTransition.incomingPlaybackRate;
-      outgoing.transitionToNext = {
-        ...outgoing.transitionToNext,
-        type: input.applyTransition.type,
-        durationMs: input.applyTransition.durationMs,
-        outgoingCuePointId:
-          input.applyTransition.outgoingCuePointId !== undefined
-            ? input.applyTransition.outgoingCuePointId
-            : outgoing.transitionToNext.outgoingCuePointId,
-        incomingCuePointId:
-          input.applyTransition.incomingCuePointId !== undefined
-            ? input.applyTransition.incomingCuePointId
-            : outgoing.transitionToNext.incomingCuePointId,
-        parameters: input.applyTransition.parameters ?? outgoing.transitionToNext.parameters,
-      };
-    }
-    if (input.moveEntry) {
-      const from = entries.findIndex((item) => item.id === input.moveEntry!.entryId);
-      if (from < 0) {
-        throw new DomainError("INVALID_SET_PLAN", `No entry ${input.moveEntry.entryId}`);
-      }
-      const [moved] = entries.splice(from, 1);
-      const to = Math.min(input.moveEntry.toOrder, entries.length);
-      entries.splice(to, 0, moved!);
-    }
-    const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
-    const orderedTracks = entries.map((entry) => {
-      const track = tracksById.get(entry.trackId);
-      if (!track) {
-        throw new DomainError("TRACK_NOT_FOUND", `Track ${entry.trackId} is missing`);
-      }
-      return track;
-    });
-    const rebuilt = buildEntries(
-      orderedTracks.map((track) => ({ ...track, analysis: this.toTimeline(track) })),
-      undefined,
-      new Map(entries.map((entry) => [entry.trackId, entry])),
-      { targetBpm: stored.plan.targetBpm, recall: this.recipeLookupFor(stored.plan) },
-    );
-    const plan: SetPlanV1 = {
-      ...stored.plan,
-      name: input.name ?? stored.plan.name,
-      entries: rebuilt,
-      updatedAt: new Date().toISOString(),
-    };
-    const validation = validateSetPlan(plan, tracksById, {
-      audioEndMsByTrackId: this.audioEndMsByTrackId(),
-      effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
-      keyConfidenceByTrackId: this.keyConfidenceByTrackId(),
-      firstDropStartMsByTrackId: this.firstDropStartMsByTrackId(),
-    });
-    if (!validation.valid) {
-      throw new DomainError(
-        "INVALID_SET_PLAN",
-        validation.errors.map((issue) => issue.message).join("; "),
-        {
-          details: { errors: validation.errors },
-        },
-      );
-    }
-    const saved = this.setPlans.save(plan, stored.seed, stored.explanation);
-    const quality = this.qualityFor(saved.plan, { validation, partial: false });
-    return {
-      plan: saved.plan,
-      explanation: saved.explanation,
-      validation: { ...validation, quality },
-      partial: quality.partial,
-      quality,
-    };
+  updateSetPlan(input: UpdateSetPlanInput): CreateSetPlanResult {
+    return applySetPlanUpdate(this, input);
   }
-
-  private bundle(trackId: string) {
+  bundle(trackId: string) {
     const track = this.requireTrack(trackId);
     return {
       track,
@@ -1382,11 +829,7 @@ export class CatalogService {
     };
   }
 
-  private timelineTracksFor(tracks: Track[]) {
-    return tracks.map((track) => ({ ...track, analysis: this.toTimeline(track) }));
-  }
-
-  private toTimeline(track: Track) {
+  toTimeline(track: Track) {
     const evidence = resolveTrackEvidence(this.analyses, track.id);
     const row = analysisForTimeline(evidence);
     const canon = resolveCanonicalBpm(track, evidence.rhythm ?? row);
@@ -1532,7 +975,7 @@ export class CatalogService {
     return this.recipes.listAll();
   }
 
-  private recipeLookupFor(plan: SetPlanV1) {
+  recipeLookupFor(plan: SetPlanV1): RecipeRecallLookup {
     return {
       listForPair: (outgoingTrackId: string, incomingTrackId: string) =>
         this.recipes.listForPair(outgoingTrackId, incomingTrackId),
@@ -1551,90 +994,25 @@ export class CatalogService {
     };
   }
 
-  private keyConfidenceByTrackId(): Map<string, number> {
-    const out = new Map<string, number>();
-    for (const track of this.repository.listAll()) {
-      const keyRow = this.analyses.findKeyAnalysis(track.id);
-      out.set(track.id, resolveCanonicalKeyConfidence(track, keyRow));
-    }
-    return out;
+  private qualityContext(): QualityEvidenceContext {
+    return {
+      repository: this.repository,
+      analyses: this.analyses,
+      recipes: this.recipes,
+      hourFeedback: this.hourFeedback,
+      toTimeline: (track) => this.toTimeline(track),
+    };
   }
 
-  private qualityEvidenceByTrackId(): Map<string, TrackQualityEvidence> {
-    const out = new Map<string, TrackQualityEvidence>();
-    for (const track of this.repository.listAll()) {
-      const rhythm = this.analyses.findByTrackId(track.id);
-      const keyRow = this.analyses.findKeyAnalysis(track.id) ?? rhythm;
-      const timeline = this.toTimeline(track);
-      out.set(track.id, {
-        musicalKey:
-          track.keySource === "manual" || track.keySource === "published"
-            ? track.musicalKey
-            : (keyRow?.musicalKey ?? track.musicalKey),
-        camelotKey:
-          track.keySource === "manual" || track.keySource === "published"
-            ? track.camelotKey
-            : (keyRow?.camelotKey ?? track.camelotKey),
-        keySource: track.keySource,
-        keyConfidence: resolveCanonicalKeyConfidence(track, keyRow),
-        keyAnalyzerName: keyRow?.analyzerName ?? null,
-        nativeBpm: resolveCanonicalBpm(track, rhythm).bpm,
-        gridOk: timeline?.gridOk ?? false,
-        gridEngine: rhythm?.analyzerName ?? null,
-      });
-    }
-    return out;
+  keyConfidenceByTrackId(): Map<string, number> {
+    return keyConfidenceByTrackId(this.qualityContext());
   }
 
-  private qualityForPlan(
-    plan: SetPlanV1,
-    evidence?: FrozenRenderRequest["evidence"],
-  ): PlanQualityReport {
-    const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
-    const audioEndMsByTrackId = this.audioEndMsByTrackId();
-    const keyConfidenceByTrackId = this.keyConfidenceByTrackId();
-    const firstDropStartMsByTrackId = this.firstDropStartMsByTrackId();
-    const evidenceByTrackId = this.qualityEvidenceByTrackId();
-    if (evidence) {
-      for (const [trackId, row] of Object.entries(evidence)) {
-        if (!isFrozenSnapshot(row)) {
-          continue;
-        }
-        if (typeof row.audioEndMs === "number") {
-          audioEndMsByTrackId.set(trackId, row.audioEndMs);
-        }
-        if (typeof row.keyConfidence === "number") {
-          keyConfidenceByTrackId.set(trackId, row.keyConfidence);
-        }
-        const drops = row.sections.filter((section) => section.type === "drop");
-        const drop = drops[0];
-        if (drop && Number.isFinite(drop.startMs)) {
-          firstDropStartMsByTrackId.set(trackId, drop.startMs);
-        }
-        const track = tracksById.get(trackId);
-        evidenceByTrackId.set(trackId, {
-          musicalKey: row.musicalKey ?? track?.musicalKey ?? null,
-          camelotKey: row.camelotKey ?? track?.camelotKey ?? null,
-          keySource: track?.keySource ?? null,
-          keyConfidence: row.keyConfidence ?? 0,
-          keyAnalyzerName: row.keyEngine ?? null,
-          nativeBpm: row.bpm,
-          gridOk: row.present && !row.gridRejected,
-          gridEngine: row.rhythmEngine ?? null,
-        });
-      }
-    }
-    const validation = validateSetPlan(plan, tracksById, {
-      artistRepeatSpacing: plan.planningConstraints?.artistRepeatSpacing,
-      audioEndMsByTrackId,
-      effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
-      keyConfidenceByTrackId,
-      firstDropStartMsByTrackId,
-    });
-    return this.qualityFor(plan, { validation, evidenceByTrackId });
+  qualityForPlan(plan: SetPlanV1, evidence?: FrozenRenderRequest["evidence"]): PlanQualityReport {
+    return qualityForPlan(this.qualityContext(), plan, evidence);
   }
 
-  private qualityFor(
+  qualityFor(
     plan: SetPlanV1,
     options: {
       validation: ValidateSetPlanResult;
@@ -1643,44 +1021,21 @@ export class CatalogService {
       evidenceByTrackId?: Map<string, TrackQualityEvidence>;
     },
   ): PlanQualityReport {
-    return reportSetPlanQuality({
-      plan,
-      tracksById: new Map(this.repository.listAll().map((track) => [track.id, track])),
-      evidenceByTrackId: options.evidenceByTrackId ?? this.qualityEvidenceByTrackId(),
-      validation: options.validation,
-      recipes: this.recipes,
-      constraints: plan.planningConstraints ?? null,
-      partial: options.partial,
-      partialReasons: options.partialReasons,
-      hourAccepted: this.hourFeedback.acceptedPlan(plan.id, sha256Json(plan)),
-    });
+    return qualityFor(this.qualityContext(), plan, options);
   }
 
-  private audioEndMsByTrackId(): Map<string, number> {
-    const map = new Map<string, number>();
-    for (const track of this.repository.listAll()) {
-      const end = this.analyses.findByTrackId(track.id)?.descriptors?.audioEndMs;
-      if (typeof end === "number") {
-        map.set(track.id, end);
-      }
-    }
-    return map;
+  audioEndMsByTrackId(): Map<string, number> {
+    return audioEndMsByTrackId(this.qualityContext());
   }
 
-  private firstDropStartMsByTrackId(): Map<string, number> {
-    const map = new Map<string, number>();
-    for (const track of this.repository.listAll()) {
-      const drop = analysisForTimeline(
-        resolveTrackEvidence(this.analyses, track.id),
-      )?.sections?.find((section) => section.type === "drop");
-      if (drop && Number.isFinite(drop.startMs)) {
-        map.set(track.id, drop.startMs);
-      }
-    }
-    return map;
+  firstDropStartMsByTrackId(): Map<string, number> {
+    return firstDropStartMsByTrackId(this.qualityContext());
   }
 
-  private requireTrack(trackId: string) {
+  effectiveEnergyByTrackId(): Map<string, number> {
+    return effectiveEnergyByTrackId(this.qualityContext());
+  }
+  requireTrack(trackId: string) {
     const track = this.repository.findById(trackId);
     if (!track) {
       throw new DomainError("TRACK_NOT_FOUND", `No track with id ${trackId}`);
@@ -1688,26 +1043,12 @@ export class CatalogService {
     return track;
   }
 
-  private requirePlan(setPlanId: string) {
+  requirePlan(setPlanId: string) {
     const stored = this.setPlans.findById(setPlanId);
     if (!stored) {
       throw new DomainError("SET_PLAN_NOT_FOUND", `No set plan with id ${setPlanId}`);
     }
     return stored;
-  }
-
-  private effectiveEnergyByTrackId(): Map<string, number> {
-    const out = new Map<string, number>();
-    for (const track of this.repository.listAll()) {
-      const energy = effectiveEnergy(
-        track,
-        this.analyses.findByTrackId(track.id)?.descriptors ?? null,
-      );
-      if (energy != null) {
-        out.set(track.id, energy);
-      }
-    }
-    return out;
   }
 
   getLibraryStats(): LibraryStats {
