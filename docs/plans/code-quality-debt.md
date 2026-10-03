@@ -25,7 +25,7 @@ the full `pnpm test` green. The beatmatching phases
   is reduced where it has already drifted; a full `z.infer` migration is a
   breaking-change project and is explicitly deferred.
 
-## Phase Q0 — dead code and no-op removal (S)
+## Phase Q0 — dead code and no-op removal (S) — COMPLETE
 
 Remove, after verifying zero importers (production, tests, tools):
 
@@ -49,7 +49,13 @@ Remove, after verifying zero importers (production, tests, tools):
 
 **Acceptance:** suite green; `git grep` for each removed symbol returns nothing.
 
-## Phase Q1 — deduplication within packages (S–M)
+## Phase Q1 — deduplication within packages (S–M) — COMPLETE except noted
+
+Done: shared nowIso; domain clamp/finiteNumber; parameterized field writer;
+recordingKeyOfRow; generic frozen-evidence collector; shared artistKey;
+pairConstraintKey rename; single camelotNumberDelta. Remaining: the
+approved-recipe applicability/feasibility merge and the DESCRIPTOR_KEYS single
+source (both deferred with Q4 steps 3–5, which touch the same files).
 
 - One `nowIso()` util in catalog; the five repository copies import it.
 - Domain exports one `clamp`; `mix-presets.ts` local copy goes. One
@@ -72,7 +78,11 @@ Remove, after verifying zero importers (production, tests, tools):
   `sectionAtMs` consumers unified on the domain helper where shapes allow.
 - `keys.ts` computes harmonic number-distance once; the three call sites use it.
 
-## Phase Q2 — contract hygiene (M)
+## Phase Q2 — contract hygiene (M) — PARTIAL
+
+Done: feedback drift fixed; transition-type enums hoisted. Remaining: the
+contracts.ts file split, requiredTransitionSchema/renderReadiness/issue-schema
+hoists, set-plan-repository validating parses, uuid idiom unification.
 
 - Fix the live drift: `scoreBreakdownSchema.components.feedback` becomes
   required (matches `ScoreComponents`).
@@ -89,7 +99,7 @@ Remove, after verifying zero importers (production, tests, tools):
   stop fabricating `handoffPolicy` on read.
 - `z.uuid()` idiom unified on the `z.string().uuid()` form used elsewhere.
 
-## Phase Q3 — planner constants and documentation (S)
+## Phase Q3 — planner constants and documentation (S) — COMPLETE
 
 - Name the magic numbers in `constants.ts`: shortlist size (12), lookahead
   continuations (8), lookahead weight (0.35), variety costs (−8/−4), opener
@@ -100,6 +110,9 @@ Remove, after verifying zero importers (production, tests, tools):
   names with their evidence comments.
 
 ## Phase Q4 — god-file splits (M–L, mechanical moves only)
+
+**Progress (October 2026):** steps 1–2 complete (CLI commands split, MCP server
+split into per-domain registration modules). Steps 3–6 remain.
 
 Order within the phase is by independence (apps → service → persistence →
 planner):
