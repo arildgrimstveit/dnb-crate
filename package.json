@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "typecheck": "pnpm -r --if-present typecheck && tsc --noEmit -p tools/tsconfig.json",
     "lint": "eslint .",
+    "lint:exports": "tsx tools/scripts/check-barrel-exports.mts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

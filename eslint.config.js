@@ -38,6 +38,14 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Keep the god-file splits from regrowing. Warnings only: files over the
+    // limit are review candidates, not failures (see docs/plans/code-quality-debt.md).
+    files: ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts"],
+    rules: {
+      "max-lines": ["warn", { max: 1000, skipBlankLines: true, skipComments: true }],
+    },
+  },
   // Dependencies flow from app adapters to catalog services to audio/domain code.
   ...[
     ["domain", ["catalog", "audio-analysis", "audio-renderer"]],

@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 
 import { automationEventSchema } from "./analysis-contracts.ts";
+import { validationIssueSchema } from "./contracts/common.ts";
 import { activeTransitionTypeSchema, transitionTypeSchema } from "./transition-type.ts";
 import {
   MAX_PREVIEW_WINDOW_MS,
@@ -8,13 +9,6 @@ import {
   MIN_PREVIEW_WINDOW_MS,
   RENDER_JOB_LIST_LIMIT_MAX,
 } from "./constants.ts";
-
-const renderIssueSchema = z.object({
-  code: z.string(),
-  message: z.string(),
-  entryId: z.string().optional(),
-  trackId: z.string().optional(),
-});
 
 export const renderJobIdSchema = z.string().uuid();
 
@@ -56,7 +50,7 @@ export const renderReadinessSchema = z.object({
   ffprobeAvailable: z.boolean(),
   ffmpegVersion: z.string().nullable(),
   ffprobeVersion: z.string().nullable(),
-  issues: z.array(renderIssueSchema),
+  issues: z.array(validationIssueSchema),
 });
 
 export const renderManifestTrackSchema = z.object({

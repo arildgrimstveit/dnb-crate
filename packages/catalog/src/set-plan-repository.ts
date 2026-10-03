@@ -1,5 +1,11 @@
 import type { PlanExplanation, SetPlanEntry, SetPlanSummary, SetPlanV1 } from "@dnb-crate/domain";
-import { DomainError, SET_PLAN_LIST_LIMIT_MAX } from "@dnb-crate/domain";
+import {
+  DomainError,
+  SET_PLAN_LIST_LIMIT_MAX,
+  planExplanationSchema,
+  planningConstraintsSchema,
+  setPlanEntrySchema,
+} from "@dnb-crate/domain";
 
 import type { SqliteDatabase } from "./db.ts";
 import { nowIso } from "./now-iso.ts";
@@ -41,6 +47,35 @@ export type StoredSetPlan = {
   explanation: PlanExplanation;
 };
 
+/** Minimal structural type of a zod schema so this package does not need a
+ * direct zod dependency just to validate stored JSON. */
+type SafeParseValidator = {
+  safeParse: (data: unknown) => {
+    success: boolean;
+    error?: { issues?: Array<{ path: PropertyKey[]; message: string }> };
+  };
+};
+
+function parseStoredJson<T>(
+  json: string | null,
+  label: string,
+  planId: string,
+  schema?: SafeParseValidator,
+): T | null {
+  if (json === null) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new DomainError("INVALID_SET_PLAN", `Stored plan ${planId} has an unreadable ${label}`);
+  }
+  if (schema && !schema.safeParse(parsed).success) {
+    throw new DomainError("INVALID_SET_PLAN", `Stored plan ${planId} has an invalid ${label}`);
+  }
+  return parsed as T;
+}
 export class SetPlanRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
@@ -123,7 +158,12 @@ export class SetPlanRepository {
       .all(id) as EntryRow[];
     return {
       seed: row.seed,
-      explanation: JSON.parse(row.explanation_json) as PlanExplanation,
+      explanation: parseStoredJson<PlanExplanation>(
+        row.explanation_json,
+        "explanation",
+        row.id,
+        planExplanationSchema,
+      )!,
       plan: {
         schemaVersion: 1,
         id: row.id,
@@ -138,14 +178,18 @@ export class SetPlanRepository {
           row.rate_regions_version === 2 || row.rate_regions_version === 1
             ? row.rate_regions_version
             : undefined,
-        handoffPolicy: "dj-continuity-v1",
+        handoffPolicy: row.handoff_policy === "dj-continuity-v1" ? "dj-continuity-v1" : undefined,
         qualityPolicy:
           row.quality_policy === "strict" || row.quality_policy === "off"
             ? row.quality_policy
             : undefined,
-        planningConstraints: row.planning_constraints_json
-          ? (JSON.parse(row.planning_constraints_json) as SetPlanV1["planningConstraints"])
-          : undefined,
+        planningConstraints:
+          parseStoredJson<SetPlanV1["planningConstraints"]>(
+            row.planning_constraints_json,
+            "planning constraints",
+            row.id,
+            planningConstraintsSchema,
+          ) ?? undefined,
       },
     };
   }
@@ -200,7 +244,7 @@ export class SetPlanRepository {
 }
 
 function mapEntry(row: EntryRow): SetPlanEntry {
-  return {
+  const entry: SetPlanEntry = {
     id: row.id,
     trackId: row.track_id,
     order: row.order_index,
@@ -209,8 +253,17 @@ function mapEntry(row: EntryRow): SetPlanEntry {
     timelineStartMs: row.timeline_start_ms,
     playbackRate: row.playback_rate,
     gainDb: row.gain_db,
-    transitionToNext: row.transition_json
-      ? (JSON.parse(row.transition_json) as SetPlanEntry["transitionToNext"])
-      : null,
+    transitionToNext: parseStoredJson<SetPlanEntry["transitionToNext"]>(
+      row.transition_json,
+      "transition",
+      row.set_plan_id,
+    ),
   };
+  if (!setPlanEntrySchema.safeParse(entry).success) {
+    throw new DomainError(
+      "INVALID_SET_PLAN",
+      `Stored plan ${row.set_plan_id} has an invalid entry ${row.id}`,
+    );
+  }
+  return entry;
 }

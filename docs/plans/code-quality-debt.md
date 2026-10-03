@@ -78,11 +78,16 @@ source (both deferred with Q4 steps 3–5, which touch the same files).
   `sectionAtMs` consumers unified on the domain helper where shapes allow.
 - `keys.ts` computes harmonic number-distance once; the three call sites use it.
 
-## Phase Q2 — contract hygiene (M) — PARTIAL
+## Phase Q2 — contract hygiene (M) — COMPLETE (October 2026)
 
-Done: feedback drift fixed; transition-type enums hoisted. Remaining: the
-contracts.ts file split, requiredTransitionSchema/renderReadiness/issue-schema
-hoists, set-plan-repository validating parses, uuid idiom unification.
+Done: contracts.ts split into contracts/{common,track,planning,prompts}.ts with
+a re-export shim (no external import churn); feedback drift fixed; shared
+requiredTransitionSchema and planningConstraintsSchema (stored plans and
+create-input can no longer drift); renderReadiness/validationIssue schemas
+imported instead of re-declared; artist-gap and twin set-plan-id input schemas
+deduplicated; uuid idiom unified; set-plan-repository validates stored JSON
+(explanation, constraints, entries) and reads handoffPolicy from the row
+instead of fabricating it.
 
 - Fix the live drift: `scoreBreakdownSchema.components.feedback` becomes
   required (matches `ScoreComponents`).
@@ -140,7 +145,13 @@ with the original order documented in place.
 6. `analysis-repository.ts`: `descriptors_json` parsed once per row;
    `PREFERRED_ORDER` derived from engine constants.
 
-## Phase Q5 — guardrails (S)
+## Phase Q5 — guardrails (S) — COMPLETE (October 2026)
+
+- `pnpm lint:exports` (tools/scripts/check-barrel-exports.mts, wired into CI):
+  fails when a domain-barrel export loses its last consumer.
+- eslint `max-lines` warn at 1000 (skip blank/comment lines) for package and
+  app sources; warnings are review candidates, not failures. Currently over:
+  render/coordinator.ts (1807), audio-analysis/dsp-analyzer.ts (1386).
 
 - CI job step or repo script that fails on unused domain-barrel exports
   (knip or ts-prune, devDependency only).
