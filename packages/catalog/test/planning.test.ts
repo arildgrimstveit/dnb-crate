@@ -11,7 +11,7 @@ import {
   type CreateSetPlanInput,
   type SonicDescriptors,
 } from "@dnb-crate/domain";
-import { relaxDescriptorFilters } from "../src/planning/planner.ts";
+import { relaxDescriptorFilters } from "../src/planning/pool.ts";
 import { validateSetPlan } from "../src/planning/validate.ts";
 import {
   analysisToTimeline,

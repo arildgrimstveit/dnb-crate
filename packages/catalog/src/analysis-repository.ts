@@ -54,6 +54,9 @@ export type StoredTrackAnalysis = TrackAnalysis & {
 };
 
 function mapAnalysis(row: AnalysisRow, sections: TrackSection[] = []): StoredTrackAnalysis {
+  const parsedDescriptors = row.descriptors_json
+    ? (JSON.parse(row.descriptors_json) as SonicDescriptors)
+    : null;
   return {
     trackId: row.track_id,
     analyzerName: row.analyzer_name,
@@ -76,10 +79,7 @@ function mapAnalysis(row: AnalysisRow, sections: TrackSection[] = []): StoredTra
     keyConfidence: row.key_confidence,
     keyMode: row.key_mode,
     camelotKey: row.camelot_key,
-    keyCandidates:
-      (row.descriptors_json
-        ? (JSON.parse(row.descriptors_json) as SonicDescriptors).keyCandidates
-        : null) ?? null,
+    keyCandidates: parsedDescriptors?.keyCandidates ?? null,
     tempoStability: row.tempo_stability,
     downbeatConfidence: row.downbeat_confidence,
     integratedLufs: row.integrated_lufs,
@@ -91,9 +91,7 @@ function mapAnalysis(row: AnalysisRow, sections: TrackSection[] = []): StoredTra
       ? (JSON.parse(row.waveform_summary_json) as number[])
       : null,
     beatAnchorMs: row.beat_anchor_ms,
-    descriptors: row.descriptors_json
-      ? (JSON.parse(row.descriptors_json) as SonicDescriptors)
-      : null,
+    descriptors: parsedDescriptors,
     engineRuntimeMs: row.engine_runtime_ms,
     analyzedAt: row.analyzed_at,
     referenceBpm: row.reference_bpm ?? null,

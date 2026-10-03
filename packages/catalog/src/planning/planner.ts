@@ -1,47 +1,43 @@
 import {
   DEFAULT_ARTIST_REPEAT_SPACING,
-  DEFAULT_TRANSITION_OVERLAP_MS,
   DURATION_TOLERANCE_MS,
   DURATION_QUALITY_WINDOW_MS,
   resolveTargetDurationMs,
-  MIN_PLAYABLE_DURATION_MS,
   PLANNER_CANDIDATE_CAP,
   PLANNER_LOOKAHEAD_CONTINUATIONS,
   PLANNER_LOOKAHEAD_WEIGHT,
-  PLANNER_MIN_POOL_ESTIMATE,
   PLANNER_OPENER_ATTEMPTS,
-  PLANNER_POOL_MIN_TRACKS,
-  PLANNER_POOL_RELAX_FACTOR,
   PLANNER_SHORTLIST_SIZE,
   VARIETY_REPEATED_PAIR_COST,
   VARIETY_REPEATED_TRACK_COST,
-  genresMatchFilter,
   interpolateEnergy,
-  matchesDescriptorFilters,
-  resolveDescriptorFilters,
   pairKey,
-  DJ_HANDOFF_POLICY,
   harmonicRelation,
   isConservativeHarmonic,
   resolveCanonicalKeyConfidence,
   scoreCandidate,
   hashSeed,
   type CreateSetPlanInput,
-  type DescriptorFilters,
   type DescriptorPercentiles,
   type FeedbackIndex,
   type PlanExplanation,
-  type RejectionExplanation,
-  type SelectionScoreBuckets,
-  type SetPlanEntry,
   type SetPlanV1,
   type Track,
 } from "@dnb-crate/domain";
 
-import { buildEntries, planDurationMs, playableMs, type TimelineAnalysis } from "./timeline.ts";
-import { compilePlanningConstraints, PlanningConstraintError } from "./constraints.ts";
+import { planDurationMs, type TimelineAnalysis } from "./timeline.ts";
+import { compilePlanningConstraints } from "./constraints.ts";
 import { artistKey } from "./shared.ts";
-import { verifiesAppliedRecipe } from "./applied-recipe.ts";
+import {
+  hasShortPlayable,
+  makeEntryRebuilder,
+  makeSelectionQualityCheck,
+  respectsSpacing,
+  typicalPlayable,
+  playableFromAnalysis,
+} from "./selection.ts";
+import { buildPlanningPool } from "./pool.ts";
+import { buildFinalPlan } from "./finalize.ts";
 import { repairSequence } from "./repair-search.ts";
 import type { RecipeRecallLookup } from "./recall.ts";
 
@@ -50,98 +46,6 @@ const DEFAULT_ARC = [
   { atFraction: 0.75, targetEnergy: 9 },
   { atFraction: 1, targetEnergy: 6 },
 ];
-
-function hasShortPlayable(entries: SetPlanEntry[], tracks: Track[]): boolean {
-  const durations = new Map(tracks.map((track) => [track.id, track.durationMs]));
-  return entries.some((entry) => {
-    const durationMs = durations.get(entry.trackId) ?? 0;
-    return durationMs >= MIN_PLAYABLE_DURATION_MS && playableMs(entry) < MIN_PLAYABLE_DURATION_MS;
-  });
-}
-
-function typicalPlayable(tracks: Track[]): number {
-  if (tracks.length === 0) {
-    return 240_000;
-  }
-  const avg = tracks.reduce((sum, track) => sum + track.durationMs, 0) / tracks.length;
-  return Math.max(avg - DEFAULT_TRANSITION_OVERLAP_MS, 60_000);
-}
-
-function respectsSpacing(track: Track, recent: Track[], spacing: number): boolean {
-  if (spacing <= 0) {
-    return true;
-  }
-  const key = artistKey(track);
-  if (key === null) {
-    return true;
-  }
-  return !recent.slice(-spacing).some((item) => artistKey(item) === key);
-}
-
-export function relaxDescriptorFilters(
-  original: DescriptorFilters | undefined,
-  step: number,
-): DescriptorFilters | undefined {
-  if (!original) {
-    return original;
-  }
-  const delta = 0.08 * step;
-  const loosened: DescriptorFilters = {};
-  for (const key of Object.keys(original) as Array<keyof DescriptorFilters>) {
-    const range = original[key];
-    if (!range) {
-      continue;
-    }
-    loosened[key] = {
-      min: range.min != null ? range.min - delta : undefined,
-      max: range.max != null ? range.max + delta : undefined,
-    };
-  }
-  return loosened;
-}
-
-function playableFromAnalysis(track: Track, analysis?: TimelineAnalysis): number {
-  if (
-    analysis?.mixInMs != null &&
-    analysis.mixOutMs != null &&
-    analysis.mixOutMs > analysis.mixInMs
-  ) {
-    return analysis.mixOutMs - analysis.mixInMs;
-  }
-  return Math.max(track.durationMs - DEFAULT_TRANSITION_OVERLAP_MS, 0);
-}
-
-function scoreBuckets(
-  breakdown: {
-    components: {
-      mood: number;
-      subgenre: number;
-      joinLevel: number;
-      joinStructure: number;
-      joinAligned: number;
-      structure: number;
-      harmonic: number;
-      joinHarmonic: number;
-      bpm: number;
-      feedback: number;
-    };
-  },
-  lookahead: number,
-): SelectionScoreBuckets {
-  const { components } = breakdown;
-  return {
-    moodFit: components.mood + components.subgenre,
-    joinQuality:
-      components.joinLevel +
-      components.joinStructure +
-      components.joinAligned +
-      components.structure,
-    keyCoverage: components.harmonic + components.joinHarmonic,
-    timeFit: components.bpm,
-    lookahead,
-    feedback: components.feedback,
-  };
-}
 
 export function draftSetPlan(
   catalog: Track[],
@@ -187,116 +91,18 @@ export function draftSetPlan(
       pairKey(recordingOf(pair.outgoingTrackId), recordingOf(pair.incomingTrackId)),
     ),
   );
-  const rejected: RejectionExplanation[] = [];
-  const needed = Math.max(
-    PLANNER_MIN_POOL_ESTIMATE,
-    Math.ceil(targetDurationMs / typicalPlayable(catalog)),
-  );
-  const originalDescriptorFilters = resolveDescriptorFilters(
-    input.descriptors,
-    options.percentiles,
-  );
-  let descriptorFilters = originalDescriptorFilters;
-  let relaxationSteps = 0;
-  const filterCatalog = (filters: DescriptorFilters | undefined) =>
-    catalog.filter((track) => {
-      if (track.fileMissing) {
-        rejected.push({ trackId: track.id, title: track.title, reason: "FILE_MISSING" });
-        return false;
-      }
-      if (excludedIds.has(track.id)) {
-        rejected.push({ trackId: track.id, title: track.title, reason: "EXCLUDED_ID" });
-        return false;
-      }
-      const artist = artistKey(track);
-      if (artist !== null && excludedArtists.has(artist)) {
-        rejected.push({ trackId: track.id, title: track.title, reason: "EXCLUDED_ARTIST" });
-        return false;
-      }
-      if (
-        input.minRating !== undefined &&
-        (track.rating === null || track.rating < input.minRating)
-      ) {
-        rejected.push({ trackId: track.id, title: track.title, reason: "BELOW_MIN_RATING" });
-        return false;
-      }
-      const analysis = analyses.get(track.id);
-      const bpm = track.bpm ?? analysis?.bpmHint ?? null;
-      if (input.bpmMin !== undefined && (bpm === null || bpm < input.bpmMin)) {
-        rejected.push({ trackId: track.id, title: track.title, reason: "BPM_BELOW_RANGE" });
-        return false;
-      }
-      if (input.bpmMax !== undefined && (bpm === null || bpm > input.bpmMax)) {
-        rejected.push({ trackId: track.id, title: track.title, reason: "BPM_ABOVE_RANGE" });
-        return false;
-      }
-      const descriptors = analysis?.descriptors ?? null;
-      const descriptorMatch = matchesDescriptorFilters(track, descriptors, filters);
-      if (!descriptorMatch.ok) {
-        rejected.push({
-          trackId: track.id,
-          title: track.title,
-          reason: descriptorMatch.reason ?? "DESCRIPTOR_OUT_OF_RANGE",
-        });
-        return false;
-      }
-      const genreMatch = genresMatchFilter(track.genres, input.genres);
-      if (!genreMatch.ok) {
-        rejected.push({
-          trackId: track.id,
-          title: track.title,
-          reason: genreMatch.reason ?? "GENRE_EXCLUDED",
-        });
-        return false;
-      }
-      return true;
-    });
-
-  let pool = filterCatalog(descriptorFilters);
-  if (
-    descriptorFilters &&
-    catalog.length >= needed * PLANNER_POOL_RELAX_FACTOR &&
-    pool.length < needed * PLANNER_POOL_RELAX_FACTOR
-  ) {
-    for (let step = 1; step <= 3 && pool.length < needed * PLANNER_POOL_RELAX_FACTOR; step += 1) {
-      descriptorFilters = relaxDescriptorFilters(originalDescriptorFilters, step);
-      relaxationSteps = step;
-      pool = filterCatalog(descriptorFilters);
-    }
-    rejected.push({ trackId: "pool", title: "pool", reason: "POOL_RELAXED" });
-  }
-  if (pool.length <= PLANNER_POOL_MIN_TRACKS && catalog.length > PLANNER_POOL_MIN_TRACKS) {
-    rejected.push({ trackId: "pool", title: "pool", reason: "POOL_TOO_SMALL" });
-    pool = [];
-  }
-
-  const byId = new Map(pool.map((track) => [track.id, track]));
-  // Explicit pins — required tracks, locked transition ends, and the named
-  // start/end — override brief filters. Naming a closer must survive a
-  // descriptor, mood, or genre filter that would otherwise drop it; only a
-  // missing file or an explicit exclusion still rejects the pin.
-  const pinLabels = new Map<string, string>();
-  if (input.startTrackId) pinLabels.set(input.startTrackId, "start");
-  if (input.endTrackId) pinLabels.set(input.endTrackId, "end");
-  for (const id of requiredIds) pinLabels.set(id, "required");
-  for (const [id, label] of pinLabels) {
-    const found = catalog.find((track) => track.id === id);
-    if (!found) {
-      throw new Error(`TRACK_NOT_FOUND:${id}:${label}`);
-    }
-    if (found.fileMissing || excludedIds.has(id) || excludedArtists.has(artistKey(found) ?? "")) {
-      throw new PlanningConstraintError(`Required ${label} track ${id} is excluded or missing`);
-    }
-    // An explicitly excluded genre contradicts the brief; a missing include
-    // match (GENRE_MISMATCH) does not — the pin overrides it.
-    if (genresMatchFilter(found.genres, input.genres).reason === "GENRE_EXCLUDED") {
-      throw new PlanningConstraintError(`Required ${label} track ${id} is excluded or missing`);
-    }
-    if (!byId.has(id)) {
-      byId.set(id, found);
-      pool = [...pool, found];
-    }
-  }
+  const planningPool = buildPlanningPool(catalog, input, {
+    analyses,
+    percentiles: options.percentiles,
+    requiredIds,
+    targetDurationMs,
+  });
+  const pool = planningPool.pool;
+  const byId = planningPool.byId;
+  const rejected = planningPool.rejected;
+  const originalDescriptorFilters = planningPool.originalDescriptorFilters;
+  const descriptorFilters = planningPool.descriptorFilters;
+  const relaxationSteps = planningPool.relaxationSteps;
   const recipeLookup: RecipeRecallLookup = {
     listForPair: (outgoingTrackId, incomingTrackId) =>
       options.recipes?.listForPair(outgoingTrackId, incomingTrackId) ?? [],
@@ -305,62 +111,19 @@ export function draftSetPlan(
     reuseForPair: (outgoingTrackId, incomingTrackId) =>
       compiled.reuseForPair(outgoingTrackId, incomingTrackId),
   };
-  const selectionQualityFailure = (tracks: Track[]): string | null => {
-    if (qualityPolicy === "off" || tracks.length < 2) {
-      return null;
-    }
-    const recordings = tracks.flatMap((track) => (track.recordingKey ? [track.recordingKey] : []));
-    if (new Set(recordings).size !== recordings.length) return "DUPLICATE_RECORDING";
-    const entries = rebuildEntriesOrNull(tracks);
-    if (!entries) {
-      return "TIMELINE";
-    }
-    if (tracks.some((track, i) => !respectsSpacing(track, tracks.slice(0, i), spacing)))
-      return "ARTIST_SPACING";
-    for (let i = 0; i < entries.length - 1; i += 1) {
-      const outgoing = tracks[i]!;
-      const incoming = tracks[i + 1]!;
-      const requirement = compiled.constraintFor(outgoing.id, incoming.id);
-      const record = recipeLookup
-        .listForPair(outgoing.id, incoming.id)
-        .find((row) => row.id === entries[i]?.transitionToNext?.parameters.appliedRecipeId);
-      const applied =
-        record != null &&
-        verifiesAppliedRecipe(record, entries[i]!, entries[i + 1]!, outgoing, incoming);
-      if (
-        requirement?.reuse === "recipe" &&
-        requirement.strength === "required" &&
-        (!applied || (requirement.recipeId && requirement.recipeId !== record?.id))
-      )
-        return "EXACT_RECIPE";
-      if (requirement?.allowQualityException) {
-        continue;
-      }
-      const transition = entries[i]?.transitionToNext;
-      if (applied) {
-        continue;
-      }
-      if (!analyses.get(outgoing.id)?.gridOk || !analyses.get(incoming.id)?.gridOk)
-        return "GRID_EVIDENCE";
-      if (
-        [outgoing, incoming].some(
-          (track) =>
-            resolveCanonicalKeyConfidence(track, {
-              musicalKey: track.musicalKey,
-              keyConfidence: analyses.get(track.id)?.keyConfidence ?? null,
-            }) < 0.5,
-        )
-      )
-        return "KEY_CONFIDENCE";
-      if (transition?.type === "crossfade") {
-        return "CROSSFADE";
-      }
-      if (!isConservativeHarmonic(harmonicRelation(outgoing.camelotKey, incoming.camelotKey))) {
-        return "HARMONY";
-      }
-    }
-    return null;
-  };
+  const { rebuildEntries, rebuildEntriesOrNull } = makeEntryRebuilder(analyses, {
+    dropAnchored: input.dropAnchored,
+    targetBpm: input.targetBpm,
+    recall: recipeLookup,
+  });
+  const selectionQualityFailure = makeSelectionQualityCheck({
+    qualityPolicy,
+    compiled,
+    recipeLookup,
+    analyses,
+    spacing,
+    rebuildEntriesOrNull,
+  });
   const selectionQualityOk = (tracks: Track[]) => selectionQualityFailure(tracks) === null;
   const joinAllowed = (source: Track | null, candidate: Track): boolean => {
     if (qualityPolicy === "off" || source == null) {
@@ -534,35 +297,6 @@ export function draftSetPlan(
     return score;
   };
 
-  const rebuildEntries = (tracks: Track[]) =>
-    buildEntries(
-      tracks.map((track) => ({
-        ...track,
-        analysis: analyses.get(track.id) ?? null,
-        fileFingerprint: track.fileFingerprint,
-        title: track.title,
-      })),
-      undefined,
-      undefined,
-      {
-        dropAnchored: input.dropAnchored,
-        targetBpm: input.targetBpm,
-        recall: recipeLookup,
-      },
-    );
-  const rebuildEntriesOrNull = (tracks: Track[]) => {
-    try {
-      return rebuildEntries(tracks);
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        (error.message.includes("native body") || error.message.includes("Invalid rate-region"))
-      ) {
-        return null;
-      }
-      throw error;
-    }
-  };
   const avgPlayable = typicalPlayable(pool);
   let safety = 0;
   while (safety < PLANNER_CANDIDATE_CAP) {
@@ -1075,89 +809,34 @@ export function draftSetPlan(
     }
   }
 
-  const plan: SetPlanV1 = {
-    schemaVersion: 1,
-    id: crypto.randomUUID(),
-    name: input.name,
-    targetDurationMs,
-    targetBpm: input.targetBpm ?? null,
-    requestedArc,
+  const { plan, explanation } = buildFinalPlan({
+    input,
+    selected,
     entries,
-    createdAt: now,
-    updatedAt: now,
-    handoffPolicy: DJ_HANDOFF_POLICY,
-    rateRegionsVersion: 2,
-    qualityPolicy,
-    planningConstraints: {
-      startTrackId: input.startTrackId,
-      endTrackId: input.endTrackId,
-      requiredTrackIds: input.requiredTrackIds,
-      excludedTrackIds: input.excludedTrackIds,
-      excludedArtists: input.excludedArtists,
-      requiredTransitions: compiled.requiredTransitions,
-      artistRepeatSpacing: spacing,
+    explanationInput: {
+      seed,
+      scoreFor,
+      lookaheadById,
+      requiredProgressById,
+      rejected,
+      varietyStrength,
+      historyIds,
+      historyRecordings,
+      historyPairs,
+      originalDescriptorFilters,
+      descriptorFilters,
+      relaxationSteps,
+      repairSearch,
+      chainRetry,
+      varietyPairs: options.varietyHistory?.pairs ?? [],
     },
-  };
-
-  const totalJoins = Math.max(selected.length - 1, 0);
-  let knownJoins = 0;
-  for (let i = 0; i < totalJoins; i += 1) {
-    if (selected[i]?.camelotKey && selected[i + 1]?.camelotKey) {
-      knownJoins += 1;
-    }
-  }
-  const explanation: PlanExplanation = {
-    ...(input.variety
-      ? {
-          variety: {
-            referencePlanIds: input.variety.referencePlanIds,
-            strength: varietyStrength,
-            trackIds: [...historyIds],
-            pairs: options.varietyHistory?.pairs ?? [],
-            repeatedTracks: selected.filter((track) =>
-              historyRecordings.has(track.recordingKey ?? track.id),
-            ).length,
-            repeatedPairs: selected
-              .slice(1)
-              .filter((track, i) =>
-                historyPairs.has(
-                  pairKey(
-                    selected[i]!.recordingKey ?? selected[i]!.id,
-                    track.recordingKey ?? track.id,
-                  ),
-                ),
-              ).length,
-          },
-        }
-      : {}),
-    seed,
-    selected: selected.map((track, order) => {
-      const score = scoreFor(
-        track,
-        selected[order - 1] ?? null,
-        selected.length <= 1 ? 0 : order / (selected.length - 1),
-      );
-      const lookahead = lookaheadById.get(track.id) ?? 0;
-      return {
-        trackId: track.id,
-        title: track.title,
-        artist: track.artist,
-        order,
-        score,
-        lookahead,
-        requiredProgress: requiredProgressById.get(track.id) ?? 0,
-        buckets: scoreBuckets(score, lookahead),
-      };
-    }),
-    rejected: rejected.slice(0, 50),
-    harmonicCoverage: { knownJoins, totalJoins },
-    originalDescriptors: originalDescriptorFilters ?? null,
-    resolvedDescriptors: descriptorFilters ?? null,
-    relaxationSteps,
-    repairSearch,
-    chainRetry,
-  };
-
+    targetDurationMs,
+    requestedArc,
+    qualityPolicy,
+    spacing,
+    compiled,
+    createdAt: now,
+  });
   let result = { plan, explanation, partial, partialReasons };
   if (
     qualityPolicy === "strict" &&
