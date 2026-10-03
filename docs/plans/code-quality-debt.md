@@ -6,24 +6,28 @@ existing suites (494 tests) plus the planner's pinned expectations; anything
 that changes a score, a cue, a render, or a persisted shape is out of scope and
 belongs in the beatmatching plan instead.
 
-Ordering is by risk: dead code first (nothing depends on it), then
-deduplication, then contract hygiene, then the god-file splits. Each phase
-ships separately with `pnpm typecheck`, `pnpm lint`, `prettier --check`, and
+**Status: COMPLETE (Q0–Q5, October 2026).** The items previously parked below
+as "Known accepted debt" are now scheduled for removal in
+[`lean-codebase.md`](lean-codebase.md) — see that plan for the decisions and
+ordering. Ordering here was by risk: dead code first (nothing depends on it),
+then deduplication, then contract hygiene, then the god-file splits. Each phase
+shipped separately with `pnpm typecheck`, `pnpm lint`, `prettier --check`, and
 the full `pnpm test` green. The beatmatching phases
 (`plans/beatmatching-automation.md`) proceed after this plan completes.
 
-## Known accepted debt (do not "fix")
+## Known accepted debt — superseded by `lean-codebase.md`
 
-- `double_drop` stays in the transition-type union and quality counting: stored
-  recipes/plans may carry it; nothing new creates it. Documented as reserved.
-- `hourAuditionWindow` stays in the quality contract (always null today).
-- Stored descriptor JSON keys (`shortTermLufsMean/Max` etc.) keep their names —
-  they are persisted in analysis rows. The TS symbols get doc comments stating
-  they are RMS-dBFS, not K-weighted LUFS.
-- Crate-calibrated descriptor stretch constants (583-track run) stay.
-- Type↔schema dual maintenance (`planning.ts` types vs `contracts.ts` schemas)
-  is reduced where it has already drifted; a full `z.infer` migration is a
-  breaking-change project and is explicitly deferred.
+- `double_drop` in the transition-type union — **now scheduled** (lean R2).
+- `hourAuditionWindow` always-null field — **now scheduled** (lean R2).
+- Stored descriptor JSON keys (`shortTermLufsMean/Max`) — **now scheduled**
+  (lean R3, rename + migration + analyzer bump).
+- Crate-calibrated descriptor stretch constants — **stays**, owned by
+  beatmatching Phase 2 (calibration is research, not refactoring).
+- Type↔schema dual maintenance — **guard scheduled** (lean R1); full `z.infer`
+  derivation stays rejected.
+- `PREFERRED_ORDER` explicit legacy engine list — **stays** (deliberate:
+  the legacy envelope engine is intentionally absent from
+  `ANALYSIS_ENGINE_IDS`).
 
 ## Phase Q0 — dead code and no-op removal (S) — COMPLETE
 
