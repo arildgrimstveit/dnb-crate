@@ -75,11 +75,12 @@ answer) and the geometric snap trusts the labels. Detection needs audio ground t
 (kick-train coincidence at 0 vs ±172 ms in the overlap region), not grid correlation.
 Unproven on real cases; do not build until a labeled instance exists.
 
-## 7. Chain tempo lock contradicts the docs
+## 7. Chain tempo lock contradicts the docs — RESOLVED (documented)
 
-`buildEntries` locks the whole mix to the opening tempo; `docs/mixing.md` says each
-overlap beatmatches at the pair tempo. Either document the lock or implement gradual
-tempo walking. Deliberately untouched: changing it risks drift across long mixes.
+`buildEntries` locks the whole mix to the opening tempo after the first aligned
+join; `docs/mixing.md` now documents this chain tempo lock explicitly (including
+the crossfade re-anchor rule). Gradual tempo walking remains unimplemented and
+out of scope until there is an auditioned reason to risk drift across long mixes.
 
 ## Calibration dataset
 

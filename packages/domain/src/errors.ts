@@ -1,6 +1,7 @@
 export type DomainErrorCode =
   | "TRACK_NOT_FOUND"
   | "SET_PLAN_NOT_FOUND"
+  | "MIX_WORKFLOW_NOT_FOUND"
   | "INVALID_SET_PLAN"
   | "MISSING_METADATA"
   | "MISSING_CUE_POINTS"

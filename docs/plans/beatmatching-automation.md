@@ -94,8 +94,9 @@ only correlating frozen grids.
 - **Recipe persistence:** save hand-tuned joins (params + windows) as reusable
   approved recipes; surface "sounds like a previous approval" in planning. Needs
   UX decisions first.
-- **Chain tempo lock:** document the opening-tempo lock in `docs/mixing.md`, or
-  implement gradual walking with a drift budget. Decision needed before code.
+- **Chain tempo lock:** RESOLVED October 2026 — the opening-tempo lock (with the
+  crossfade re-anchor rule) is now documented in `docs/mixing.md`. Gradual walking
+  with a drift budget stays out of scope unless an auditioned need appears.
 - **±2-beat swap detection:** research only. Needs a labeled real instance plus the
   audio-ground-truth harness from Phase 4. Do not build blind.
 

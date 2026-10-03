@@ -22,7 +22,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `search_tracks`
 
-- Input: optional `query`, `artist`, `bpmMin`/`bpmMax`, `musicalKey`, `camelotKey`, `energyMin`/`energyMax`, `minRating`, `subgenres` + `subgenresMatch`, `moods` + `moodsMatch`, `tags` + `tagsMatch`, `analysisStatus`, `descriptors` (`energy`/`danceability`/`valence`/`acousticness`/`melodicness`/`subBass`/`brightness` each `{min,max}`), `genres` include/exclude, `sort`, `direction`, `limit` (1–50), `cursor`
+- Input: optional `query`, `artist`, `bpmMin`/`bpmMax`, `musicalKey`, `camelotKey`, `energyMin`/`energyMax`, `minRating`, `subBassMin`/`subBassMax`, `brightnessMin`/`brightnessMax` (top-level shortcuts for the analyzed sub-bass ratio and spectral brightness), `subgenres` + `subgenresMatch`, `moods` + `moodsMatch`, `tags` + `tagsMatch`, `analysisStatus`, `descriptors` (`energy`/`danceability`/`valence`/`acousticness`/`melodicness`/`subBass`/`brightness` each `{min,max}`), `genres` include/exclude, `sort`, `direction`, `limit` (1–50), `cursor`
 - Output data: `{ tracks, nextCursor, limit, sort, direction }`
 
 ## `get_track`
@@ -128,7 +128,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 - Input: name, optional `targetDurationMinutes` or `targetDurationMs` (default 60 minutes; 1 minute–8 hours), BPM/arc/required/excluded/preferences/start/end/seed, `descriptors` 0–1 ranges, `genres` include/exclude, `qualityPolicy`, `requiredTransitions`
 - Output: `{ plan, explanation, validation, partial, quality }`
 - Errors: `TRACK_NOT_FOUND` when a required/start/end id is not eligible
-- Hard-rejects `NO_ANALYSIS`, `DESCRIPTOR_OUT_OF_RANGE`, `GENRE_EXCLUDED`, `DUPLICATE_RECORDING`
+- Hard-rejects briefs with `NO_ANALYSIS`, `DESCRIPTOR_OUT_OF_RANGE`, `GENRE_EXCLUDED`, `DUPLICATE_RECORDING`; these surface as validation issue codes in the response, not as tool-level error envelopes
 - New plans default to `qualityPolicy: "strict"`. Joins always use continuity windows, supported sequential, and timing version 2.
 
 ## `get_set_plan` / `list_set_plans`
@@ -184,7 +184,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `start_set_render`
 
-- Input: `{ setPlanId, outputFormat?: "flac", edgeFadeMs?, allowLowConfidence?, allowExcessiveTempo? }`
+- Input: `{ setPlanId, outputFormat?: "flac", edgeFadeMs?, allowLowConfidence?, allowExcessiveTempo?, allowOverlongDuration? }` — `allowOverlongDuration` lifts duration/window blockers only
 - Returns immediately with a job id. Poll `get_render_status`. Full renders write a 24-bit master (`outputRootRelativePath`) and a 16-bit listen FLAC named from the plan (`listenRootRelativePath`).
 - Errors: `SET_PLAN_NOT_FOUND`, `INVALID_SET_PLAN`, `FFMPEG_UNAVAILABLE`. Strict plans also refuse if `readyForAudition` is false.
 
@@ -217,9 +217,9 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 ## First-mix workflows
 
 - `start_mix_workflow`: `{requestToken, brief}`. The brief uses `create_set_plan` fields and requires strict quality. Starts asynchronously and returns a persisted workflow. Reusing a token with a different brief fails.
-- `get_mix_workflow`: `{id}`. Returns status/stage, stage-local progress, immutable brief, effective settings, dependency identities, candidate fingerprints, analysis IDs, plan ID, render attempt IDs, structured issues and final master/listen references.
-- `resume_mix_workflow`: `{id}`. Reuses completed valid work and child jobs. Never silently replaces an existing plan.
-- `cancel_mix_workflow`: `{id}`. Stops further scheduling and cancels exclusively owned children.
+- `get_mix_workflow`: `{id}`. Returns status/stage, stage-local progress, immutable brief, effective settings, dependency identities, candidate fingerprints, analysis IDs, plan ID, render attempt IDs, structured issues and final master/listen references. Errors: `MIX_WORKFLOW_NOT_FOUND`.
+- `resume_mix_workflow`: `{id}`. Reuses completed valid work and child jobs. Never silently replaces an existing plan. Errors: `MIX_WORKFLOW_NOT_FOUND`.
+- `cancel_mix_workflow`: `{id}`. Stops further scheduling and cancels exclusively owned children. Errors: `MIX_WORKFLOW_NOT_FOUND`.
 - `get_mix_preflight`: `{}`. Checks configured roots, output access and native prerequisites. Conditional Rubber Band requirements are checked against the actual plan.
 
 Every issue has `code`, `severity`, `stage`, `retryable`, `message`, and `nextAction`; affected IDs/counts are included where known. New workflow results use logical IDs and output-root-relative references, without exposing configured absolute paths. `succeeded` requires both verified deliverables. Analysis jobs include optional `keyStages`; a successful batch can still contain key-stage failures. See [first-mix onboarding](first-mix.md) for CLI equivalents and recovery semantics.

@@ -103,7 +103,7 @@ export class MixWorkflowRepository {
     const row = this.db.prepare("SELECT data_json FROM mix_workflows WHERE id = ?").get(id) as
       { data_json: string } | undefined;
 
-    if (!row) throw new DomainError("INVALID_SET_PLAN", "Mix workflow was not found.");
+    if (!row) throw new DomainError("MIX_WORKFLOW_NOT_FOUND", "Mix workflow was not found.");
 
     return JSON.parse(row.data_json) as MixWorkflow;
   }

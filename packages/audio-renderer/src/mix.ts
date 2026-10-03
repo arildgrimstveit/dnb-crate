@@ -212,13 +212,22 @@ function combineStretchEngines(engines: StretchEngine[]): StretchEngine {
   return "none";
 }
 
-function chooseStaticGainDb(
+/**
+ * One static gain that moves integrated loudness to the target in both
+ * directions (quiet mixes are boosted, loud mixes attenuated), then backs the
+ * gain off so stored true peak plus gain stays at or below the ceiling. When
+ * both cannot be satisfied, the true-peak ceiling wins.
+ */
+export function chooseStaticGainDb(
   measured: { integratedLufs: number | null; truePeakDb: number | null },
   loudnessTargetLufs: number,
   truePeakCeilingDb: number,
 ): number {
   let gainDb = 0;
-  if (measured.integratedLufs != null && measured.integratedLufs > loudnessTargetLufs + 0.5) {
+  if (
+    measured.integratedLufs != null &&
+    Math.abs(measured.integratedLufs - loudnessTargetLufs) > 0.5
+  ) {
     gainDb = loudnessTargetLufs - measured.integratedLufs;
   }
   if (measured.truePeakDb != null) {
@@ -527,7 +536,7 @@ export async function renderMix(
         request.truePeakCeilingDb,
       );
       if (Math.abs(gainDb) >= 0.05) {
-        const attenuated = `${request.outputPath}.attenuated.wav`;
+        const gained = `${request.outputPath}.gained.wav`;
         const volumeArgs = [
           "-nostdin",
           "-hide_banner",
@@ -542,7 +551,7 @@ export async function renderMix(
           INTERMEDIATE_PCM_CODEC,
           "-rf64",
           "auto",
-          attenuated,
+          gained,
         ];
         invocation = `${invocation} ; ${redactInvocation(binaries.ffmpegPath, volumeArgs)}`;
         const volRun = await runner.run({
@@ -554,7 +563,7 @@ export async function renderMix(
           mapRunFailure(volRun, request.abortSignal);
         }
         await removeIfPresent(workingPath);
-        workingPath = attenuated;
+        workingPath = gained;
         staticGainDb = gainDb;
         warnings.push(
           `Applied mix-wide ${gainDb.toFixed(2)} dB static gain so loudness and true peak meet target without limiting.`,
@@ -678,7 +687,7 @@ export async function renderMix(
     };
   } catch (error) {
     await removeIfPresent(partialPath);
-    await removeIfPresent(`${request.outputPath}.attenuated.wav`);
+    await removeIfPresent(`${request.outputPath}.gained.wav`);
     await removeIfPresent(`${request.outputPath}.peak-limited.wav`);
     await removeIfPresent(`${request.outputPath}.peak-ducked.wav`);
     await removeIfPresent(`${request.outputPath}.partial.flac`);

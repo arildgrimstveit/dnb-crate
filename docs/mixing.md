@@ -6,9 +6,9 @@ Rules for new plans and renders. They apply to any local DnB folder. They are no
 
 - Phrase windows are scored for energy continuity. After the usual downbeat snap, joins also search nearby beat/bar slips so overlapping kicks, snares, and vocals share a grid. Sequential joins use the supported kit-on shape. Timing is `rateRegionsVersion: 2`.
 - `qualityPolicy: "strict"` — refuse unexplained risky/unknown keys and unexplained crossfades.
-- Omit `targetBpm`. Each overlap beatmatches at the pair tempo. Featured bodies stay native. A mix-wide tempo lock is opt-in only.
+- Omit `targetBpm`. Each overlap beatmatches at the pair tempo, and from the first aligned join onward the mix runs on a **chain tempo lock**: every later pair targets the outgoing deck's effective BPM, which carries the opening pair's tempo forward. Decks join that tempo as the mix proceeds instead of pulling the chain back toward native tempos. A tempo-mismatch crossfade leaves both decks native and re-anchors the chain at the next track's tempo. Featured bodies stay native. An explicit `targetBpm` is an additional opt-in lock on top.
 - `dropAnchored: true` so the incoming drop lands at overlap end.
-- Phrase-mix (or bass-swap) when both grids are usable and tempo is within ±3%. Crossfade is the mismatch fallback.
+- The set-plan path picks `phrase_mix` whenever both grids are usable and tempo is within ±3%; it never auto-selects `bass_swap` today. Bass-swap joins enter a plan through approved recipes or `plan_transition` / `update_set_plan`. Crossfade is the mismatch fallback everywhere.
 
 ## Joins
 

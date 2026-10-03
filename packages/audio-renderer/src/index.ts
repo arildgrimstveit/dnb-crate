@@ -47,6 +47,7 @@ export type { ProbeResult } from "./parse.ts";
 export {
   renderMix,
   measureLoudness,
+  chooseStaticGainDb,
   type MixRequest,
   type MixResult,
   type MixSegment,
