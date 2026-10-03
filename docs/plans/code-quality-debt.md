@@ -109,13 +109,17 @@ hoists, set-plan-repository validating parses, uuid idiom unification.
 - onset-lock `SCORE_MARGIN` / channel weights and `windows.ts` thresholds get
   names with their evidence comments.
 
-## Phase Q4 — god-file splits (M–L, mechanical moves only)
+## Phase Q4 — god-file splits (M–L, mechanical moves only) — COMPLETE (October 2026)
 
-**Progress (October 2026):** steps 1–2 complete (CLI commands split, MCP server
-split into per-domain registration modules). Steps 3–6 remain.
+Done: CLI commands split; MCP server registration modules; service.ts facade
+over service/ modules (analysis-report, compatible-tracks, plan-editor,
+quality-evidence); repository.ts over repository-search/repository-stats/
+provenance; planner over planning/pool + planning/selection +
+planning/finalize; analysis-repository parses descriptors once per row.
 
-Order within the phase is by independence (apps → service → persistence →
-planner):
+Accepted deviation: `PREFERRED_ORDER` in analysis-repository keeps its explicit
+legacy list (`dnb-crate-envelope` is not in `ANALYSIS_ENGINE_IDS` by design),
+with the original order documented in place.
 
 1. `apps/cli/src/main.ts` (681) → per-domain command modules plus a shared
    arg-parsing helper; `usage()` generated from the same table.
