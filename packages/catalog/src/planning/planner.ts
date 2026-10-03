@@ -585,7 +585,7 @@ export function draftSetPlan(
           !excludedIds.has(incoming.id) &&
           !excludedArtists.has(artistKey(incoming) ?? "") &&
           joinAllowed(source, incoming);
-        if (!incoming || used.has(incoming.id) || !allowed) {
+        if (!incoming || !allowed) {
           partialReasons.push("REQUIRED_TRANSITION_UNSATISFIED");
           rejected.push({
             trackId: requiredNext.incomingTrackId,

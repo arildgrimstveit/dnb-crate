@@ -1,4 +1,5 @@
 import {
+  DEFAULT_ARTIST_REPEAT_SPACING,
   DURATION_TOLERANCE_MS,
   MAX_BPM_JUMP,
   MAX_ENERGY_DEVIATION,
@@ -30,7 +31,7 @@ export function validateSetPlan(
   const warnings: ValidationIssue[] = [];
   const seen = new Set<string>();
   const seenRecordings = new Set<string>();
-  const spacing = options?.artistRepeatSpacing ?? 1;
+  const spacing = options?.artistRepeatSpacing ?? DEFAULT_ARTIST_REPEAT_SPACING;
   const recentArtists: Array<string | null> = [];
 
   for (const entry of plan.entries) {

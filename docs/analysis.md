@@ -21,7 +21,7 @@ Descriptors (`energy`, `danceability`, `acousticness`, `melodicness`, `valence`)
 
 ## Grids
 
-- Tempo folds into **160–190 BPM** (half/double, then 2:3 / 3:2 and similar).
+- Tempo folds into **160–190 BPM** (half/double, then 2:3 / 3:2 and similar). Libraries built around other tempos can set `analysis.bpmMin` / `analysis.bpmMax` (40–300); stored grids are not auto-invalidated by a range change, so re-run analysis for affected tracks.
 - Confidence below **0.6** rejects the grid. A rejected grid cannot phrase-mix.
 - A published or leftover BPM is scored as a reference lock when it agrees with a passing free grid.
 - `set_cue_points` with `beatAnchorMs` rebuilds the grid as `gridSource: "anchor"` and raises stored confidence to at least 0.6. Pass existing cues or they are wiped.

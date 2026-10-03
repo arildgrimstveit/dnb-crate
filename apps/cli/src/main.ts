@@ -6,6 +6,7 @@ import {
   APP_NAME,
   APP_VERSION,
   createSetPlanInputSchema,
+  isDomainError,
   listTransitionFeedbackInputSchema,
   loadConfig,
   rateTransitionInputSchema,
@@ -161,11 +162,21 @@ async function main(): Promise<void> {
             clearInterval(progress);
           }
         }
-        printJson({
-          ok: workflow.status !== "failed" && workflow.status !== "blocked",
-          data: workflow,
-        });
-        if (workflow.status === "failed" || workflow.status === "blocked") process.exitCode = 1;
+        const unsuccessful = workflow.status === "failed" || workflow.status === "blocked";
+        printJson(
+          unsuccessful
+            ? {
+                ok: false,
+                error: {
+                  code: `MIX_WORKFLOW_${workflow.status.toUpperCase()}`,
+                  message: `${workflow.issues[0]?.message ?? `Mix workflow ended ${workflow.status}.`} (stage ${workflow.stage}; run mix:status --id ${workflow.id} for the full report)`,
+                  retryable: workflow.status === "blocked",
+                  details: { stage: workflow.stage, issues: workflow.issues },
+                },
+              }
+            : { ok: true, data: workflow },
+        );
+        if (unsuccessful) process.exitCode = 1;
         break;
       }
       case "db:migrate":
@@ -658,8 +669,18 @@ async function main(): Promise<void> {
           throw new Error("render:check requires --id");
         }
         const checked = await runtime.service.checkRender(id);
-        printJson({ ok: checked.ok, data: checked });
-        if (!checked.ok) {
+        if (checked.ok) {
+          printJson({ ok: true, data: checked });
+        } else {
+          printJson({
+            ok: false,
+            error: {
+              code: "RENDER_CHECK_FAILED",
+              message: "Render checks failed; inspect the joins and warnings in details.",
+              retryable: false,
+              details: { warnings: checked.warnings },
+            },
+          });
           process.exitCode = 1;
         }
         break;
@@ -677,5 +698,11 @@ main().catch((error: unknown) => {
   process.stderr.write(
     `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
   );
+  // Keep stdout machine-readable even for unexpected failures: the envelope
+  // carries the domain error code when there is one.
+  const body = isDomainError(error)
+    ? { code: error.code, message: error.message, retryable: error.retryable }
+    : { code: "INTERNAL_ERROR", message: "CLI command failed; see stderr.", retryable: false };
+  process.stdout.write(`${JSON.stringify({ ok: false, error: body })}\n`);
   process.exitCode = 1;
 });

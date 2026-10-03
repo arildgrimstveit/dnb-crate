@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { DomainError, effectivePlaybackRate, resolveRateRegions } from "@dnb-crate/domain";
 
@@ -90,8 +91,22 @@ export async function prepareBothJoinRegions(
 
 const BUNDLED_DIR = path.join("tools", "rubberband-cli", "rubberband-4.0.0-gpl-executable-windows");
 
+/** Anchor for bundled tools: the repository root (the directory holding
+ * `pnpm-workspace.yaml`), found by walking up from this module. Falls back to
+ * the working directory so behavior from inside the repo is unchanged. */
+function bundledToolsRoot(): string {
+  let dir = path.dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 8; i += 1) {
+    if (existsSync(path.join(dir, "pnpm-workspace.yaml"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd();
+}
+
 export function resolveRubberbandCli(explicit?: string | null): string | null {
-  const bundled = path.resolve(process.cwd(), BUNDLED_DIR);
+  const bundled = path.resolve(bundledToolsRoot(), BUNDLED_DIR);
   const candidates = [
     explicit,
     process.env.DNB_CRATE_RUBBERBAND_PATH,

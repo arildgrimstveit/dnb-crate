@@ -15,8 +15,24 @@ export const analysisConfigSchema = z
     defaultEngine: analysisEngineIdSchema.default(DEFAULT_ANALYSIS_ENGINE),
     keyAnalysis: z.enum(["auto", "off"]).optional(),
     prefetch: z.number().int().min(0).max(4).optional(),
+    /** Grid tempo fold window. Defaults to the DnB 160–190 range; widen only
+     * for libraries built around other tempos. Affects accepted grids and
+     * published-BPM reference locks. Stored rows are not auto-invalidated:
+     * re-run `analysis:run --scope all` (or `--track-ids`) after changing it. */
+    bpmMin: z.number().min(40).max(300).optional(),
+    bpmMax: z.number().min(40).max(300).optional(),
   })
-  .optional();
+  .optional()
+  .refine(
+    (value) =>
+      !value ||
+      value.bpmMin === undefined ||
+      value.bpmMax === undefined ||
+      value.bpmMin < value.bpmMax,
+    {
+      message: "analysis.bpmMin must be below analysis.bpmMax",
+    },
+  );
 
 export const appConfigSchema = z.object({
   databasePath: z.string().min(1, "databasePath is required"),

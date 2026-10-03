@@ -1,13 +1,26 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+/** Cached provider responses go stale so changed upstream metadata is
+ * eventually picked up instead of being served forever. */
+export const RESPONSE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 export class ResponseCache {
-  constructor(private readonly root: string) {}
+  constructor(
+    private readonly root: string,
+    private readonly maxAgeMs: number = RESPONSE_CACHE_TTL_MS,
+  ) {}
 
   get(url: string): string | null {
+    const file = this.fileFor(url);
     try {
-      return readFileSync(this.fileFor(url), "utf8");
+      const info = statSync(file);
+      if (Date.now() - info.mtimeMs > this.maxAgeMs) {
+        rmSync(file, { force: true });
+        return null;
+      }
+      return readFileSync(file, "utf8");
     } catch {
       return null;
     }

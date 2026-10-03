@@ -455,7 +455,7 @@ export function musicalWindow(
         ? (snapToNearestBeat(rawMixIn, downbeats)?.positionMs ?? Math.round(rawMixIn))
         : Math.round(rawMixIn);
   const mixInMs = Math.max(audioStart, snappedMixIn);
-  const mixOutMs = constrainMixOut(rawMixOut, overlapSource, audioEnd, downbeats);
+  const mixOutMs = constrainMixOut(rawMixOut, audioEnd);
   let sourceEndMs = isLast ? audioEnd : Math.min(Math.round(mixOutMs + overlapSource), audioEnd);
   let sourceStartMs = mixInMs;
   if (sourceEndMs <= sourceStartMs) {

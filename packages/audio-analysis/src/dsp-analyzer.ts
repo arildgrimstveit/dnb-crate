@@ -12,9 +12,15 @@ import {
   type TrackSection,
 } from "@dnb-crate/domain";
 
-import { dominantSubPitchClass, estimateKeyFromChroma } from "./chroma.ts";
+import {
+  collectChromaFrame,
+  createChromaFrames,
+  dominantSubPitchClassFromVotes,
+  estimateKeyFromChroma,
+  subPitchVoteOfFrame,
+} from "./chroma.ts";
 import { computeDescriptorPack } from "./descriptors.ts";
-import { stftMagnitude } from "./fft.ts";
+import { forEachStftFrame } from "./fft.ts";
 import type {
   AnalyzeOptions,
   AnalyzerCue,
@@ -69,7 +75,12 @@ function hzToBin(hz: number, sampleRateHz: number, nfft: number): number {
   return Math.max(1, Math.min(nfft / 2 - 1, Math.round((hz * nfft) / sampleRateHz)));
 }
 
-function bandFlux(prev: number[], next: number[], fromBin: number, toBin: number): number {
+function bandFlux(
+  prev: ArrayLike<number>,
+  next: ArrayLike<number>,
+  fromBin: number,
+  toBin: number,
+): number {
   let sum = 0;
   for (let k = fromBin; k < toBin; k += 1) {
     const a = Math.log1p(prev[k] ?? 0);
@@ -79,32 +90,14 @@ function bandFlux(prev: number[], next: number[], fromBin: number, toBin: number
   return sum;
 }
 
-function onsetStrength(
-  mag: number[][],
-  sampleRateHz: number,
-  nfft: number,
-): {
-  onset: number[];
-  low: number[];
-  mid: number[];
-} {
-  const lowEnd = hzToBin(200, sampleRateHz, nfft);
-  const midEnd = hzToBin(2000, sampleRateHz, nfft);
-  const highEnd = nfft / 2;
-  const onset: number[] = [];
-  const low: number[] = [];
-  const mid: number[] = [];
-  for (let t = 1; t < mag.length; t += 1) {
-    const prev = mag[t - 1]!;
-    const next = mag[t]!;
-    const l = bandFlux(prev, next, 1, lowEnd);
-    const m = bandFlux(prev, next, lowEnd, midEnd);
-    const h = bandFlux(prev, next, midEnd, highEnd);
-    low.push(l);
-    mid.push(m);
-    onset.push(3 * l + m + 0.25 * h);
+/** Sum of squared bin magnitudes in [fromBin, toBin) for one STFT frame. */
+function frameBandPower(frame: ArrayLike<number>, fromBin: number, toBin: number): number {
+  let sum = 0;
+  for (let k = fromBin; k < toBin; k += 1) {
+    const v = frame[k] ?? 0;
+    sum += v * v;
   }
-  return { onset, low, mid };
+  return sum;
 }
 
 function autocorr(env: number[], lag: number): number {
@@ -589,20 +582,6 @@ function positiveDelta(series: number[]): number[] {
   return out;
 }
 
-function snareFlux(mag: number[][], sampleRateHz: number, nfft: number): number[] {
-  const body0 = hzToBin(150, sampleRateHz, nfft);
-  const body1 = hzToBin(400, sampleRateHz, nfft);
-  const crack0 = hzToBin(1500, sampleRateHz, nfft);
-  const crack1 = hzToBin(4000, sampleRateHz, nfft);
-  const out: number[] = [];
-  for (let t = 1; t < mag.length; t += 1) {
-    const prev = mag[t - 1]!;
-    const next = mag[t]!;
-    out.push(bandFlux(prev, next, body0, body1) + bandFlux(prev, next, crack0, crack1));
-  }
-  return out;
-}
-
 function downbeatConfidenceFromMargin(marginZ: number): number {
   return clamp(1 / (1 + Math.exp(-(marginZ - 0.12) * 10)), 0, 1);
 }
@@ -798,17 +777,6 @@ function waveformSummary(samples: Float32Array, buckets = 128): number[] {
   return out;
 }
 
-function bandMagEnergy(mag: number[][], fromBin: number, toBin: number): number[] {
-  return mag.map((frame) => {
-    let sum = 0;
-    for (let k = fromBin; k < toBin; k += 1) {
-      const v = frame[k] ?? 0;
-      sum += v * v;
-    }
-    return sum;
-  });
-}
-
 function detectDropMs(low: number[], hopMs: number, durationMs: number): number | null {
   if (low.length < 16) {
     return null;
@@ -943,9 +911,6 @@ function labelSections(
     if (i < dropIdx) {
       return "build";
     }
-    if (i === laterDropIdx) {
-      return "drop";
-    }
     if (i > dropIdx && laterDropIdx > dropIdx && i < laterDropIdx) {
       const here = stats[i]!;
       if (here.sub < dropSub * 0.6) {
@@ -1058,12 +1023,51 @@ export const dspAnalyzer: AudioAnalyzer = {
     const fileDurationMs = options.durationMs ?? pcm.durationMs;
     const bounds = detectAudioBounds(pcm.samples, pcm.sampleRateHz, fileDurationMs);
     const durationMs = bounds.audioEndMs;
-    const stft = stftMagnitude(pcm.samples, pcm.sampleRateHz, NFFT, HOP);
-    const { onset, low, mid } = onsetStrength(stft.mag, pcm.sampleRateHz, NFFT);
-    const hopMs = stft.hopMs;
-    const subEnergy = bandMagEnergy(stft.mag, 1, hzToBin(120, pcm.sampleRateHz, NFFT));
+    // One streaming STFT pass builds every per-frame series and the retained
+    // chroma evidence without materializing the frames×bins magnitude matrix
+    // (which would be >1 GB for an hour-long file). All band edges match the
+    // previous matrix implementation exactly.
+    const hopMs = (HOP / pcm.sampleRateHz) * 1000;
+    const lowEnd = hzToBin(200, pcm.sampleRateHz, NFFT);
+    const midEnd = hzToBin(2000, pcm.sampleRateHz, NFFT);
+    const subEnd = hzToBin(120, pcm.sampleRateHz, NFFT);
+    const snareBody0 = hzToBin(150, pcm.sampleRateHz, NFFT);
+    const snareBody1 = hzToBin(400, pcm.sampleRateHz, NFFT);
+    const snareCrack0 = hzToBin(1500, pcm.sampleRateHz, NFFT);
+    const snareCrack1 = hzToBin(4000, pcm.sampleRateHz, NFFT);
+    const highStart = hzToBin(4000, pcm.sampleRateHz, NFFT);
+    const chroma = createChromaFrames();
+    const onset: number[] = [];
+    const low: number[] = [];
+    const mid: number[] = [];
+    const snareOnset: number[] = [];
+    const subEnergy: number[] = [];
+    const highEnergySeries: number[] = [];
+    const midEnergySeries: number[] = [];
+    const subVotes: Array<{ pc: number; weight: number } | null> = [];
+    let prevFrame: Float64Array | null = null;
+    forEachStftFrame(pcm.samples, NFFT, HOP, (frame) => {
+      if (prevFrame !== null) {
+        const l = bandFlux(prevFrame, frame, 1, lowEnd);
+        const m = bandFlux(prevFrame, frame, lowEnd, midEnd);
+        const h = bandFlux(prevFrame, frame, midEnd, NFFT / 2);
+        low.push(l);
+        mid.push(m);
+        onset.push(3 * l + m + 0.25 * h);
+        snareOnset.push(
+          bandFlux(prevFrame, frame, snareBody0, snareBody1) +
+            bandFlux(prevFrame, frame, snareCrack0, snareCrack1),
+        );
+      }
+      subEnergy.push(frameBandPower(frame, 1, subEnd));
+      highEnergySeries.push(frameBandPower(frame, highStart, NFFT / 2));
+      midEnergySeries.push(frameBandPower(frame, subEnd, highStart));
+      collectChromaFrame(chroma, frame, pcm.sampleRateHz, NFFT);
+      subVotes.push(subPitchVoteOfFrame(frame, pcm.sampleRateHz, NFFT));
+      if (prevFrame === null) prevFrame = new Float64Array(frame.length);
+      prevFrame.set(frame);
+    });
     const kickOnset = positiveDelta(subEnergy.length > 0 ? subEnergy : low);
-    const snareOnset = snareFlux(stft.mag, pcm.sampleRateHz, NFFT);
     const tempoHop = 128;
     const tempoOnset = timeDomainOnset(pcm.samples, tempoHop);
     const tempoHopMs = (tempoHop / pcm.sampleRateHz) * 1000;
@@ -1248,21 +1252,19 @@ export const dspAnalyzer: AudioAnalyzer = {
     }
 
     const dropFrame = dropHint !== null ? Math.round(dropHint / hopMs) : 0;
-    const subRootPc = dominantSubPitchClass(
-      stft.mag,
-      pcm.sampleRateHz,
-      NFFT,
+    const subRootPc = dominantSubPitchClassFromVotes(
+      subVotes,
       dropFrame,
-      Math.min(stft.mag.length, dropFrame + Math.round(16_000 / hopMs)),
+      Math.min(subVotes.length, dropFrame + Math.round(16_000 / hopMs)),
     );
-    const key = estimateKeyFromChroma(stft.mag, pcm.sampleRateHz, NFFT, { subRootPc });
+    const key = estimateKeyFromChroma(chroma, { subRootPc });
     const nyquist = pcm.sampleRateHz / 2;
     const lowE = bandEnergyTime(pcm.samples, pcm.sampleRateHz, 0, 80);
     const midE = bandEnergyTime(pcm.samples, pcm.sampleRateHz, 80, 4000);
     const highE = bandEnergyTime(pcm.samples, pcm.sampleRateHz, 4000, nyquist);
     const totalE = lowE + midE + highE + 1e-9;
     const wave = waveformSummary(pcm.samples);
-    const highEnergy = bandMagEnergy(stft.mag, hzToBin(4000, pcm.sampleRateHz, NFFT), NFFT / 2);
+    const highEnergy = highEnergySeries;
     const barMs = bpm ? (4 * 60_000) / bpm : 2000;
     const onsetMeanAll = mean(onset);
     const collectBars = (gridStart: number): BarFeatures[] => {
@@ -1289,7 +1291,9 @@ export const dspAnalyzer: AudioAnalyzer = {
       return collected;
     };
     let bars = collectBars(downbeatTimesMs[0] ?? 0);
-    const sections = labelSections(bars, durationMs, dropHint, 0);
+    // The intro section starts at the first audible sample, so lead-in
+    // silence is not labeled as intro content.
+    const sections = labelSections(bars, durationMs, dropHint, bounds.audioStartMs);
     if (bpm !== null && !gridRejected && beatTimesMs.length >= 8) {
       const refinedAnchors = [
         dropHint,
@@ -1303,7 +1307,12 @@ export const dspAnalyzer: AudioAnalyzer = {
     }
     const cues = cuesFromSections(sections).map((cue) => ({
       ...cue,
-      positionMs: snapToNearestBeat(cue.positionMs, beatTimesMs)?.positionMs ?? cue.positionMs,
+      // intro_start is the measured first audible sample; a beat snap could
+      // move it back into lead-in silence, so it is kept as measured.
+      positionMs:
+        cue.type === "intro_start"
+          ? cue.positionMs
+          : (snapToNearestBeat(cue.positionMs, beatTimesMs)?.positionMs ?? cue.positionMs),
     }));
 
     const rmsAll = rms(pcm.samples, 0, pcm.samples.length);
@@ -1318,13 +1327,7 @@ export const dspAnalyzer: AudioAnalyzer = {
       peak > 0 ? Number((20 * Math.log10((peak + 1e-9) / (rmsAll + 1e-9))).toFixed(3)) : 0;
     const stftSub = mean(subEnergy);
     const stftHigh = mean(highEnergy);
-    const stftMid = mean(
-      bandMagEnergy(
-        stft.mag,
-        hzToBin(120, pcm.sampleRateHz, NFFT),
-        hzToBin(4000, pcm.sampleRateHz, NFFT),
-      ),
-    );
+    const stftMid = mean(midEnergySeries);
     const stftTotal = stftSub + stftMid + stftHigh + 1e-12;
     const pack = computeDescriptorPack({
       samples: pcm.samples,

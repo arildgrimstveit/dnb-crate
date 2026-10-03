@@ -78,7 +78,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 - Input: `{ scope?: unmatched|all|ids, trackIds?, dryRun?, limit? }` — default scope `unmatched`
 - Output: enrichment job
 - `dryRun` looks up and reports without writing track fields
-- Errors: `ENRICHMENT_FAILED`, `TRACK_NOT_FOUND`
+- Errors: `ENRICHMENT_FAILED`, `TRACK_NOT_FOUND`, `CONFIG_INVALID` when enrichment is disabled in the config
 - Never writes tags to audio files; never overwrites `manual`
 
 ## `get_enrichment_status`

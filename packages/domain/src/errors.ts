@@ -23,6 +23,7 @@ export type DomainErrorCode =
   | "INVALID_METADATA"
   | "CONFIG_INVALID"
   | "SCAN_FAILED"
+  | "INTERNAL_ERROR"
   | "ENRICHMENT_FAILED"
   | "ENRICHMENT_JOB_NOT_FOUND";
 

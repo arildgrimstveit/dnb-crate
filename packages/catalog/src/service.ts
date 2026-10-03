@@ -160,8 +160,12 @@ export class CatalogService {
       supportedExtensions: this.config.supportedExtensions,
       enrichment: {
         enabled: this.config.enrichment?.enabled === true,
-        musicbrainz: this.config.enrichment?.musicbrainz?.enabled !== false,
-        deezer: this.config.enrichment?.deezer?.enabled !== false,
+        musicbrainz:
+          this.config.enrichment?.enabled === true &&
+          this.config.enrichment?.musicbrainz?.enabled !== false,
+        deezer:
+          this.config.enrichment?.enabled === true &&
+          this.config.enrichment?.deezer?.enabled !== false,
         acoustidConfigured: Boolean(this.config.enrichment?.acoustid?.apiKey),
       },
     };
@@ -221,6 +225,12 @@ export class CatalogService {
   ): { trackId: string; cuePoints: CuePoint[] } {
     const track = this.requireTrack(trackId);
     for (const cue of cuePoints) {
+      if (!Number.isFinite(cue.positionMs) || cue.positionMs < 0) {
+        throw new DomainError(
+          "INVALID_METADATA",
+          `Cue ${cue.type} position must be a non-negative number of milliseconds`,
+        );
+      }
       if (cue.positionMs > track.durationMs) {
         throw new DomainError(
           "INVALID_METADATA",
@@ -228,8 +238,8 @@ export class CatalogService {
         );
       }
     }
-    if (beatAnchorMs !== undefined && beatAnchorMs > track.durationMs) {
-      throw new DomainError("INVALID_BEAT_GRID", "Beat anchor is past the track duration");
+    if (beatAnchorMs !== undefined && (beatAnchorMs < 0 || beatAnchorMs > track.durationMs)) {
+      throw new DomainError("INVALID_BEAT_GRID", "Beat anchor is outside the track duration");
     }
     return this.repository.withTransaction(() => {
       const result = { trackId, cuePoints: this.repository.replaceCuePoints(trackId, cuePoints) };
@@ -473,7 +483,8 @@ export class CatalogService {
     let accepted = 0;
     let acceptedExact = 0;
     let outOfRangeCount = 0;
-    for (const track of this.repository.listAll()) {
+    const allTracks = this.repository.listAll();
+    for (const track of allTracks) {
       const rows = this.analyses.listByTrackId(track.id);
       if (rows.length === 0) {
         continue;
@@ -580,7 +591,7 @@ export class CatalogService {
       }
     }
     return {
-      trackCount: this.repository.listAll().length,
+      trackCount: allTracks.length,
       engineCounts,
       inRange: { count: inRangeCount, withinHalf, accepted, acceptedExact },
       outOfRange: { count: outOfRangeCount },
@@ -701,6 +712,13 @@ export class CatalogService {
     dryRun?: boolean;
     limit?: number;
   }): { job: EnrichmentJob } {
+    if (this.config.enrichment?.enabled !== true) {
+      throw new DomainError(
+        "CONFIG_INVALID",
+        "Metadata enrichment is disabled. Set enrichment.enabled in the config to use it.",
+        { retryable: false },
+      );
+    }
     const trackIds = this.enrichment.selectTrackIds(input);
     return this.enrichment.start({ trackIds, dryRun: input.dryRun === true });
   }
@@ -784,11 +802,12 @@ export class CatalogService {
     };
     const scored = this.repository
       .listAll()
-      .filter((track) => {
+      .map((track) => ({ track, analysis: analysisOf(track.id) }))
+      .filter(({ track, analysis }) => {
         if (track.id === source.id || track.fileMissing) {
           return false;
         }
-        const desc = analysisOf(track.id)?.descriptors ?? null;
+        const desc = analysis?.descriptors ?? null;
         if (input.energyMin !== undefined) {
           const energy = track.energy ?? desc?.suggestedEnergy;
           if (energy == null || energy < input.energyMin) {
@@ -817,8 +836,7 @@ export class CatalogService {
         }
         return true;
       })
-      .map((track) => {
-        const candA = analysisOf(track.id);
+      .map(({ track, analysis: candA }) => {
         return {
           track,
           score: scoreCandidate({
@@ -893,9 +911,10 @@ export class CatalogService {
           })),
         ),
       };
+      const allTracks = this.repository.listAll();
+      const descriptorPercentiles = this.getLibraryStats().descriptorPercentiles;
       const analyses = new Map(
-        this.repository
-          .listAll()
+        allTracks
           .map((track) => [track.id, this.toTimeline(track)] as const)
           .filter(
             (
@@ -905,25 +924,20 @@ export class CatalogService {
           ),
       );
       const drafted = draftSetPlan(
-        this.repository
-          .listAll()
-          .filter((track) => !candidateTrackIds || candidateTrackIds.has(track.id)),
+        allTracks.filter((track) => !candidateTrackIds || candidateTrackIds.has(track.id)),
         {
           ...input,
-          descriptors: resolveDescriptorFilters(
-            input.descriptors,
-            this.getLibraryStats().descriptorPercentiles,
-          ),
+          descriptors: resolveDescriptorFilters(input.descriptors, descriptorPercentiles),
         },
         analyses,
         {
-          percentiles: this.getLibraryStats().descriptorPercentiles,
+          percentiles: descriptorPercentiles,
           feedback: this.feedback.index(),
           recipes: this.recipes,
           varietyHistory,
         },
       );
-      const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
+      const tracksById = new Map(allTracks.map((track) => [track.id, track]));
       const validation = validateSetPlan(drafted.plan, tracksById, {
         artistRepeatSpacing: input.artistRepeatSpacing,
         audioEndMsByTrackId: this.audioEndMsByTrackId(),
@@ -1136,6 +1150,9 @@ export class CatalogService {
   }
 
   cancelRenderJob(renderJobId: string, confirm: true) {
+    if (confirm !== true) {
+      throw new DomainError("INVALID_METADATA", "Pass confirm: true to cancel a render job");
+    }
     return this.renders.cancel(renderJobId, confirm);
   }
 
@@ -1144,7 +1161,8 @@ export class CatalogService {
   }
 
   listRenderResources(limit = RESOURCE_LIST_LIMIT): RenderJob[] {
-    return this.renders.list(limit).jobs.filter((job) => job.status === "succeeded");
+    // Filter in SQL so pagination is not wasted on non-succeeded pages.
+    return this.renders.list(limit, undefined, undefined, "succeeded").jobs;
   }
 
   listSetPlans(

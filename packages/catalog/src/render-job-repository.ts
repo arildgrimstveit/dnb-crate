@@ -318,7 +318,9 @@ export class RenderJobRepository {
     return result.changes;
   }
 
-  list(options: { limit?: number; cursor?: string; setPlanId?: string }): {
+  list(
+    options: { limit?: number; cursor?: string; setPlanId?: string; status?: RenderJobStatus } = {},
+  ): {
     jobs: StoredRenderJob[];
     nextCursor: string | null;
   } {
@@ -328,6 +330,10 @@ export class RenderJobRepository {
     if (options.setPlanId) {
       where.push("set_plan_id = ?");
       params.push(options.setPlanId);
+    }
+    if (options.status) {
+      where.push("status = ?");
+      params.push(options.status);
     }
     if (options.cursor) {
       const decoded = decodeCursor(options.cursor);

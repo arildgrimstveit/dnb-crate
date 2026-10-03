@@ -42,7 +42,7 @@ function hzToBin(hz: number, sampleRateHz: number, nfft: number): number {
   return Math.max(1, Math.min(nfft / 2 - 1, Math.round((hz * nfft) / sampleRateHz)));
 }
 
-function magAtBin(frame: number[], bin: number): number {
+function magAtBin(frame: ArrayLike<number>, bin: number): number {
   const i0 = Math.floor(bin);
   const frac = bin - i0;
   if (i0 < 0 || i0 >= frame.length) {
@@ -54,7 +54,7 @@ function magAtBin(frame: number[], bin: number): number {
   return (frame[i0] ?? 0) * (1 - frac) + (frame[i0 + 1] ?? 0) * frac;
 }
 
-function interpolateBin(frame: number[], index: number): number {
+function interpolateBin(frame: ArrayLike<number>, index: number): number {
   const a = frame[index - 1] ?? 0;
   const b = frame[index] ?? 0;
   const c = frame[index + 1] ?? 0;
@@ -141,122 +141,167 @@ function addToChroma(chroma: number[], hz: number, weight: number, tuningShift: 
   chroma[hi] = (chroma[hi] ?? 0) + weight * frac;
 }
 
-export function dominantSubPitchClass(
-  mag: number[][],
+export type SubPitchVote = { pc: number; weight: number };
+
+/** Sub-band (35–110 Hz) dominant pitch class vote for one STFT frame. */
+export function subPitchVoteOfFrame(
+  frame: ArrayLike<number>,
   sampleRateHz: number,
   nfft: number,
-  frameStart = 0,
-  frameEnd = mag.length,
-): number | null {
+): SubPitchVote | null {
   const lo = hzToBin(35, sampleRateHz, nfft);
   const hi = hzToBin(110, sampleRateHz, nfft);
-  const votes = new Array<number>(12).fill(0);
-  const end = Math.min(mag.length, Math.max(frameStart + 1, frameEnd));
+  let best = 0;
+  let bestK = lo;
+  for (let k = lo; k <= hi && k < frame.length; k += 1) {
+    const value = frame[k] ?? 0;
+    if (value > best) {
+      best = value;
+      bestK = k;
+    }
+  }
+  if (best <= 1e-9) {
+    return null;
+  }
+  const hz = (bestK * sampleRateHz) / nfft;
+  const pc = Math.round(12 * Math.log2(hz / 440)) % 12;
+  const wrapped = ((pc % 12) + 12) % 12;
+  return { pc: wrapped, weight: best };
+}
+
+/** Dominant sub-band pitch class over a frame range of per-frame votes. */
+export function dominantSubPitchClassFromVotes(
+  votes: Array<SubPitchVote | null>,
+  frameStart = 0,
+  frameEnd = votes.length,
+): number | null {
+  const votesByPc = new Array<number>(12).fill(0);
+  const end = Math.min(votes.length, Math.max(frameStart + 1, frameEnd));
   for (let t = Math.max(0, frameStart); t < end; t += 1) {
-    const frame = mag[t]!;
-    let best = 0;
-    let bestK = lo;
-    for (let k = lo; k <= hi && k < frame.length; k += 1) {
-      const value = frame[k] ?? 0;
-      if (value > best) {
-        best = value;
-        bestK = k;
-      }
+    const vote = votes[t];
+    if (vote) {
+      votesByPc[vote.pc] = (votesByPc[vote.pc] ?? 0) + vote.weight;
     }
-    if (best <= 1e-9) {
-      continue;
-    }
-    const hz = (bestK * sampleRateHz) / nfft;
-    const pc = Math.round(12 * Math.log2(hz / 440)) % 12;
-    const wrapped = ((pc % 12) + 12) % 12;
-    votes[wrapped] = (votes[wrapped] ?? 0) + best;
   }
   let bestPc = 0;
   let bestVote = 0;
   for (let i = 0; i < 12; i += 1) {
-    if ((votes[i] ?? 0) > bestVote) {
-      bestVote = votes[i] ?? 0;
+    if ((votesByPc[i] ?? 0) > bestVote) {
+      bestVote = votesByPc[i] ?? 0;
       bestPc = i;
     }
   }
   return bestVote > 0 ? bestPc : null;
 }
 
-/** HPCP-style chroma: 165–3520 Hz, spectral peaks, tuning, harmonic suppression. */
-export function estimateKeyFromChroma(
-  mag: number[][],
+/** Per-frame data retained from one streaming STFT pass: spectral peaks with
+ * precomputed half/third-fraction magnitudes (used later for harmonic
+ * suppression), per-frame peak energy for the quiet-frame cutoff, the tuning
+ * histogram, and spectral-flatness accumulators. Memory is a handful of values
+ * per frame instead of the full frames×bins magnitude matrix. */
+export type ChromaFrames = {
+  /** Per frame: flat quadruples `[hz, power, halfMag, thirdMag]` per peak. */
+  peaks: Float64Array[];
+  frameEnergy: number[];
+  tuningHist: number[];
+  flatLogSum: number;
+  flatLinSum: number;
+  flatCount: number;
+  bandPowerSum: number;
+  peakPowerSum: number;
+};
+
+export function createChromaFrames(): ChromaFrames {
+  return {
+    peaks: [],
+    frameEnergy: [],
+    tuningHist: new Array<number>(100).fill(0),
+    flatLogSum: 0,
+    flatLinSum: 0,
+    flatCount: 0,
+    bandPowerSum: 0,
+    peakPowerSum: 0,
+  };
+}
+
+/** Collect one STFT frame's chroma evidence. `frame` is a reused streaming
+ * buffer; everything needed later is copied out here. */
+export function collectChromaFrame(
+  frames: ChromaFrames,
+  frame: ArrayLike<number>,
   sampleRateHz: number,
   nfft: number,
-  options: { subRootPc?: number | null } = {},
-): ChromaKeyEstimate {
+): void {
   const minBin = hzToBin(CHROMA_LOW_HZ, sampleRateHz, nfft);
   const maxBin = hzToBin(CHROMA_HIGH_HZ, sampleRateHz, nfft);
   const centsBins = 100;
-  const tuningHist = new Array<number>(centsBins).fill(0);
-  const frameEnergy: number[] = [];
-  const peakFrames: Array<Array<{ hz: number; power: number }>> = [];
-  let peakPowerSum = 0;
-  let bandPowerSum = 0;
-  let flatLogSum = 0;
-  let flatLinSum = 0;
-  let flatCount = 0;
-
-  for (const frame of mag) {
-    const peaks: Array<{ hz: number; power: number }> = [];
-    let energy = 0;
-    let frameBand = 0;
-    let frameMax = 0;
-    for (let k = minBin; k <= maxBin && k < frame.length; k += 1) {
-      const magK = frame[k] ?? 0;
-      frameBand += magK * magK;
-      if (magK > frameMax) {
-        frameMax = magK;
-      }
+  const peaks: number[] = [];
+  let energy = 0;
+  let frameBand = 0;
+  let frameMax = 0;
+  for (let k = minBin; k <= maxBin && k < frame.length; k += 1) {
+    const magK = frame[k] ?? 0;
+    frameBand += magK * magK;
+    if (magK > frameMax) {
+      frameMax = magK;
     }
-    const floor = Math.max(1e-9, frameMax * 0.02);
-    for (let k = minBin; k <= maxBin && k < frame.length; k += 1) {
-      const magK = frame[k] ?? 0;
-      if (magK < floor) {
-        continue;
-      }
-      flatLogSum += Math.log(magK);
-      flatLinSum += magK;
-      flatCount += 1;
-    }
-    bandPowerSum += frameBand;
-    for (let k = minBin + 1; k < maxBin - 1 && k < frame.length - 1; k += 1) {
-      const cur = frame[k] ?? 0;
-      if (cur < (frame[k - 1] ?? 0) || cur < (frame[k + 1] ?? 0) || cur <= 0) {
-        continue;
-      }
-      const bin = interpolateBin(frame, k);
-      const hz = (bin * sampleRateHz) / nfft;
-      if (hz < CHROMA_LOW_HZ || hz > CHROMA_HIGH_HZ) {
-        continue;
-      }
-      const compressed = Math.log1p(cur * 8);
-      const power = cur * cur;
-      peaks.push({ hz, power });
-      energy += power;
-      peakPowerSum += power;
-      const midi = 12 * Math.log2(hz / 440) + 69;
-      const frac = ((midi % 1) + 1) % 1;
-      const histBin = Math.min(centsBins - 1, Math.floor(frac * centsBins));
-      tuningHist[histBin] = (tuningHist[histBin] ?? 0) + compressed;
-    }
-    peakFrames.push(peaks);
-    frameEnergy.push(energy);
   }
+  const floor = Math.max(1e-9, frameMax * 0.02);
+  for (let k = minBin; k <= maxBin && k < frame.length; k += 1) {
+    const magK = frame[k] ?? 0;
+    if (magK < floor) {
+      continue;
+    }
+    frames.flatLogSum += Math.log(magK);
+    frames.flatLinSum += magK;
+    frames.flatCount += 1;
+  }
+  frames.bandPowerSum += frameBand;
+  for (let k = minBin + 1; k < maxBin - 1 && k < frame.length - 1; k += 1) {
+    const cur = frame[k] ?? 0;
+    if (cur < (frame[k - 1] ?? 0) || cur < (frame[k + 1] ?? 0) || cur <= 0) {
+      continue;
+    }
+    const bin = interpolateBin(frame, k);
+    const hz = (bin * sampleRateHz) / nfft;
+    if (hz < CHROMA_LOW_HZ || hz > CHROMA_HIGH_HZ) {
+      continue;
+    }
+    const compressed = Math.log1p(cur * 8);
+    const power = cur * cur;
+    const half = magAtBin(frame, (hz * 0.5 * nfft) / sampleRateHz);
+    const third = magAtBin(frame, ((hz / 3) * nfft) / sampleRateHz);
+    peaks.push(hz, power, half, third);
+    energy += power;
+    frames.peakPowerSum += power;
+    const midi = 12 * Math.log2(hz / 440) + 69;
+    const frac = ((midi % 1) + 1) % 1;
+    const histBin = Math.min(centsBins - 1, Math.floor(frac * centsBins));
+    frames.tuningHist[histBin] = (frames.tuningHist[histBin] ?? 0) + compressed;
+  }
+  frames.peaks.push(Float64Array.from(peaks));
+  frames.frameEnergy.push(energy);
+}
+
+/** HPCP-style chroma key estimate: 165–3520 Hz, spectral peaks, tuning,
+ * harmonic suppression — over frames collected by `collectChromaFrame`. */
+export function estimateKeyFromChroma(
+  frames: ChromaFrames,
+  options: { subRootPc?: number | null } = {},
+): ChromaKeyEstimate {
+  const tuningHist = frames.tuningHist;
+  const frameEnergy = frames.frameEnergy;
+  const peakFrames = frames.peaks;
 
   let peakBin = 0;
   let peakVal = -Infinity;
-  for (let i = 0; i < centsBins; i += 1) {
+  for (let i = 0; i < tuningHist.length; i += 1) {
     if ((tuningHist[i] ?? 0) > peakVal) {
       peakVal = tuningHist[i] ?? 0;
       peakBin = i;
     }
   }
-  const peakFrac = peakBin / centsBins;
+  const peakFrac = peakBin / tuningHist.length;
   const tuningShift = peakFrac > 0.5 ? peakFrac - 1 : peakFrac;
 
   const cutoff = [...frameEnergy].sort((a, b) => a - b)[Math.floor(frameEnergy.length * 0.2)] ?? 0;
@@ -265,16 +310,18 @@ export function estimateKeyFromChroma(
     if ((frameEnergy[t] ?? 0) <= cutoff && peakFrames.length > 5) {
       continue;
     }
-    const frame = mag[t]!;
     const chroma = new Array<number>(12).fill(0);
-    for (const peak of peakFrames[t] ?? []) {
-      const half = magAtBin(frame, (peak.hz * 0.5 * nfft) / sampleRateHz);
-      const third = magAtBin(frame, ((peak.hz / 3) * nfft) / sampleRateHz);
-      const contrib = Math.max(0, peak.power - 0.5 * half * half - 0.5 * third * third);
+    const peaks = peakFrames[t]!;
+    for (let p = 0; p + 3 < peaks.length; p += 4) {
+      const hz = peaks[p]!;
+      const power = peaks[p + 1]!;
+      const half = peaks[p + 2]!;
+      const third = peaks[p + 3]!;
+      const contrib = Math.max(0, power - 0.5 * half * half - 0.5 * third * third);
       if (contrib <= 0) {
         continue;
       }
-      addToChroma(chroma, peak.hz, contrib, tuningShift);
+      addToChroma(chroma, hz, contrib, tuningShift);
     }
     const l1 = chroma.reduce((sum, v) => sum + v, 0);
     if (l1 > 1e-9) {
@@ -343,9 +390,12 @@ export function estimateKeyFromChroma(
     stabilityCount += 1;
   }
   const tonalStability = stabilityCount === 0 ? 0 : clamp(stabilitySum / stabilityCount, 0, 1);
-  const tonalPeakRatio = clamp(peakPowerSum / (bandPowerSum + 1e-12), 0, 1);
+  const tonalPeakRatio = clamp(frames.peakPowerSum / (frames.bandPowerSum + 1e-12), 0, 1);
   const flatness =
-    flatCount === 0 ? 1 : Math.exp(flatLogSum / flatCount) / (flatLinSum / flatCount + 1e-12);
+    frames.flatCount === 0
+      ? 1
+      : Math.exp(frames.flatLogSum / frames.flatCount) /
+        (frames.flatLinSum / frames.flatCount + 1e-12);
   const strongPeakRatio = clamp(1 - flatness, 0, 1);
   const bestMajor = scored.find((row) => row.mode === "major");
   const bestMinor = scored.find((row) => row.mode === "minor");

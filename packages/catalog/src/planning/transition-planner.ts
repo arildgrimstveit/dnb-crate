@@ -190,12 +190,7 @@ function propose(
   if (window == null && firstDrop && outCueMs < firstDrop.endMs) {
     outCueMs = firstDrop.endMs;
   }
-  outCueMs = constrainMixOut(
-    outCueMs,
-    outSourceOverlap,
-    outAudio.audioEndMs,
-    outgoing.analysis?.downbeatTimesMs ?? [],
-  );
+  outCueMs = constrainMixOut(outCueMs, outAudio.audioEndMs);
 
   const outgoingEnd = Math.min(outAudio.audioEndMs, Math.round(outCueMs + outSourceOverlap));
   const outgoingStart = Math.max(outAudio.audioStartMs, Math.round(outgoingEnd - outSourceOverlap));

@@ -33,7 +33,7 @@ export function toolFailure(error: unknown): {
         details: error.details,
       })
     : fail({
-        code: "SCAN_FAILED",
+        code: "INTERNAL_ERROR",
         message: "Unexpected server error. Check stderr logs.",
         retryable: true,
       });

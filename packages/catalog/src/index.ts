@@ -22,6 +22,7 @@ import { ApprovedRecipeRepository } from "./approved-recipe-repository.ts";
 import { CatalogService } from "./service.ts";
 import { RenderJobRepository } from "./render-job-repository.ts";
 import { RenderCoordinator } from "./render/coordinator.ts";
+import { sweepStaleRenderTemps } from "./render/temp-sweep.ts";
 import { SetPlanRepository } from "./set-plan-repository.ts";
 import { MixWorkflowCoordinator } from "./mix-workflow.ts";
 import { MixWorkflowRepository } from "./mix-workflow-repository.ts";
@@ -157,6 +158,9 @@ export function createCatalogRuntime(
       renders.recoverInterrupted();
       analysis.recoverInterrupted();
       enrichment.recoverInterrupted();
+      // A previous owner may have been hard-killed mid-render; its working
+      // files are stale now that this runtime owns the catalog.
+      void sweepStaleRenderTemps(config.outputRoot, { logger }).catch(() => undefined);
     } else {
       owner.heartbeat();
     }

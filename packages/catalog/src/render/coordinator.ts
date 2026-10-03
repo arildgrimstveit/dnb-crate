@@ -39,6 +39,7 @@ import {
   type Logger,
   type MixPresetParams,
   type RenderJob,
+  type RenderJobStatus,
   type RenderManifestTrack,
   type RenderManifestV1,
   type RenderReadiness,
@@ -781,8 +782,8 @@ export class RenderCoordinator {
     };
   }
 
-  list(limit?: number, cursor?: string, setPlanId?: string) {
-    const page = this.jobs.list({ limit, cursor, setPlanId });
+  list(limit?: number, cursor?: string, setPlanId?: string, status?: RenderJobStatus) {
+    const page = this.jobs.list({ limit, cursor, setPlanId, status });
     return { jobs: page.jobs.map(toPublicJob), nextCursor: page.nextCursor };
   }
 

@@ -102,7 +102,9 @@ export class AcoustidClient {
       await this.limiter.wait();
       const response = await this.http.get(url, { Accept: "application/json" });
       if (response.status === 429 || response.status === 503) {
-        await this.limiter.sleep(1000);
+        const retryAfter = Number(response.headers["retry-after"]);
+        const waitMs = Number.isFinite(retryAfter) ? Math.max(0, retryAfter * 1000) : 1000;
+        await this.limiter.sleep(Math.min(30_000, waitMs));
         continue;
       }
       if (response.status >= 400) {

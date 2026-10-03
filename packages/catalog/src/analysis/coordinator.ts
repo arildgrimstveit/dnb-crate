@@ -329,6 +329,8 @@ export class AnalysisCoordinator {
       durationMs: track.durationMs,
       beatAnchorMs: anchor,
       referenceBpm,
+      dnbBpmMin: this.config.analysis?.bpmMin,
+      dnbBpmMax: this.config.analysis?.bpmMax,
     });
     const loudnessPromise = binaries
       ? this.runner.run({

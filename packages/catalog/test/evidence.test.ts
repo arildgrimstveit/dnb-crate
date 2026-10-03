@@ -72,8 +72,14 @@ describe("evidence and cue edits", () => {
     catalog.service.setCuePoints(track.id, [{ type: "drop", positionMs: 500, label: "drop" }]);
     expect(catalog.service.getTrack(track.id).cuePoints).toHaveLength(1);
     expect(() => catalog.service.setCuePoints(track.id, [], 2000)).toThrow(
-      /Beat anchor is past the track duration/,
+      /Beat anchor is outside the track duration/,
     );
+    expect(() => catalog.service.setCuePoints(track.id, [], -1)).toThrow(
+      /Beat anchor is outside the track duration/,
+    );
+    expect(() =>
+      catalog.service.setCuePoints(track.id, [{ type: "drop", positionMs: -5 }]),
+    ).toThrow(/non-negative/);
     const after = catalog.service.getTrack(track.id);
     expect(after.cuePoints).toHaveLength(1);
     expect(after.cuePoints[0]?.positionMs).toBe(500);

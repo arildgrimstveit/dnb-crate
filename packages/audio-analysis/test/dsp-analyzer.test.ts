@@ -224,6 +224,28 @@ describe("dnb-crate-dsp", () => {
     }
   });
 
+  it("starts the intro section at the first audible sample, not inside lead-in silence", () => {
+    const pcm = buildSyntheticDnbPcm({ bpm: 174 });
+    const leadMs = 3000;
+    const extra = Math.round((pcm.sampleRateHz * leadMs) / 1000);
+    const samples = new Float32Array(extra + pcm.samples.length);
+    samples.set(pcm.samples, extra);
+    const padded = {
+      ...pcm,
+      samples,
+      durationMs: pcm.durationMs + leadMs,
+    };
+    const result = dspAnalyzer.analyze(padded);
+    const audioStart = result.descriptors?.audioStartMs ?? 0;
+    expect(audioStart).toBeGreaterThan(leadMs - 150);
+    const intro = result.sections.find((section) => section.type === "intro");
+    expect(intro).toBeDefined();
+    expect(Math.abs((intro?.startMs ?? 0) - audioStart)).toBeLessThanOrEqual(1);
+    const introCue = result.suggestedCues.find((cue) => cue.type === "intro_start");
+    expect(introCue).toBeDefined();
+    expect(Math.abs((introCue?.positionMs ?? -1) - audioStart)).toBeLessThanOrEqual(1);
+  });
+
   it("accepts a reference grid when the free estimate is rejected", () => {
     const full = buildClickTrackPcm({ bpm: 174, durationMs: 12_000, sampleRateHz: 22_050 });
     const periodFrames = Math.round((full.sampleRateHz * 60) / 174);

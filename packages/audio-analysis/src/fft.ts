@@ -62,16 +62,24 @@ export type StftResult = {
   hopMs: number;
 };
 
-export function stftMagnitude(
+/**
+ * Stream STFT magnitude frames without materializing the frames×bins matrix
+ * (a `number[][]` for a 60-minute file is >1 GB). Bin values are computed
+ * exactly as a matrix build would compute them, so results are bit-identical;
+ * the only difference is that `frame` is a reused buffer — copy it when
+ * retention is needed. Returns the frame count.
+ */
+export function forEachStftFrame(
   samples: Float32Array,
-  sampleRateHz: number,
-  nfft = 2048,
-  hop = 512,
-): StftResult {
+  nfft: number,
+  hop: number,
+  visit: (frame: Float64Array, index: number, startSample: number) => void,
+): number {
   const window = hannWindow(nfft);
-  const mag: number[][] = [];
   const re = new Float64Array(nfft);
   const im = new Float64Array(nfft);
+  const bins = new Float64Array(nfft / 2);
+  let index = 0;
   for (let start = 0; start + nfft <= samples.length; start += hop) {
     re.fill(0);
     im.fill(0);
@@ -79,13 +87,13 @@ export function stftMagnitude(
       re[i] = (samples[start + i] ?? 0) * (window[i] ?? 0);
     }
     fftRadix2(re, im);
-    const bins = new Array<number>(nfft / 2);
     for (let k = 0; k < nfft / 2; k += 1) {
       const r = re[k] ?? 0;
       const imk = im[k] ?? 0;
       bins[k] = Math.sqrt(r * r + imk * imk);
     }
-    mag.push(bins);
+    visit(bins, index, start);
+    index += 1;
   }
-  return { mag, hop, nfft, hopMs: (hop / sampleRateHz) * 1000 };
+  return index;
 }

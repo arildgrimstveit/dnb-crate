@@ -42,12 +42,8 @@ export function audioBounds(bundle: MixCueBundle): { audioStartMs: number; audio
   };
 }
 
-export function constrainMixOut(
-  mixOutMs: number,
-  _overlapSourceMs: number,
-  audioEndMs: number,
-  _downbeatTimesMs: number[],
-): number {
+/** Clamp a mix-out to the playable region of the source. */
+export function constrainMixOut(mixOutMs: number, audioEndMs: number): number {
   return Math.round(Math.min(Math.max(0, mixOutMs), audioEndMs));
 }
 
@@ -60,7 +56,7 @@ export function pickMixOut(
   const overlap = options.overlapSourceMs ?? DEFAULT_TRANSITION_OVERLAP_MS;
 
   const applyConstraint = (pick: MixCuePick): MixCuePick => {
-    const ms = constrainMixOut(pick.ms, overlap, audioEndMs, downbeats);
+    const ms = constrainMixOut(pick.ms, audioEndMs);
     return ms === pick.ms ? pick : { ...pick, ms };
   };
 
