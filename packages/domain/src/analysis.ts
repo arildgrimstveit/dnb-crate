@@ -65,6 +65,8 @@ export type TempoEvidence = {
 
 export type SonicDescriptors = {
   integratedLufs: number | null;
+  /** Stored JSON key is historical: this is short-term RMS dBFS (no K-weighting,
+   * no gating), not measured LUFS. Real loudness comes from ebur128. */
   shortTermLufsMean: number | null;
   shortTermLufsMax: number | null;
   truePeakDb: number | null;
