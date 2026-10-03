@@ -1,7 +1,6 @@
 import type {
   CuePoint,
   CuePointType,
-  FieldSource,
   LibraryStats,
   PublicTrack,
   SearchTracksInput,
@@ -11,24 +10,27 @@ import type {
 } from "@dnb-crate/domain";
 import {
   DomainError,
-  DSP_ANALYZER_NAME,
   MIN_KEY_CONFIDENCE,
-  SEARCH_LIMIT_DEFAULT,
-  SEARCH_LIMIT_MAX,
-  normalizeGenres,
   normalizeKey,
   normalizePersonName,
-  recordingKeyFrom,
-  resolveBpmHint,
   toPublicTrack,
   yearFromDate,
 } from "@dnb-crate/domain";
 
 import type { SqliteDatabase } from "./db.ts";
 import { nowIso } from "./now-iso.ts";
-import { decodeCursor, encodeCursor, type SortDirection, type SortField } from "./pagination.ts";
+import {
+  parseFieldSources,
+  recordingKeyOfRow,
+  refreshRecordingIdentity,
+  replaceGenres,
+  writeTagLikeFields,
+} from "./provenance.ts";
+import { tableExists } from "./repository-stats.ts";
+import { buildLibraryStats } from "./repository-stats.ts";
+import { searchTracks } from "./repository-search.ts";
 
-type TrackRow = {
+export type TrackRow = {
   id: string;
   file_path: string;
   file_fingerprint: string;
@@ -59,18 +61,6 @@ type TrackRow = {
   field_sources_json?: string | null;
 };
 
-const SORT_COLUMNS: Record<SortField, string> = {
-  title: "tracks.title",
-  artist: "tracks.artist",
-  album: "tracks.album",
-  bpm: "tracks.bpm",
-  energy: "tracks.energy",
-  rating: "tracks.rating",
-  durationMs: "tracks.duration_ms",
-  createdAt: "tracks.created_at",
-  updatedAt: "tracks.updated_at",
-};
-
 export type UpsertTrackInput = Omit<
   Track,
   | "id"
@@ -92,59 +82,6 @@ export type UpsertTrackInput = Omit<
   recordingMbid?: string | null;
   genres?: string[];
 };
-
-function likePattern(query: string): string {
-  return `%${query.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-}
-
-/** Recording identity input shared by the identity refresh and row hydration. */
-function recordingKeyOfRow(row: TrackRow, artistCanonical: string | null): string {
-  return recordingKeyFrom({
-    recordingMbid: row.recording_mbid ?? null,
-    isrc: row.isrc ?? null,
-    artistCanonical,
-    artist: row.artist,
-    title: row.title,
-    durationMs: row.duration_ms,
-  });
-}
-
-function parseFieldSources(raw: string | null | undefined): Record<string, FieldSource> {
-  if (!raw) {
-    return {};
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    const out: Record<string, FieldSource> = {};
-    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (value === "tag" || value === "published" || value === "manual") {
-        out[key] = value;
-      }
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-function canWriteField(
-  sources: Record<string, FieldSource>,
-  field: string,
-  incoming: FieldSource,
-): boolean {
-  const current = sources[field];
-  if (incoming === "manual") {
-    return true;
-  }
-  if (incoming === "published") {
-    return current !== "manual";
-  }
-  return current == null || current === "tag";
-}
-
 export class TrackRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
@@ -516,7 +453,7 @@ export class TrackRepository {
         this.replaceList("track_tags", "tag", id, patch.tags);
       }
       if (patch.genres !== undefined) {
-        this.replaceGenres(id, patch.genres, "manual");
+        replaceGenres(this.db, id, patch.genres, "manual");
         sources.genres = "manual";
         this.db
           .prepare("UPDATE tracks SET field_sources_json = ? WHERE id = ?")
@@ -534,532 +471,11 @@ export class TrackRepository {
   }
 
   search(input: SearchTracksInput): SearchTracksResult {
-    const sort: SortField = input.sort ?? "title";
-    const direction: SortDirection = input.direction ?? "asc";
-    const limit = Math.min(input.limit ?? SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX);
-    const column = SORT_COLUMNS[sort];
-
-    const where: string[] = [];
-    const params: unknown[] = [];
-
-    if (input.query !== undefined && input.query.trim().length > 0) {
-      const pattern = likePattern(input.query.trim());
-      where.push(`(
-        tracks.title LIKE ? ESCAPE '\\' OR
-        IFNULL(tracks.artist, '') LIKE ? ESCAPE '\\' OR
-        IFNULL(tracks.album, '') LIKE ? ESCAPE '\\' OR
-        IFNULL(tracks.notes, '') LIKE ? ESCAPE '\\' OR
-        EXISTS (SELECT 1 FROM track_tags tt WHERE tt.track_id = tracks.id AND tt.tag LIKE ? ESCAPE '\\')
-      )`);
-      params.push(pattern, pattern, pattern, pattern, pattern);
-    }
-
-    if (input.artist !== undefined) {
-      where.push("LOWER(tracks.artist) = LOWER(?)");
-      params.push(input.artist);
-    }
-    if (input.bpmMin !== undefined) {
-      where.push("tracks.bpm >= ?");
-      params.push(input.bpmMin);
-    }
-    if (input.bpmMax !== undefined) {
-      where.push("tracks.bpm <= ?");
-      params.push(input.bpmMax);
-    }
-    if (input.musicalKey !== undefined) {
-      where.push("(LOWER(tracks.musical_key) = LOWER(?) OR LOWER(tracks.camelot_key) = LOWER(?))");
-      params.push(input.musicalKey, input.musicalKey);
-    }
-    if (input.camelotKey !== undefined) {
-      where.push("LOWER(tracks.camelot_key) = LOWER(?)");
-      params.push(input.camelotKey);
-    }
-    if (input.energyMin !== undefined) {
-      where.push("tracks.energy >= ?");
-      params.push(input.energyMin);
-    }
-    if (input.energyMax !== undefined) {
-      where.push("tracks.energy <= ?");
-      params.push(input.energyMax);
-    }
-    if (input.minRating !== undefined) {
-      where.push("tracks.rating >= ?");
-      params.push(input.minRating);
-    }
-    if (input.analysisStatus !== undefined) {
-      where.push("tracks.analysis_status = ?");
-      params.push(input.analysisStatus);
-    }
-
-    this.pushListFilter(
-      where,
-      params,
-      "track_subgenres",
-      "subgenre",
-      input.subgenres,
-      input.subgenresMatch ?? "any",
-    );
-    this.pushListFilter(
-      where,
-      params,
-      "track_moods",
-      "mood",
-      input.moods,
-      input.moodsMatch ?? "any",
-    );
-    this.pushListFilter(where, params, "track_tags", "tag", input.tags, input.tagsMatch ?? "any");
-
-    const descriptorBounds: Array<{ path: string; min?: number; max?: number }> = [];
-    if (input.subBassMin !== undefined || input.subBassMax !== undefined) {
-      descriptorBounds.push({
-        path: "$.subBassRatio",
-        min: input.subBassMin,
-        max: input.subBassMax,
-      });
-    }
-    if (input.brightnessMin !== undefined || input.brightnessMax !== undefined) {
-      descriptorBounds.push({
-        path: "$.brightness",
-        min: input.brightnessMin,
-        max: input.brightnessMax,
-      });
-    }
-    const nested = input.descriptors;
-    if (nested) {
-      const map: Array<[string, string]> = [
-        ["energy", "$.energy"],
-        ["danceability", "$.danceability"],
-        ["valence", "$.valence"],
-        ["acousticness", "$.acousticness"],
-        ["melodicness", "$.melodicness"],
-        ["subBass", "$.subBassRatio"],
-        ["brightness", "$.brightness"],
-      ];
-      for (const [key, jsonPath] of map) {
-        const range = nested[key as keyof typeof nested];
-        if (range?.min !== undefined || range?.max !== undefined) {
-          descriptorBounds.push({ path: jsonPath, min: range.min, max: range.max });
-        }
-      }
-    }
-    for (const bound of descriptorBounds) {
-      where.push(`EXISTS (
-        SELECT 1 FROM track_analyses ta
-        WHERE ta.track_id = tracks.id
-          AND (? IS NULL OR json_extract(ta.descriptors_json, '${bound.path}') >= ?)
-          AND (? IS NULL OR json_extract(ta.descriptors_json, '${bound.path}') <= ?)
-      )`);
-      params.push(bound.min ?? null, bound.min ?? 0, bound.max ?? null, bound.max ?? 1);
-    }
-
-    if (input.genres?.include && input.genres.include.length > 0) {
-      const include = input.genres.include.map((item) => item.trim().toLowerCase());
-      const placeholders = include.map(() => "LOWER(?)").join(", ");
-      where.push(
-        `EXISTS (SELECT 1 FROM track_genres WHERE track_id = tracks.id AND LOWER(genre) IN (${placeholders}))`,
-      );
-      params.push(...include);
-    }
-    if (input.genres?.exclude && input.genres.exclude.length > 0) {
-      const exclude = input.genres.exclude.map((item) => item.trim().toLowerCase());
-      const placeholders = exclude.map(() => "LOWER(?)").join(", ");
-      where.push(
-        `NOT EXISTS (SELECT 1 FROM track_genres WHERE track_id = tracks.id AND LOWER(genre) IN (${placeholders}))`,
-      );
-      params.push(...exclude);
-    }
-
-    if (input.cursor) {
-      const cursor = decodeCursor(input.cursor);
-      if (cursor.sort !== sort || cursor.direction !== direction) {
-        throw new DomainError(
-          "INVALID_CURSOR",
-          "Pagination cursor does not match the current sort",
-        );
-      }
-      const operator = direction === "asc" ? ">" : "<";
-      // NULLS LAST in either direction: enter the null group after a non-null cursor,
-      // and never return to non-null values once the cursor is in the null group.
-      where.push(`(
-        (${column} IS NULL AND ? IS NULL AND tracks.id ${operator} ?)
-        OR (${column} IS NULL AND ? IS NOT NULL)
-        OR (${column} IS NOT NULL AND ? IS NOT NULL AND (${column} ${operator} ? OR (${column} = ? AND tracks.id ${operator} ?)))
-      )`);
-      params.push(
-        cursor.value,
-        cursor.id,
-        cursor.value,
-        cursor.value,
-        cursor.value,
-        cursor.value,
-        cursor.id,
-      );
-    }
-
-    const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
-    const orderSql = `ORDER BY (${column} IS NULL), ${column} ${direction.toUpperCase()}, tracks.id ${direction.toUpperCase()}`;
-    const rows = this.db
-      .prepare(`SELECT tracks.* FROM tracks ${whereSql} ${orderSql} LIMIT ?`)
-      .all(...params, limit + 1) as TrackRow[];
-
-    const page = this.hydrateRows(rows.slice(0, limit));
-    const last = page[page.length - 1];
-    let nextCursor: string | null = null;
-    if (rows.length > limit && last) {
-      nextCursor = encodeCursor({
-        sort,
-        direction,
-        value: this.sortValue(last, sort),
-        id: last.id,
-      });
-    }
-
-    return {
-      tracks: page.map(toPublicTrack),
-      nextCursor,
-      limit,
-      sort,
-      direction,
-    };
+    return searchTracks(this.db, (rows) => this.hydrateRows(rows), input);
   }
-
   stats(): LibraryStats {
-    const row = this.db
-      .prepare(
-        `SELECT
-          COUNT(*) AS track_count,
-          SUM(file_missing) AS missing_file_count,
-          IFNULL(SUM(duration_ms), 0) AS total_duration_ms,
-          SUM(CASE WHEN artist IS NULL THEN 1 ELSE 0 END) AS missing_artist_count,
-          SUM(CASE WHEN bpm IS NULL THEN 1 ELSE 0 END) AS missing_bpm_count,
-          SUM(CASE WHEN musical_key IS NULL THEN 1 ELSE 0 END) AS missing_key_count,
-          SUM(CASE WHEN energy IS NULL THEN 1 ELSE 0 END) AS missing_energy_count,
-          SUM(CASE WHEN rating IS NULL THEN 1 ELSE 0 END) AS missing_rating_count
-         FROM tracks`,
-      )
-      .get() as {
-      track_count: number;
-      missing_file_count: number | null;
-      total_duration_ms: number;
-      missing_artist_count: number;
-      missing_bpm_count: number;
-      missing_key_count: number;
-      missing_energy_count: number;
-      missing_rating_count: number;
-    };
-
-    const paths = this.db.prepare("SELECT title, file_path FROM tracks").all() as {
-      title: string;
-      file_path: string;
-    }[];
-    const extensionCounts: Record<string, number> = {};
-    let missingTitleFromTagsCount = 0;
-    for (const item of paths) {
-      const ext = (/\.[^.]+$/.exec(item.file_path)?.[0] ?? "").toLowerCase();
-      if (ext.length > 0) {
-        extensionCounts[ext] = (extensionCounts[ext] ?? 0) + 1;
-      }
-      const stem = item.file_path
-        .replaceAll("\\", "/")
-        .split("/")
-        .pop()
-        ?.replace(/\.[^.]+$/, "");
-      if (stem !== undefined && stem === item.title) {
-        missingTitleFromTagsCount += 1;
-      }
-    }
-
-    return {
-      trackCount: row.track_count,
-      missingFileCount: row.missing_file_count ?? 0,
-      totalDurationMs: row.total_duration_ms,
-      extensionCounts,
-      missingTitleFromTagsCount,
-      missingArtistCount: row.missing_artist_count,
-      missingBpmCount: row.missing_bpm_count,
-      missingKeyCount: row.missing_key_count,
-      missingEnergyCount: row.missing_energy_count,
-      missingRatingCount: row.missing_rating_count,
-      analysisCoverage: this.analysisCoverage(),
-      metadataCoverage: this.metadataCoverage(),
-      descriptorPercentiles: this.descriptorPercentiles(),
-    };
+    return buildLibraryStats(this.db);
   }
-
-  private tableExists(name: string): boolean {
-    const row = this.db
-      .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ?")
-      .get(name) as { ok: number } | undefined;
-    return row !== undefined;
-  }
-
-  private hasColumn(table: string, column: string): boolean {
-    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    return rows.some((item) => item.name === column);
-  }
-
-  private sourceCounts(column: string): Record<string, number> {
-    const rows = this.db
-      .prepare(
-        `SELECT COALESCE(${column}, 'NULL') AS source, COUNT(*) AS n FROM tracks GROUP BY ${column}`,
-      )
-      .all() as { source: string; n: number }[];
-    const out: Record<string, number> = {};
-    for (const item of rows) {
-      out[item.source] = item.n;
-    }
-    return out;
-  }
-
-  private percentileTriple(values: number[]): LibraryStats["descriptorPercentiles"]["energy"] {
-    if (values.length === 0) {
-      return null;
-    }
-    const sorted = [...values].sort((a, b) => a - b);
-    const at = (p: number): number => {
-      const index = Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))));
-      return sorted[index]!;
-    };
-    return { p10: at(0.1), p50: at(0.5), p90: at(0.9) };
-  }
-
-  private descriptorPercentiles(): LibraryStats["descriptorPercentiles"] {
-    const empty = {
-      energy: null,
-      danceability: null,
-      valence: null,
-      acousticness: null,
-      melodicness: null,
-      subBass: null,
-      brightness: null,
-    };
-    if (
-      !this.tableExists("track_analyses") ||
-      !this.hasColumn("track_analyses", "descriptors_json")
-    ) {
-      return empty;
-    }
-    const rows = this.db
-      .prepare("SELECT descriptors_json FROM track_analyses WHERE descriptors_json IS NOT NULL")
-      .all() as { descriptors_json: string }[];
-    const buckets: Record<string, number[]> = {
-      energy: [],
-      danceability: [],
-      valence: [],
-      acousticness: [],
-      melodicness: [],
-      subBass: [],
-      brightness: [],
-    };
-    for (const row of rows) {
-      try {
-        const parsed = JSON.parse(row.descriptors_json) as Record<string, unknown>;
-        const push = (key: string, value: unknown): void => {
-          if (typeof value === "number" && Number.isFinite(value)) {
-            buckets[key]?.push(value);
-          }
-        };
-        push("energy", parsed.energy);
-        push("danceability", parsed.danceability);
-        push("valence", parsed.valence);
-        push("acousticness", parsed.acousticness);
-        push("melodicness", parsed.melodicness);
-        push("subBass", parsed.subBassRatio);
-        push("brightness", parsed.brightness);
-      } catch {
-        // skip malformed rows
-      }
-    }
-    return {
-      energy: this.percentileTriple(buckets.energy ?? []),
-      danceability: this.percentileTriple(buckets.danceability ?? []),
-      valence: this.percentileTriple(buckets.valence ?? []),
-      acousticness: this.percentileTriple(buckets.acousticness ?? []),
-      melodicness: this.percentileTriple(buckets.melodicness ?? []),
-      subBass: this.percentileTriple(buckets.subBass ?? []),
-      brightness: this.percentileTriple(buckets.brightness ?? []),
-    };
-  }
-
-  private analysisCoverage(): LibraryStats["analysisCoverage"] {
-    const statusRows = this.db
-      .prepare(
-        "SELECT analysis_status AS status, COUNT(*) AS n FROM tracks GROUP BY analysis_status",
-      )
-      .all() as { status: string; n: number }[];
-    let analyzed = 0;
-    let notAnalyzed = 0;
-    for (const item of statusRows) {
-      if (item.status === "complete") {
-        analyzed = item.n;
-      } else if (item.status === "not_analyzed") {
-        notAnalyzed = item.n;
-      }
-    }
-
-    const byEngineVersion: Record<string, number> = {};
-    let accepted = 0;
-    let rejected = 0;
-    let reference = 0;
-    let bpmHintOnly = 0;
-    if (this.tableExists("track_analyses")) {
-      const engineRows = this.db
-        .prepare(
-          `SELECT analyzer_name || '@' || analyzer_version AS key, COUNT(*) AS n
-           FROM track_analyses GROUP BY analyzer_name, analyzer_version`,
-        )
-        .all() as { key: string; n: number }[];
-      for (const item of engineRows) {
-        byEngineVersion[item.key] = item.n;
-      }
-      const dsp = this.db
-        .prepare(
-          `SELECT
-             SUM(CASE WHEN grid_rejected = 0 AND IFNULL(grid_source, 'analyzed') <> 'reference' THEN 1 ELSE 0 END) AS accepted,
-             SUM(CASE WHEN grid_rejected = 1 THEN 1 ELSE 0 END) AS rejected,
-             SUM(CASE WHEN grid_source = 'reference' AND grid_rejected = 0 THEN 1 ELSE 0 END) AS reference
-           FROM track_analyses WHERE analyzer_name = ?`,
-        )
-        .get(DSP_ANALYZER_NAME) as {
-        accepted: number | null;
-        rejected: number | null;
-        reference: number | null;
-      };
-      accepted = dsp.accepted ?? 0;
-      rejected = dsp.rejected ?? 0;
-      reference = dsp.reference ?? 0;
-      const hintRows = this.db
-        .prepare(
-          `SELECT bpm_raw, bpm_confidence, grid_rejected
-           FROM track_analyses WHERE analyzer_name = ?`,
-        )
-        .all(DSP_ANALYZER_NAME) as Array<{
-        bpm_raw: number | null;
-        bpm_confidence: number | null;
-        grid_rejected: number;
-      }>;
-      bpmHintOnly = hintRows.filter(
-        (row) =>
-          resolveBpmHint({
-            gridRejected: row.grid_rejected === 1,
-            bpmRaw: row.bpm_raw,
-            bpmConfidence: row.bpm_confidence,
-          }).bpm != null,
-      ).length;
-    }
-
-    return { analyzed, notAnalyzed, byEngineVersion, accepted, rejected, reference, bpmHintOnly };
-  }
-
-  private metadataCoverage(): LibraryStats["metadataCoverage"] {
-    const energy = (
-      this.db.prepare("SELECT COUNT(*) AS n FROM tracks WHERE energy IS NOT NULL").get() as {
-        n: number;
-      }
-    ).n;
-    const moods = this.tableExists("track_moods")
-      ? (
-          this.db.prepare("SELECT COUNT(DISTINCT track_id) AS n FROM track_moods").get() as {
-            n: number;
-          }
-        ).n
-      : 0;
-    const genres = this.tableExists("track_genres")
-      ? (
-          this.db.prepare("SELECT COUNT(DISTINCT track_id) AS n FROM track_genres").get() as {
-            n: number;
-          }
-        ).n
-      : 0;
-    const countNonEmpty = (column: string): number => {
-      if (!this.hasColumn("tracks", column)) {
-        return 0;
-      }
-      return (
-        this.db
-          .prepare(
-            `SELECT COUNT(*) AS n FROM tracks WHERE ${column} IS NOT NULL AND ${column} <> ''`,
-          )
-          .get() as { n: number }
-      ).n;
-    };
-    let duplicateGroups = 0;
-    if (this.hasColumn("tracks", "recording_key")) {
-      duplicateGroups = (
-        this.db
-          .prepare(
-            `SELECT COUNT(*) AS n FROM (
-               SELECT recording_key FROM tracks
-               WHERE recording_key IS NOT NULL
-               GROUP BY recording_key
-               HAVING COUNT(*) > 1
-             )`,
-          )
-          .get() as { n: number }
-      ).n;
-    }
-    return {
-      bpmBySource: this.sourceCounts("bpm_source"),
-      keyBySource: this.sourceCounts("key_source"),
-      energy,
-      moods,
-      genres,
-      isrc: countNonEmpty("isrc"),
-      label: countNonEmpty("label"),
-      releaseDate: countNonEmpty("release_date"),
-      recordingMbid: countNonEmpty("recording_mbid"),
-      duplicateGroups,
-    };
-  }
-
-  private sortValue(track: Track, sort: SortField): string | number | null {
-    switch (sort) {
-      case "title":
-        return track.title;
-      case "artist":
-        return track.artist;
-      case "album":
-        return track.album;
-      case "bpm":
-        return track.bpm;
-      case "energy":
-        return track.energy;
-      case "rating":
-        return track.rating;
-      case "durationMs":
-        return track.durationMs;
-      case "createdAt":
-        return track.createdAt;
-      case "updatedAt":
-        return track.updatedAt;
-    }
-  }
-
-  private pushListFilter(
-    where: string[],
-    params: unknown[],
-    table: string,
-    column: string,
-    values: string[] | undefined,
-    mode: "any" | "all",
-  ): void {
-    if (values === undefined || values.length === 0) {
-      return;
-    }
-    const placeholders = values.map(() => "LOWER(?)").join(", ");
-    if (mode === "all") {
-      where.push(
-        `(SELECT COUNT(DISTINCT LOWER(${column})) FROM ${table} WHERE track_id = tracks.id AND LOWER(${column}) IN (${placeholders})) = ?`,
-      );
-      params.push(...values, values.length);
-      return;
-    }
-    where.push(
-      `EXISTS (SELECT 1 FROM ${table} WHERE track_id = tracks.id AND LOWER(${column}) IN (${placeholders}))`,
-    );
-    params.push(...values);
-  }
-
   private replaceList(
     table: "track_moods" | "track_subgenres" | "track_tags",
     column: string,
@@ -1076,82 +492,6 @@ export class TrackRepository {
     }
   }
 
-  /** Shared writer for tag and published provenance: applies the same
-   * field-source rules, source bookkeeping, genre replacement, and identity
-   * refresh for both routes. */
-  private writeTagLikeFields(
-    trackId: string,
-    source: "tag" | "published",
-    fields: {
-      album?: string | null;
-      label?: string | null;
-      releaseDate?: string | null;
-      isrc?: string | null;
-      recordingMbid?: string | null;
-      genres?: string[];
-      artistCanonical?: string | null;
-      bpm?: number | null;
-    },
-    options: { missingRow: "skip" | "throw" } = { missingRow: "skip" },
-  ): void {
-    const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(trackId) as
-      TrackRow | undefined;
-    if (!row) {
-      if (options.missingRow === "throw") {
-        throw new DomainError("TRACK_NOT_FOUND", `No track with id ${trackId}`);
-      }
-      return;
-    }
-    const sources = parseFieldSources(row.field_sources_json);
-    const assignments: string[] = [];
-    const values: unknown[] = [];
-    const setIf = (
-      column: string,
-      field: string,
-      value: string | number | null | undefined,
-    ): void => {
-      if (value == null || value === "") {
-        return;
-      }
-      if (!canWriteField(sources, field, source)) {
-        return;
-      }
-      assignments.push(`${column} = ?`);
-      values.push(value);
-      sources[field] = source;
-    };
-    setIf("album", "album", fields.album);
-    setIf("label", "label", fields.label);
-    setIf("release_date", "releaseDate", fields.releaseDate);
-    setIf("isrc", "isrc", fields.isrc);
-    setIf("recording_mbid", "recordingMbid", fields.recordingMbid);
-    if (fields.artistCanonical && canWriteField(sources, "artistCanonical", source)) {
-      assignments.push("artist_canonical = ?");
-      values.push(fields.artistCanonical);
-      sources.artistCanonical = source;
-    }
-    if (
-      fields.bpm != null &&
-      source === "published" &&
-      row.bpm_source !== "manual" &&
-      row.bpm_source !== "published"
-    ) {
-      assignments.push("bpm = ?", "bpm_source = ?");
-      values.push(fields.bpm, "published");
-    }
-    if (assignments.length > 0) {
-      assignments.push("field_sources_json = ?", "updated_at = ?");
-      values.push(JSON.stringify(sources), nowIso(), trackId);
-      this.db.prepare(`UPDATE tracks SET ${assignments.join(", ")} WHERE id = ?`).run(...values);
-    }
-    if ((fields.genres?.length ?? 0) > 0 && canWriteField(sources, "genres", source)) {
-      this.replaceGenres(trackId, fields.genres ?? [], source);
-      sources.genres = source;
-      this.writeFieldSources(trackId, sources);
-    }
-    this.refreshRecordingIdentity(trackId);
-  }
-
   applyTagFields(
     id: string,
     input: {
@@ -1163,27 +503,11 @@ export class TrackRepository {
       genres?: string[];
     },
   ): void {
-    this.writeTagLikeFields(id, "tag", input);
+    writeTagLikeFields(this.db, id, "tag", input);
   }
+
   refreshRecordingIdentity(trackId: string): void {
-    const row = this.db.prepare("SELECT * FROM tracks WHERE id = ?").get(trackId) as
-      TrackRow | undefined;
-    if (!row) {
-      return;
-    }
-    const sources = parseFieldSources(row.field_sources_json);
-    const artistCanonical =
-      sources.artistCanonical === "published" && row.artist_canonical
-        ? row.artist_canonical
-        : row.artist
-          ? normalizePersonName(row.artist)
-          : (row.artist_canonical ?? null);
-    const recordingKey = recordingKeyOfRow(row, artistCanonical);
-    this.db
-      .prepare(
-        `UPDATE tracks SET artist_canonical = ?, recording_key = ?, updated_at = ? WHERE id = ?`,
-      )
-      .run(artistCanonical, recordingKey, nowIso(), trackId);
+    refreshRecordingIdentity(this.db, trackId);
   }
 
   applyPublishedEnrichment(
@@ -1199,24 +523,8 @@ export class TrackRepository {
       bpm: number | null;
     },
   ): void {
-    this.writeTagLikeFields(trackId, "published", patch, { missingRow: "throw" });
+    writeTagLikeFields(this.db, trackId, "published", patch, { missingRow: "throw" });
   }
-  private writeFieldSources(trackId: string, sources: Record<string, FieldSource>): void {
-    this.db
-      .prepare("UPDATE tracks SET field_sources_json = ?, updated_at = ? WHERE id = ?")
-      .run(JSON.stringify(sources), nowIso(), trackId);
-  }
-
-  private replaceGenres(trackId: string, genres: string[], source: FieldSource): void {
-    this.db.prepare("DELETE FROM track_genres WHERE track_id = ?").run(trackId);
-    const insert = this.db.prepare(
-      "INSERT INTO track_genres (track_id, genre, source) VALUES (?, ?, ?)",
-    );
-    for (const genre of normalizeGenres(genres)) {
-      insert.run(trackId, genre, source);
-    }
-  }
-
   private updateScanFields(id: string, input: UpsertTrackInput): Track {
     const existing = this.findById(id);
     const keepBpm =
@@ -1297,7 +605,7 @@ export class TrackRepository {
     >();
     for (const row of rows) values.set(row.id, { moods: [], subgenres: [], tags: [], genres: [] });
     for (const [field, table, column] of relations) {
-      if (field === "genres" && !this.tableExists(table)) continue;
+      if (field === "genres" && !tableExists(this.db, table)) continue;
       // JSON supplies one bound parameter even for libraries beyond SQLite's variable limit.
       // Table and column identifiers come only from the fixed relation list above.
       const items = this.db
