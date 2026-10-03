@@ -18,6 +18,7 @@ import {
 
 import { verifiesAppliedRecipe } from "./applied-recipe.ts";
 import type { RecipeRecallLookup } from "./recall.ts";
+import { artistKey } from "./shared.ts";
 
 export type TrackQualityEvidence = {
   musicalKey: string | null;
@@ -48,13 +49,6 @@ function str(value: unknown): string | null {
 
 function num(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function artistKey(track: Track): string | null {
-  if (track.artistCanonical) {
-    return track.artistCanonical;
-  }
-  return track.artist ? normalizePersonName(track.artist) : null;
 }
 
 function keyEvidence(
@@ -131,7 +125,7 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
     const klass = harmonicClass(relation);
     harmonicCounts[klass] += 1;
     const params = transition?.parameters ?? {};
-    const fallbackReason = type === "crossfade" ? str(params.reason) : str(params.reason);
+    const fallbackReason = str(params.reason);
     let recipeStatus: JoinRecipeStatus = "none";
     const appliedId = str(params.appliedRecipeId);
     if (appliedId && input.recipes && outgoing && incoming) {

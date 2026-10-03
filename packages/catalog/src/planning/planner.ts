@@ -6,12 +6,18 @@ import {
   resolveTargetDurationMs,
   MIN_PLAYABLE_DURATION_MS,
   PLANNER_CANDIDATE_CAP,
+  PLANNER_LOOKAHEAD_CONTINUATIONS,
+  PLANNER_LOOKAHEAD_WEIGHT,
+  PLANNER_MIN_POOL_ESTIMATE,
+  PLANNER_OPENER_ATTEMPTS,
   PLANNER_POOL_MIN_TRACKS,
   PLANNER_POOL_RELAX_FACTOR,
+  PLANNER_SHORTLIST_SIZE,
+  VARIETY_REPEATED_PAIR_COST,
+  VARIETY_REPEATED_TRACK_COST,
   genresMatchFilter,
   interpolateEnergy,
   matchesDescriptorFilters,
-  normalizePersonName,
   resolveDescriptorFilters,
   pairKey,
   DJ_HANDOFF_POLICY,
@@ -34,6 +40,7 @@ import {
 
 import { buildEntries, planDurationMs, playableMs, type TimelineAnalysis } from "./timeline.ts";
 import { compilePlanningConstraints, PlanningConstraintError } from "./constraints.ts";
+import { artistKey } from "./shared.ts";
 import { verifiesAppliedRecipe } from "./applied-recipe.ts";
 import { repairSequence } from "./repair-search.ts";
 import type { RecipeRecallLookup } from "./recall.ts";
@@ -58,13 +65,6 @@ function typicalPlayable(tracks: Track[]): number {
   }
   const avg = tracks.reduce((sum, track) => sum + track.durationMs, 0) / tracks.length;
   return Math.max(avg - DEFAULT_TRANSITION_OVERLAP_MS, 60_000);
-}
-
-function artistKey(track: Track): string | null {
-  if (track.artistCanonical) {
-    return track.artistCanonical;
-  }
-  return track.artist ? normalizePersonName(track.artist) : null;
 }
 
 function respectsSpacing(track: Track, recent: Track[], spacing: number): boolean {
@@ -188,7 +188,10 @@ export function draftSetPlan(
     ),
   );
   const rejected: RejectionExplanation[] = [];
-  const needed = Math.max(16, Math.ceil(targetDurationMs / typicalPlayable(catalog)));
+  const needed = Math.max(
+    PLANNER_MIN_POOL_ESTIMATE,
+    Math.ceil(targetDurationMs / typicalPlayable(catalog)),
+  );
   const originalDescriptorFilters = resolveDescriptorFilters(
     input.descriptors,
     options.percentiles,
@@ -520,7 +523,10 @@ export function draftSetPlan(
       historyPairs.has(
         pairKey(source.recordingKey ?? source.id, candidate.recordingKey ?? candidate.id),
       );
-    const cost = varietyStrength * ((repeatedTrack ? 8 : 0) + (repeatedPair ? 4 : 0));
+    const cost =
+      varietyStrength *
+      ((repeatedTrack ? VARIETY_REPEATED_TRACK_COST : 0) +
+        (repeatedPair ? VARIETY_REPEATED_PAIR_COST : 0));
     score.components.recentlyUsed -= cost;
     score.total -= cost;
     if (repeatedTrack) score.reasons.push("RECENT_MIX_RECORDING");
@@ -713,7 +719,7 @@ export function draftSetPlan(
           b.breakdown.total + b.requiredProgress - a.breakdown.total - a.requiredProgress ||
           a.track.id.localeCompare(b.track.id),
       );
-    const top = ranked.slice(0, 12);
+    const top = ranked.slice(0, PLANNER_SHORTLIST_SIZE);
     const nextFraction = Math.min(
       (currentDuration + avgPlayable) / Math.max(targetDurationMs, 1),
       1,
@@ -734,7 +740,7 @@ export function draftSetPlan(
       if (qualityPolicy === "strict") {
         // Score a continuation that can actually host both joins, rather than metadata alone.
         const continuation = nextCandidates
-          .slice(0, 8)
+          .slice(0, PLANNER_LOOKAHEAD_CONTINUATIONS)
           .find(({ track }) =>
             selectionQualityOk([...selected, ...chainFrom(item.track), ...chainFrom(track)]),
           );
@@ -745,13 +751,14 @@ export function draftSetPlan(
       (a, b) =>
         b.breakdown.total +
           b.requiredProgress +
-          0.35 * (b.lookahead ?? 0) -
-          (a.breakdown.total + a.requiredProgress + 0.35 * (a.lookahead ?? 0)) ||
-        a.track.id.localeCompare(b.track.id),
+          PLANNER_LOOKAHEAD_WEIGHT * (b.lookahead ?? 0) -
+          (a.breakdown.total +
+            a.requiredProgress +
+            PLANNER_LOOKAHEAD_WEIGHT * (a.lookahead ?? 0)) || a.track.id.localeCompare(b.track.id),
     );
     if (explorationWeight > 0 && top.length > 1) {
       const merit = (item: (typeof top)[number]) =>
-        item.breakdown.total + item.requiredProgress + 0.35 * item.lookahead;
+        item.breakdown.total + item.requiredProgress + PLANNER_LOOKAHEAD_WEIGHT * item.lookahead;
       const best = merit(top[0]!);
       const near = top.filter((item) => best - merit(item) <= 4 * explorationWeight);
       const draw = (item: (typeof top)[number]) =>
@@ -1176,7 +1183,7 @@ export function draftSetPlan(
       );
     };
     const attempts = [{ openerTrackId: plan.entries[0]?.trackId ?? null, durationMs: duration }];
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let attempt = 1; attempt <= PLANNER_OPENER_ATTEMPTS; attempt += 1) {
       const alternative = draftSetPlan(catalog, input, analyses, {
         ...options,
         openerAttempt: attempt,

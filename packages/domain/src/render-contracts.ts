@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 
 import { automationEventSchema } from "./analysis-contracts.ts";
+import { activeTransitionTypeSchema, transitionTypeSchema } from "./transition-type.ts";
 import {
   MAX_PREVIEW_WINDOW_MS,
   MAX_RENDER_EDGE_FADE_MS,
@@ -73,9 +74,7 @@ export const renderManifestTrackSchema = z.object({
   overlapToNextMs: z.number().int().nullable(),
   transitionId: z.string().nullable(),
   transitionTemplate: z.enum(["equal_power_crossfade", "phrase_mix", "bass_swap", "none"]),
-  requestedTransitionType: z
-    .enum(["crossfade", "phrase_mix", "bass_swap", "double_drop"])
-    .nullable(),
+  requestedTransitionType: transitionTypeSchema.nullable(),
   analysisVersion: z.string().nullable(),
   bpmConfidence: z.number().nullable(),
   downbeatOffsetMs: z.number().nullable(),
@@ -192,8 +191,7 @@ export const createTransitionPreviewInputSchema = z.object({
     .max(MAX_PREVIEW_WINDOW_MS)
     .optional()
     .describe("Target preview length, 30–60 seconds. Default 45 seconds."),
-  template: z
-    .enum(["crossfade", "phrase_mix", "bass_swap"])
+  template: activeTransitionTypeSchema
     .optional()
     .describe("Override the planned transition template for this preview."),
   barCount: z.union([z.literal(8), z.literal(16), z.literal(32)]).optional(),

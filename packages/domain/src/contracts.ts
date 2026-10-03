@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 
 import { SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX } from "./constants.ts";
+import { activeTransitionTypeSchema, transitionTypeSchema } from "./transition-type.ts";
 
 export const trackIdSchema = z.string().uuid();
 
@@ -416,7 +417,7 @@ const scoreBreakdownSchema = z.object({
     joinAligned: z.number(),
     joinHarmonic: z.number(),
     genrePrior: z.number(),
-    feedback: z.number().optional(),
+    feedback: z.number(),
   }),
   reasons: z.array(z.string()),
 });
@@ -442,7 +443,7 @@ export const findCompatibleTracksDataSchema = z.object({
 
 export const transitionPlanSchema = z.object({
   id: z.string(),
-  type: z.enum(["crossfade", "phrase_mix", "bass_swap", "double_drop"]),
+  type: transitionTypeSchema,
   durationMs: z.number().int().positive(),
   outgoingCuePointId: z.string().nullable(),
   incomingCuePointId: z.string().nullable(),
@@ -641,7 +642,7 @@ export const updateSetPlanInputSchema = z
     setTransition: z
       .object({
         entryId: z.string().uuid(),
-        type: z.enum(["crossfade", "phrase_mix", "bass_swap", "double_drop"]),
+        type: transitionTypeSchema,
         durationMs: z.number().int().min(1000).max(120_000),
         outgoingCuePointId: z.string().uuid().nullable().optional(),
         incomingCuePointId: z.string().uuid().nullable().optional(),
@@ -657,7 +658,7 @@ export const updateSetPlanInputSchema = z
     applyTransition: z
       .object({
         entryId: z.string().uuid(),
-        type: z.enum(["crossfade", "phrase_mix", "bass_swap"]),
+        type: activeTransitionTypeSchema,
         durationMs: z.number().int().min(1000).max(120_000),
         outgoingCuePointId: z.string().uuid().nullable().optional(),
         incomingCuePointId: z.string().uuid().nullable().optional(),
@@ -731,7 +732,7 @@ export const joinQualityReportSchema = z.object({
   phraseShape: z.string().nullable(),
   sequentialHandoff: z.string().nullable(),
   intent: z.string().nullable(),
-  type: z.enum(["crossfade", "phrase_mix", "bass_swap", "double_drop"]),
+  type: transitionTypeSchema,
   fallbackReason: z.string().nullable(),
   nativeOutgoingBpm: z.number().nullable(),
   nativeIncomingBpm: z.number().nullable(),

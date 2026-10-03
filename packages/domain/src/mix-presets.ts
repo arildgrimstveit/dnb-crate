@@ -15,6 +15,7 @@ import {
   type BassSwapParams,
   type TrackSection,
 } from "./analysis.ts";
+import { clamp } from "./num.ts";
 import type { TransitionType } from "./planning.ts";
 
 export type MixPresetType = "crossfade" | "phrase_mix" | "bass_swap";
@@ -48,10 +49,6 @@ export type MixPresetParams = BassSwapParams & {
   mixInMs?: number;
   incomingDropMs?: number;
 };
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
 
 export function chooseMixIntent(
   input: {

@@ -393,7 +393,6 @@ export class EnrichmentCoordinator {
         );
         if (picked?.match.accept) {
           recording = hits.find((hit) => hit.id === picked.candidate.id) ?? null;
-          method = method ?? "isrc";
           score = picked.match.score;
           needsReview = false;
           if (recording?.releaseMbid) {

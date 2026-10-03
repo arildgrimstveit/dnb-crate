@@ -157,6 +157,11 @@ export function parseCamelot(code: string): ParsedCamelot | null {
  */
 export type KeyAgreement = "exact" | "relative" | "number_pm1" | "clash";
 
+/** Wrap-around Camelot number distance (0–6) between two parsed keys. */
+function camelotNumberDelta(a: ParsedCamelot, b: ParsedCamelot): number {
+  return Math.min((a.number - b.number + 12) % 12, (b.number - a.number + 12) % 12);
+}
+
 export function camelotNumberDistance(left: string | null, right: string | null): number | null {
   if (left === null || right === null) {
     return null;
@@ -166,7 +171,7 @@ export function camelotNumberDistance(left: string | null, right: string | null)
   if (!a || !b) {
     return null;
   }
-  return Math.min((a.number - b.number + 12) % 12, (b.number - a.number + 12) % 12);
+  return camelotNumberDelta(a, b);
 }
 
 /** Exact Camelot, relative (same number), number ±1, or clash. */
@@ -217,7 +222,7 @@ export function harmonicRelation(left: string | null, right: string | null): Har
   if (!pa || !pb) {
     return "unknown";
   }
-  const numberDist = Math.min((pa.number - pb.number + 12) % 12, (pb.number - pa.number + 12) % 12);
+  const numberDist = camelotNumberDelta(pa, pb);
   if (numberDist === 0) {
     return "relative";
   }
@@ -293,7 +298,7 @@ export function camelotDistance(left: string | null, right: string | null): numb
   if (!a || !b) {
     return null;
   }
-  const numberDiff = Math.min((a.number - b.number + 12) % 12, (b.number - a.number + 12) % 12);
+  const numberDiff = camelotNumberDelta(a, b);
   const letterDiff = a.letter === b.letter ? 0 : 1;
   return numberDiff + letterDiff;
 }

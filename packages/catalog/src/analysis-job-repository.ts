@@ -3,6 +3,7 @@ import { ANALYSIS_JOB_LIST_LIMIT_MAX, DomainError } from "@dnb-crate/domain";
 
 import { AnalysisRepository } from "./analysis-repository.ts";
 import type { SqliteDatabase } from "./db.ts";
+import { nowIso } from "./now-iso.ts";
 
 type JobRow = {
   id: string;
@@ -19,10 +20,6 @@ type JobRow = {
   started_at: string | null;
   completed_at: string | null;
 };
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
 
 function mapJob(row: JobRow): AnalysisJob {
   return {

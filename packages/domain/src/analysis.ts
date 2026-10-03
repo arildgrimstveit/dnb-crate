@@ -8,6 +8,7 @@ import {
   MIN_BASS_CROSSOVER_HZ,
   MIN_BASS_SWAP_RAMP_MS,
 } from "./constants.ts";
+import { clamp } from "./num.ts";
 import type { BpmSource, CuePointType, KeySource } from "./track.ts";
 import type { TransitionType } from "./planning.ts";
 
@@ -243,10 +244,6 @@ export type TrackAnalysisView = TrackAnalysis & {
   bpmHint: number | null;
   bpmHintConfidence: number | null;
 };
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
 
 export function clampBassSwapParams(
   input: Partial<BassSwapParams> | null | undefined,

@@ -228,44 +228,44 @@ export function evidenceRefOf(evidence: ResolvedTrackEvidence): FrozenEvidenceRe
   };
 }
 
-export function firstDropMsFromFrozen(
+/** Collect a finite numeric field from every present frozen snapshot. */
+function numericFieldFromFrozen(
   evidence: Record<string, FrozenTrackEvidence | FrozenEvidenceRef>,
+  pick: (row: FrozenTrackEvidence) => number | null | undefined,
 ): Map<string, number> {
   const map = new Map<string, number>();
   for (const [trackId, row] of Object.entries(evidence)) {
-    if (!isFrozenSnapshot(row) || !row.present) {
+    if (!isFrozenSnapshot(row)) {
       continue;
     }
-    const drop = row.sections.find((section) => section.type === "drop");
-    if (drop && Number.isFinite(drop.startMs)) {
-      map.set(trackId, drop.startMs);
+    const value = pick(row);
+    if (typeof value === "number" && Number.isFinite(value)) {
+      map.set(trackId, value);
     }
   }
   return map;
+}
+
+export function firstDropMsFromFrozen(
+  evidence: Record<string, FrozenTrackEvidence | FrozenEvidenceRef>,
+): Map<string, number> {
+  return numericFieldFromFrozen(evidence, (row) => {
+    if (!row.present) return null;
+    const drop = row.sections.find((section) => section.type === "drop");
+    return drop ? drop.startMs : null;
+  });
 }
 
 export function audioEndMsFromFrozen(
   evidence: Record<string, FrozenTrackEvidence | FrozenEvidenceRef>,
 ): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const [trackId, row] of Object.entries(evidence)) {
-    if (isFrozenSnapshot(row) && typeof row.audioEndMs === "number") {
-      map.set(trackId, row.audioEndMs);
-    }
-  }
-  return map;
+  return numericFieldFromFrozen(evidence, (row) => row.audioEndMs);
 }
 
 export function keyConfidenceFromFrozen(
   evidence: Record<string, FrozenTrackEvidence | FrozenEvidenceRef>,
 ): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const [trackId, row] of Object.entries(evidence)) {
-    if (isFrozenSnapshot(row) && typeof row.keyConfidence === "number") {
-      map.set(trackId, row.keyConfidence);
-    }
-  }
-  return map;
+  return numericFieldFromFrozen(evidence, (row) => row.keyConfidence);
 }
 
 export function assertEvidenceEnginesExist(

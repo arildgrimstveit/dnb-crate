@@ -2,6 +2,7 @@ import { parseEbur128, type ProcessRunner } from "@dnb-crate/audio-renderer";
 import {
   RENDER_DURATION_TOLERANCE_MS,
   camelotDistance as camelotWheelDistance,
+  finiteNumber,
   type FrozenJoinEvidence,
 } from "@dnb-crate/domain";
 
@@ -9,8 +10,7 @@ export function paramNumber(
   parameters: Record<string, number | string | boolean> | undefined,
   key: string,
 ): number | null {
-  const value = parameters?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return finiteNumber(parameters?.[key]);
 }
 
 export function paramString(
@@ -73,9 +73,6 @@ export function storedGridResidualMs(
   }
   return gridResidual;
 }
-
-/** @deprecated Use storedGridResidualMs — this is not an audio measurement. */
-export const alignmentResidualMs = storedGridResidualMs;
 
 export function beatsInWindow(
   beats: number[],

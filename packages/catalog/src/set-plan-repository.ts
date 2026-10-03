@@ -2,6 +2,7 @@ import type { PlanExplanation, SetPlanEntry, SetPlanSummary, SetPlanV1 } from "@
 import { DomainError, SET_PLAN_LIST_LIMIT_MAX } from "@dnb-crate/domain";
 
 import type { SqliteDatabase } from "./db.ts";
+import { nowIso } from "./now-iso.ts";
 import { decodeCursor, encodeCursor } from "./pagination.ts";
 
 type PlanRow = {
@@ -39,10 +40,6 @@ export type StoredSetPlan = {
   seed: number;
   explanation: PlanExplanation;
 };
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
 
 export class SetPlanRepository {
   constructor(private readonly db: SqliteDatabase) {}

@@ -14,6 +14,7 @@ import {
 
 import type { SqliteDatabase } from "./db.ts";
 import type { FrozenEvidenceRef, FrozenRenderSettings, FrozenTrackEvidence } from "./evidence.ts";
+import { nowIso } from "./now-iso.ts";
 import { decodeCursor, encodeCursor } from "./pagination.ts";
 
 type JobRow = {
@@ -62,10 +63,6 @@ export type StoredRenderJob = RenderJob & {
   manifest: RenderManifestV1 | null;
   params: RenderJobParams;
 };
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
 
 function fileNameOf(relPath: string | null): string | null {
   if (!relPath) {

@@ -21,7 +21,7 @@ export type CompiledPlanningConstraints = {
   ): RequiredTransitionConstraint | undefined;
 };
 
-function pairKey(outgoingTrackId: string, incomingTrackId: string): string {
+function pairConstraintKey(outgoingTrackId: string, incomingTrackId: string): string {
   return `${outgoingTrackId}->${incomingTrackId}`;
 }
 
@@ -64,7 +64,7 @@ export function compilePlanningConstraints(
   const declarations = new Map<string, string>();
 
   for (const row of requiredTransitions) {
-    const key = pairKey(row.outgoingTrackId, row.incomingTrackId);
+    const key = pairConstraintKey(row.outgoingTrackId, row.incomingTrackId);
     const declaration = JSON.stringify([
       row.strength,
       row.reuse,
@@ -137,7 +137,10 @@ export function compilePlanningConstraints(
   }
 
   const byPair = new Map(
-    requiredTransitions.map((row) => [pairKey(row.outgoingTrackId, row.incomingTrackId), row]),
+    requiredTransitions.map((row) => [
+      pairConstraintKey(row.outgoingTrackId, row.incomingTrackId),
+      row,
+    ]),
   );
 
   return {
@@ -147,14 +150,14 @@ export function compilePlanningConstraints(
     reservedIncoming,
     lockedTrackIds,
     recipeIdForPair(outgoingTrackId, incomingTrackId) {
-      const row = byPair.get(pairKey(outgoingTrackId, incomingTrackId));
+      const row = byPair.get(pairConstraintKey(outgoingTrackId, incomingTrackId));
       return row?.reuse === "recipe" ? row.recipeId : undefined;
     },
     reuseForPair(outgoingTrackId, incomingTrackId) {
-      return byPair.get(pairKey(outgoingTrackId, incomingTrackId))?.reuse;
+      return byPair.get(pairConstraintKey(outgoingTrackId, incomingTrackId))?.reuse;
     },
     constraintFor(outgoingTrackId, incomingTrackId) {
-      return byPair.get(pairKey(outgoingTrackId, incomingTrackId));
+      return byPair.get(pairConstraintKey(outgoingTrackId, incomingTrackId));
     },
   };
 }

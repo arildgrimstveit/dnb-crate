@@ -81,6 +81,15 @@ export const DEFAULT_SCORE_WEIGHTS = {
 export const MIN_KEY_CONFIDENCE = 0.5;
 export const PLANNER_POOL_MIN_TRACKS = 12;
 export const PLANNER_POOL_RELAX_FACTOR = 3;
+/** Selection-loop tuning. Documented in docs/scoring.md; changing any of these
+ * changes plan output for existing briefs (they are part of determinism). */
+export const PLANNER_SHORTLIST_SIZE = 12;
+export const PLANNER_LOOKAHEAD_CONTINUATIONS = 8;
+export const PLANNER_LOOKAHEAD_WEIGHT = 0.35;
+export const PLANNER_MIN_POOL_ESTIMATE = 16;
+export const PLANNER_OPENER_ATTEMPTS = 3;
+export const VARIETY_REPEATED_TRACK_COST = 8;
+export const VARIETY_REPEATED_PAIR_COST = 4;
 
 export const DEFAULT_LOUDNESS_TARGET_LUFS = -14;
 export const DEFAULT_TRUE_PEAK_CEILING_DB = -1;

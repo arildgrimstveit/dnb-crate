@@ -2,6 +2,7 @@ import type { EnrichmentJob } from "@dnb-crate/domain";
 import { DomainError } from "@dnb-crate/domain";
 
 import type { SqliteDatabase } from "./db.ts";
+import { nowIso } from "./now-iso.ts";
 
 type JobRow = {
   id: string;
@@ -19,10 +20,6 @@ type JobRow = {
   progress_message: string | null;
   dry_run: number;
 };
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
 
 function mapJob(row: JobRow): EnrichmentJob {
   return {

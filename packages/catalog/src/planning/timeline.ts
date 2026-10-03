@@ -702,12 +702,12 @@ export function buildEntries(
             }
           : transitionToNext;
     const stampedTransition =
-      transitionWithGain && rateVersion === 2
-        ? {
+      transitionWithGain === null
+        ? null
+        : {
             ...transitionWithGain,
             parameters: { ...transitionWithGain.parameters, rateRegionsVersion: 2 as const },
-          }
-        : transitionWithGain;
+          };
     entries.push({
       id: prior?.id ?? crypto.randomUUID(),
       trackId: track.id,

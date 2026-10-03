@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  alignmentResidualMs,
   evaluateDurationError,
   firstDropMs,
   fullRenderDurationFailure,
@@ -15,7 +14,7 @@ import {
 describe("render:check v2 metrics", () => {
   it("reports a one-beat applied nudge as residual", () => {
     const beats = Array.from({ length: 32 }, (_, i) => i * 345);
-    const residual = alignmentResidualMs(343, beats, beats, 200_000, 343, 1, 1, 345);
+    const residual = storedGridResidualMs(343, beats, beats, 200_000, 343, 1, 1, 345);
     expect(residual).toBe(343);
   });
 
@@ -63,26 +62,26 @@ describe("render:check v2 metrics", () => {
   it("does not treat a phrase-mode 360ms nudge as a one-beat residual", () => {
     const outgoing = Array.from({ length: 64 }, (_, i) => 200_000 + i * 345);
     const incoming = Array.from({ length: 64 }, (_, i) => 360 + i * 345);
-    const residual = alignmentResidualMs(360, outgoing, incoming, 200_000, 360, 1, 1, 10_971);
+    const residual = storedGridResidualMs(360, outgoing, incoming, 200_000, 360, 1, 1, 10_971);
     expect(Math.abs(residual ?? 99)).toBeLessThan(20);
   });
 
   it("does not treat a bar-mode locked grid as a one-beat residual", () => {
     const outgoing = Array.from({ length: 64 }, (_, i) => 265_024 + i * 345);
     const incoming = Array.from({ length: 64 }, (_, i) => 2 + i * 345);
-    const residual = alignmentResidualMs(-5, outgoing, incoming, 265_024, 2, 1, 1, 1379);
+    const residual = storedGridResidualMs(-5, outgoing, incoming, 265_024, 2, 1, 1, 1379);
     expect(Math.abs(residual ?? 99)).toBeLessThan(20);
   });
 
   it("does not report a phrase nudge as residual when beat grids are missing", () => {
-    const residual = alignmentResidualMs(573, [], [], 175_855, 1110, 1, 1, 10_971);
+    const residual = storedGridResidualMs(573, [], [], 175_855, 1110, 1, 1, 10_971);
     expect(residual).toBeNull();
   });
 
   it("uses grid cross-correlation when the applied nudge is small", () => {
     const outgoing = Array.from({ length: 32 }, (_, i) => 10_000 + i * 345);
     const incoming = Array.from({ length: 32 }, (_, i) => i * 345);
-    const residual = alignmentResidualMs(0, outgoing, incoming, 10_000, 0, 1, 1, 345);
+    const residual = storedGridResidualMs(0, outgoing, incoming, 10_000, 0, 1, 1, 345);
     expect(residual).not.toBeNull();
     expect(Math.abs(residual ?? 99)).toBeLessThan(20);
   });
@@ -90,7 +89,7 @@ describe("render:check v2 metrics", () => {
   it("reports an 80ms grid slip when the off-zero peak is clearly better", () => {
     const outgoing = Array.from({ length: 32 }, (_, i) => 10_000 + i * 345);
     const incoming = Array.from({ length: 32 }, (_, i) => 80 + i * 345);
-    const residual = alignmentResidualMs(0, outgoing, incoming, 10_000, 0, 1, 1, 345);
+    const residual = storedGridResidualMs(0, outgoing, incoming, 10_000, 0, 1, 1, 345);
     expect(residual).toBe(80);
   });
 

@@ -28,6 +28,13 @@ export {
   MIN_KEY_CONFIDENCE,
   PLANNER_POOL_MIN_TRACKS,
   PLANNER_POOL_RELAX_FACTOR,
+  PLANNER_SHORTLIST_SIZE,
+  PLANNER_LOOKAHEAD_CONTINUATIONS,
+  PLANNER_LOOKAHEAD_WEIGHT,
+  PLANNER_MIN_POOL_ESTIMATE,
+  PLANNER_OPENER_ATTEMPTS,
+  VARIETY_REPEATED_TRACK_COST,
+  VARIETY_REPEATED_PAIR_COST,
   DEFAULT_LOUDNESS_TARGET_LUFS,
   DEFAULT_TRUE_PEAK_CEILING_DB,
   DEFAULT_RENDER_SAMPLE_RATE_HZ,
@@ -131,7 +138,6 @@ export {
   keyAgreement,
   normalizeKey,
   parseCamelot,
-  MIN_HARMONIC_CONFIDENCE,
   type HarmonicRelation,
   type KeyAgreement,
   type NormalizedKey,
@@ -139,10 +145,7 @@ export {
 } from "./keys.ts";
 export {
   assertPlaybackRate,
-  barDurationMs,
   barIndexForBeat,
-  beatPeriodMs,
-  foldedIntegerBpm,
   normalizeDnbBpm,
   pairTargetBpm,
   publishedBpmTolerance,
@@ -164,8 +167,6 @@ export {
   snapToNearestBeat,
   type NormalizedDnbBpm,
 } from "./tempo.ts";
-export const analysisScopeValues = ["ids", "planningReady", "unanalyzed", "stale", "all"] as const;
-export type AnalysisScope = (typeof analysisScopeValues)[number];
 export type {
   AnalysisJob,
   AnalysisJobStatus,
@@ -200,13 +201,9 @@ export {
   clampMixPresetParams,
   defaultLowHandoverBar,
   expandPreset,
-  landingIncomingDropBar,
   isMonotoneBand,
-  outgoingHoldBars,
   sequentialHandoffLabel,
   sectionAtMs,
-  SEQUENTIAL_INCOMING_HEAD_ENERGY,
-  SEQUENTIAL_OUTGOING_DROP_ENERGY,
   type MixIntent,
   type MixPresetParams,
   type MixPresetType,
@@ -238,9 +235,10 @@ export {
 } from "./analysis-contracts.ts";
 export { silentLogger, type Logger } from "./logger.ts";
 export { fail, ok, type ToolErrorBody, type ToolResult } from "./tool-result.ts";
+export { clamp, finiteNumber } from "./num.ts";
+export { activeTransitionTypeSchema, transitionTypeSchema } from "./transition-type.ts";
 export { interpolateEnergy, scoreCandidate, hashSeed, type ScoreContext } from "./compatibility.ts";
 export {
-  MOOD_PRESETS,
   moodPresetFor,
   resolveDescriptorFilters,
   type DescriptorFilters,
@@ -248,15 +246,9 @@ export {
   type DescriptorRange,
 } from "./mood-presets.ts";
 export {
-  continuousEnergy,
-  descriptorValue,
   effectiveEnergy,
   genresMatchFilter,
-  hasDescriptorFilters,
   matchesDescriptorFilters,
-  moodPresetScore,
-  valueInRange,
-  type DescriptorValues,
 } from "./descriptor-filters.ts";
 export {
   type AnalysisEngineId,
@@ -365,7 +357,6 @@ export {
   setCuePointsDataSchema,
   setCuePointsInputSchema,
   setPlanV1Schema,
-  toolErrorSchema,
   toolResultSchema,
   trackIdSchema,
   updateSetPlanInputSchema,
@@ -413,12 +404,6 @@ export {
   type ReusableRecipePayload,
   type SequentialHandoff,
 } from "./approved-recipe.ts";
-export {
-  bpmDisagrees,
-  downbeatPhaseAgreement,
-  periodStats,
-  type PeriodStats,
-} from "./grid-metrics.ts";
 export {
   FEEDBACK_DISLIKE_THRESHOLD,
   FEEDBACK_LIKE_THRESHOLD,
