@@ -1,5 +1,5 @@
 import * as z from "zod/v4";
-import { activeTransitionTypeSchema, transitionTypeSchema } from "../transition-type.ts";
+import { transitionTypeSchema } from "../transition-type.ts";
 import { renderReadinessSchema } from "../render-contracts.ts";
 import {
   descriptorFiltersSchema,
@@ -299,7 +299,7 @@ export const updateSetPlanInputSchema = z
     applyTransition: z
       .object({
         entryId: z.string().uuid(),
-        type: activeTransitionTypeSchema,
+        type: transitionTypeSchema,
         durationMs: z.number().int().min(1000).max(120_000),
         outgoingCuePointId: z.string().uuid().nullable().optional(),
         incomingCuePointId: z.string().uuid().nullable().optional(),
@@ -403,7 +403,6 @@ export const planQualityReportSchema = z.object({
     crossfade: z.number().int(),
     phrase_mix: z.number().int(),
     bass_swap: z.number().int(),
-    double_drop: z.number().int(),
   }),
   harmonicCounts: z.object({
     compatible: z.number().int(),
@@ -413,13 +412,6 @@ export const planQualityReportSchema = z.object({
   durationMs: z.number().int(),
   durationDeltaMs: z.number().int(),
   targetDurationMs: z.number().int(),
-  hourAuditionWindow: z
-    .object({
-      minMs: z.number().int(),
-      maxMs: z.number().int(),
-      inWindow: z.boolean(),
-    })
-    .nullable(),
   artistRepeatSpacingRequested: z.number().int(),
   artistGaps: z.array(artistGapSchema),
   artistSpacingViolations: z.array(artistGapSchema),

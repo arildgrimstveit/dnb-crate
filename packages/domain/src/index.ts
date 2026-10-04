@@ -242,7 +242,7 @@ export {
 export { silentLogger, type Logger } from "./logger.ts";
 export { fail, ok, type ToolErrorBody, type ToolResult } from "./tool-result.ts";
 export { clamp, finiteNumber } from "./num.ts";
-export { activeTransitionTypeSchema, transitionTypeSchema } from "./transition-type.ts";
+export { transitionTypeSchema } from "./transition-type.ts";
 export { interpolateEnergy, scoreCandidate, hashSeed, type ScoreContext } from "./compatibility.ts";
 export {
   moodPresetFor,

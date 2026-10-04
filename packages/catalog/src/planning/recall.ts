@@ -41,9 +41,7 @@ export function recallApprovedHandoff(
         transition: {
           id: crypto.randomUUID(),
           type:
-            payload.type === "bass_swap" ||
-            payload.type === "crossfade" ||
-            payload.type === "double_drop"
+            payload.type === "bass_swap" || payload.type === "crossfade"
               ? payload.type
               : "phrase_mix",
           durationMs: payload.durationMs,

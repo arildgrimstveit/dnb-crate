@@ -36,7 +36,7 @@ export type UpdateSetPlanInput = {
   setTrim?: { entryId: string; sourceStartMs: number; sourceEndMs: number };
   setTransition?: {
     entryId: string;
-    type: "crossfade" | "phrase_mix" | "bass_swap" | "double_drop";
+    type: "crossfade" | "phrase_mix" | "bass_swap";
     durationMs: number;
     outgoingCuePointId?: string | null;
     incomingCuePointId?: string | null;

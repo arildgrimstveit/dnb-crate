@@ -2,7 +2,7 @@ import * as z from "zod/v4";
 
 import { automationEventSchema } from "./analysis-contracts.ts";
 import { validationIssueSchema } from "./contracts/common.ts";
-import { activeTransitionTypeSchema, transitionTypeSchema } from "./transition-type.ts";
+import { transitionTypeSchema } from "./transition-type.ts";
 import {
   MAX_PREVIEW_WINDOW_MS,
   MAX_RENDER_EDGE_FADE_MS,
@@ -185,7 +185,7 @@ export const createTransitionPreviewInputSchema = z.object({
     .max(MAX_PREVIEW_WINDOW_MS)
     .optional()
     .describe("Target preview length, 30–60 seconds. Default 45 seconds."),
-  template: activeTransitionTypeSchema
+  template: transitionTypeSchema
     .optional()
     .describe("Override the planned transition template for this preview."),
   barCount: z.union([z.literal(8), z.literal(16), z.literal(32)]).optional(),

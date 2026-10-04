@@ -232,7 +232,6 @@ describe("plan quality report", () => {
         },
       },
     });
-    expect(inside.hourAuditionWindow).toBeNull();
     expect(inside.partial).toBe(false);
     expect(inside.readyForAudition).toBe(true);
 

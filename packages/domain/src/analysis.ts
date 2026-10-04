@@ -190,7 +190,7 @@ export type BassSwapParams = {
 };
 
 export type TransitionProposal = {
-  type: Exclude<TransitionType, "double_drop">;
+  type: TransitionType;
   barCount: 8 | 16 | 32 | null;
   durationMs: number;
   targetBpm: number | null;

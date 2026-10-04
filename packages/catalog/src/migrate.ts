@@ -20,6 +20,7 @@ import { migration016AnalysisStages } from "./migrations/016_analysis_stages.ts"
 import { migration017MixWorkflows } from "./migrations/017_mix_workflows.ts";
 
 import { migration018WorkerOwnerHeartbeat } from "./migrations/018_worker_owner_heartbeat.ts";
+import { migration019DoubleDropRetired } from "./migrations/019_double_drop_retired.ts";
 
 export type Migration = {
   id: number;
@@ -47,6 +48,7 @@ const MIGRATIONS: Migration[] = [
   migration016AnalysisStages,
   migration017MixWorkflows,
   migration018WorkerOwnerHeartbeat,
+  migration019DoubleDropRetired,
 ];
 
 export function runMigrations(db: SqliteDatabase): void {

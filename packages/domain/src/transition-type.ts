@@ -2,13 +2,10 @@ import * as z from "zod/v4";
 
 import type { TransitionType } from "./planning.ts";
 
-/** Single schema source for transition types. `double_drop` is a reserved
- * member: stored recipes/plans may carry it; nothing new creates it. */
-export const transitionTypeSchema = z.enum(["crossfade", "phrase_mix", "bass_swap", "double_drop"]);
-
-/** Types the renderer/planner can newly produce today. */
-export const activeTransitionTypeSchema = z.enum(["crossfade", "phrase_mix", "bass_swap"]);
+/** Single schema source for transition types. The reserved `double_drop`
+ * member was retired in October 2026 (migration 019 rewrites stored rows);
+ * every transition the planner/renderer creates today is one of these. */
+export const transitionTypeSchema = z.enum(["crossfade", "phrase_mix", "bass_swap"]);
 
 export type TransitionTypeValue = z.output<typeof transitionTypeSchema>;
-export type ActiveTransitionTypeValue = z.output<typeof activeTransitionTypeSchema>;
 export type { TransitionType };

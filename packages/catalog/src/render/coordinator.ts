@@ -943,9 +943,6 @@ export class RenderCoordinator {
             ? error
             : new DomainError("PLAYBACK_RATE_OUT_OF_RANGE", String(error));
         }
-        if (segment.requestedTransitionType === "double_drop") {
-          warnings.push(`double_drop on ${segment.title} is rendered as a bass_swap.`);
-        }
       }
 
       const mixTypes: MixTransitionSpec[] = overlaps.map((_, index) => {
@@ -1756,7 +1753,7 @@ function toManifestTrack(
 }
 
 function isAlignedType(type: TransitionType | null | undefined): boolean {
-  return type === "phrase_mix" || type === "bass_swap" || type === "double_drop";
+  return type === "phrase_mix" || type === "bass_swap";
 }
 
 function planHasAlignedTransition(plan: SetPlanV1): boolean {
@@ -1830,7 +1827,7 @@ function toMixSpec(
     const clamped = clampMixPresetParams({ ...params, barCount: bars }, bars);
     return { type: "phrase_mix", barCount: bars, params: clamped };
   }
-  if (type === "bass_swap" || type === "double_drop") {
+  if (type === "bass_swap") {
     const clamped = clampMixPresetParams({ ...params, barCount: bars }, bars);
     return { type: "bass_swap", barCount: bars, bassSwap: clamped, params: clamped };
   }

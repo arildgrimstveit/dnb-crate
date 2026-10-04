@@ -8,7 +8,7 @@ export type EnergyArcPoint = {
   targetEnergy: number;
 };
 
-export type TransitionType = "crossfade" | "phrase_mix" | "bass_swap" | "double_drop";
+export type TransitionType = "crossfade" | "phrase_mix" | "bass_swap";
 
 export type TransitionPlan = {
   id: string;
@@ -273,7 +273,6 @@ export type PlanQualityReport = {
   durationMs: number;
   durationDeltaMs: number;
   targetDurationMs: number;
-  hourAuditionWindow: { minMs: number; maxMs: number; inWindow: boolean } | null;
   artistRepeatSpacingRequested: number;
   artistGaps: Array<{
     artist: string;

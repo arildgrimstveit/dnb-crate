@@ -103,7 +103,6 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
     crossfade: 0,
     phrase_mix: 0,
     bass_swap: 0,
-    double_drop: 0,
   };
   const harmonicCounts = { compatible: 0, risky: 0, unknown: 0 };
   const joins: JoinQualityReport[] = [];
@@ -307,7 +306,6 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
     !boundaryOrExclusionViolation &&
     (input.plan.qualityPolicy !== "strict" || artistSpacingViolations.length === 0);
   if (joins.some((join) => join.unexplainedQualityIssue)) partialReasons.push("JOIN_QUALITY");
-  const hourAuditionWindow = null;
   const durationReady = !durationPartial;
   const readyForAudition =
     input.validation.valid && qualityChecksPassed && !partial && durationReady;
@@ -319,7 +317,6 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
     durationMs,
     durationDeltaMs,
     targetDurationMs: input.plan.targetDurationMs,
-    hourAuditionWindow,
     artistRepeatSpacingRequested: spacing,
     artistGaps,
     artistSpacingViolations,
