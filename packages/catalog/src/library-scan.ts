@@ -29,15 +29,33 @@ export async function scanLibrary(
   const dryRun = options.dryRun ?? false;
   const walk = await walkLibrary(config, logger);
   const warnings = [...walk.warnings];
-  const seenPaths = new Set<string>();
+  const seenPaths = new Set(walk.files.map((file) => normalizedPath(file.realPath)));
   let upserted = 0;
   let moved = 0;
   let skippedMalformed = 0;
+  let markedMissing = 0;
 
   const resolved = walk.resolvedRoots;
 
+  // Reconcile missing rows BEFORE importing: a bulk rename between scans must
+  // be recognized as moves in this same pass, and move detection only matches
+  // fingerprints against rows already flagged missing. Rows that move are
+  // un-flagged by their own import below.
+  if (!dryRun && walk.complete) {
+    const missingIds: string[] = [];
+    for (const entry of repository.listPathIndex()) {
+      if (!isPathInsideAnyRoot(entry.filePath, resolved)) {
+        continue;
+      }
+      if (!seenPaths.has(normalizedPath(entry.filePath))) {
+        missingIds.push(entry.id);
+      }
+    }
+    repository.markMissing(missingIds);
+    markedMissing = missingIds.length;
+  }
+
   for (const file of walk.files) {
-    seenPaths.add(normalizedPath(file.realPath));
     try {
       const metadata = await extractAudioMetadata(file.realPath);
       const fileFingerprint = await fingerprintFile(file.realPath, {
@@ -83,20 +101,6 @@ export async function scanLibrary(
     }
   }
 
-  let markedMissing = 0;
-  if (!dryRun && walk.complete) {
-    const missingIds: string[] = [];
-    for (const entry of repository.listPathIndex()) {
-      if (!isPathInsideAnyRoot(entry.filePath, resolved)) {
-        continue;
-      }
-      if (!seenPaths.has(normalizedPath(entry.filePath))) {
-        missingIds.push(entry.id);
-      }
-    }
-    repository.markMissing(missingIds);
-    markedMissing = missingIds.length;
-  }
   if (!dryRun && !walk.complete) {
     warnings.push(
       "Scan incomplete; existing file availability was preserved. Retry the scan after resolving unreadable paths.",

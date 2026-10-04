@@ -1,4 +1,4 @@
-import { mkdir, writeFile, symlink, rm } from "node:fs/promises";
+import { mkdir, writeFile, symlink, rm, rename } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -182,6 +182,31 @@ describe("catalog repository and scanner", () => {
     const afterScan = await runtime.service.scanLibrary();
     expect(afterScan.result.moved).toBe(1);
     const after = runtime.service.searchTracks({ query: "Mover" });
+    expect(after.tracks).toHaveLength(1);
+    expect(after.tracks[0]?.id).toBe(before?.id);
+    expect(after.tracks[0]?.fileMissing).toBe(false);
+  });
+
+  it("recognizes a pure rename as a move in a single scan pass", async () => {
+    const { library, config } = await makeWorkspace();
+    const runtime = createCatalogRuntime(config);
+    cleanups.push(() => runtime.close());
+
+    const original = path.join(library, "rename-me.wav");
+    await writeSineWav(original, { title: "Renamed", artist: "Shifter", durationMs: 220 });
+    await runtime.service.scanLibrary();
+    const before = runtime.service.searchTracks({ query: "Renamed" }).tracks[0];
+    expect(before).toBeTruthy();
+
+    // No intermediate scan: the rename and the next scan happen in one step,
+    // so the old row is still flagged present when the scan starts.
+    const renamed = path.join(library, "Shifter - rename-me.wav");
+    await rename(original, renamed);
+    const scan = await runtime.service.scanLibrary();
+    expect(scan.result.moved).toBe(1);
+    expect(scan.result.upserted).toBe(1);
+
+    const after = runtime.service.searchTracks({ query: "Renamed" });
     expect(after.tracks).toHaveLength(1);
     expect(after.tracks[0]?.id).toBe(before?.id);
     expect(after.tracks[0]?.fileMissing).toBe(false);
