@@ -23,7 +23,6 @@ export type ExtractedAudioMetadata = {
   isrc: string | null;
   recordingMbid: string | null;
   genres: string[];
-  catalogNumber: string | null;
   albumArtist: string | null;
 };
 
@@ -124,9 +123,7 @@ export async function extractAudioMetadata(filePath: string): Promise<ExtractedA
     firstString(common.originaldate) ??
     firstString(common.date) ??
     firstString(nativeValue(native, ["TDOR", "TDRC", "TYER", "IDATE", "DATE", "ORIGINALDATE"]));
-  const catalogNumber =
-    firstString(common.catalognumber) ??
-    firstString(nativeValue(native, ["CATALOGNUMBER", "CATALOG"]));
+
   const genres = normalizeGenres([
     ...stringList(common.genre),
     ...stringList(nativeValue(native, ["TCON", "GENRE", "IGNR"])),
@@ -149,7 +146,6 @@ export async function extractAudioMetadata(filePath: string): Promise<ExtractedA
     isrc,
     recordingMbid,
     genres,
-    catalogNumber,
     albumArtist: blankToNull(parsed.common.albumartist),
   };
 }

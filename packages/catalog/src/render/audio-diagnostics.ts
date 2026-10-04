@@ -1,8 +1,12 @@
-import { RENDER_CHECK_AUDIO_CONFIDENT_MS, RENDER_CHECK_AUDIO_REVIEW_MS } from "@dnb-crate/domain";
+import {
+  RENDER_CHECK_AUDIO_CONFIDENT_MS,
+  RENDER_CHECK_AUDIO_REVIEW_MS,
+  type MixIntent,
+} from "@dnb-crate/domain";
 
 export type DiagnosticConfidence = "high" | "low" | "insufficient";
 export type DiagnosticStatus = "pass" | "review" | "fail" | "advisory" | "unmeasured";
-export type MixIntent = "sustain" | "lift" | "breather" | null;
+export type MixIntentOrNull = MixIntent | null;
 export type OverlapRegion = "start" | "middle" | "end";
 
 export type RegionGridFit = {
@@ -212,7 +216,7 @@ export function diagnoseRenderedMix(input: {
   sampleRate: number;
   mixPcm: Float32Array;
   overlapMs: number;
-  intent?: MixIntent;
+  intent?: MixIntentOrNull;
 }): OverlapAudioDiagnostic {
   return diagnoseOverlapAudio({
     sampleRate: input.sampleRate,
@@ -234,7 +238,7 @@ export function diagnoseOverlapAudio(input: {
   overlapMs: number;
   outgoingBeatsMs: number[];
   incomingBeatsMs: number[];
-  intent?: MixIntent;
+  intent?: MixIntentOrNull;
 }): OverlapAudioDiagnostic {
   const mix = input.mixPcm ?? mixPcm(input.outgoingPcm, input.incomingPcm);
   const outgoing = diagnoseDeck(
@@ -338,7 +342,7 @@ function diagnoseMix(
   incoming: Float32Array,
   sampleRate: number,
   _overlapMs: number,
-  intent: MixIntent,
+  intent: MixIntentOrNull,
 ): MixAudioDiagnostic {
   const hop = Math.max(1, Math.round((HOP_MS / 1000) * sampleRate));
   const mixRms = rmsEnvelope(mix, hop);

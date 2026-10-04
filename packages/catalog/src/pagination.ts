@@ -25,6 +25,17 @@ export function encodeCursor(cursor: PageCursor): string {
 }
 
 export function decodeCursor(raw: string): PageCursor {
+  const sortFields: readonly string[] = [
+    "title",
+    "artist",
+    "album",
+    "bpm",
+    "energy",
+    "rating",
+    "durationMs",
+    "createdAt",
+    "updatedAt",
+  ];
   try {
     const parsed: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
     if (
@@ -40,6 +51,12 @@ export function decodeCursor(raw: string): PageCursor {
     const cursor = parsed as PageCursor;
     if (typeof cursor.id !== "string" || cursor.id.length === 0) {
       throw new Error("id");
+    }
+    if (!sortFields.includes(cursor.sort)) {
+      throw new Error("sort");
+    }
+    if (cursor.direction !== "asc" && cursor.direction !== "desc") {
+      throw new Error("direction");
     }
     return cursor;
   } catch (error) {

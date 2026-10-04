@@ -6,6 +6,7 @@ import path from "node:path";
 import type { AnalyzerResult } from "@dnb-crate/audio-analysis";
 import { DomainError, normalizeKey, type AppConfig } from "@dnb-crate/domain";
 import { createNodeProcessRunner, type ProcessRunner } from "@dnb-crate/audio-renderer";
+import { findCommands } from "../which.ts";
 
 export type KeyEngineProbe = {
   engine: "keyfinder" | null;
@@ -15,18 +16,12 @@ export type KeyEngineProbe = {
   reason?: string;
 };
 
-function candidates(config: AppConfig): string[] {
+async function candidates(config: AppConfig): Promise<string[]> {
   if (config.keyfinderPath) return [config.keyfinderPath];
   const name = process.platform === "win32" ? "keyfinder-cli.exe" : "keyfinder-cli";
-  return [
-    ...new Set([
-      path.resolve(process.cwd(), "tools", "keyfinder-cli", name),
-      ...(process.env.PATH ?? "")
-        .split(path.delimiter)
-        .filter(Boolean)
-        .map((dir) => path.join(dir.replace(/^"|"$/g, ""), name)),
-    ]),
-  ];
+  const local = path.resolve(process.cwd(), "tools", "keyfinder-cli", name);
+  const onPath = await findCommands(name);
+  return [...new Set([local, ...onPath])];
 }
 
 /** Recognition confidence is a fixed heuristic, not a KeyFinder probability. */
@@ -36,7 +31,7 @@ export async function probeKeyEngine(
   config: AppConfig,
   runner: ProcessRunner = createNodeProcessRunner(),
 ): Promise<KeyEngineProbe> {
-  for (const command of candidates(config)) {
+  for (const command of await candidates(config)) {
     try {
       const bytes = await readFile(command);
       const result = await runner.run({

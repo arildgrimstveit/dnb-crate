@@ -290,7 +290,7 @@ export class CatalogService {
     }
     if (ids.size === 0) {
       throw new DomainError(
-        "ANALYSIS_FAILED",
+        "INVALID_METADATA",
         "No tracks to analyze. Pass trackIds, planningReadyOnly=true, or scope unanalyzed|stale|all|planningReady.",
       );
     }
@@ -855,11 +855,6 @@ export class CatalogService {
     this.requireTrack(input.trackId);
     assertEvidenceEnginesExist(this.analyses, input.trackId, input);
     return this.analyses.setSelection(input.trackId, input);
-  }
-
-  getTrackEvidence(trackId: string): TrackEvidenceSelection | null {
-    this.requireTrack(trackId);
-    return this.analyses.getSelection(trackId);
   }
 
   rateTransition(input: RateTransitionInput): TransitionFeedback {

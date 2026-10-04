@@ -9,7 +9,7 @@ export async function run(
 ): Promise<boolean> {
   switch (command) {
     case "db:migrate":
-      printJson({ ok: true, databasePath: "[configured]" });
+      printJson({ ok: true, data: { databasePath: "[configured]", migrations: "applied" } });
       return true;
     case "library:scan": {
       const scanned = await runtime.service.scanLibrary({ dryRun: flag(args, "--dry-run") });

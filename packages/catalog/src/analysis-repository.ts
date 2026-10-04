@@ -338,77 +338,82 @@ export class AnalysisRepository {
   }
 
   upsert(analysis: StoredTrackAnalysis): StoredTrackAnalysis {
-    this.db
-      .prepare(
-        `INSERT INTO track_analyses (
-          track_id, analyzer_name, analyzer_version, bpm, bpm_confidence, bpm_raw,
-          beat_times_json, downbeat_times_json, grid_rejected, grid_rejection_reason, grid_source,
-          musical_key, key_confidence, key_mode, camelot_key, tempo_stability, downbeat_confidence,
-          integrated_lufs, true_peak_db, low_band_energy, mid_band_energy, high_band_energy,
-          waveform_summary_json, beat_anchor_ms, suggested_cues_json, descriptors_json,
-          engine_runtime_ms, analyzed_at, reference_bpm
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(track_id, analyzer_name) DO UPDATE SET
-          analyzer_version = excluded.analyzer_version,
-          bpm = excluded.bpm,
-          bpm_confidence = excluded.bpm_confidence,
-          bpm_raw = excluded.bpm_raw,
-          beat_times_json = excluded.beat_times_json,
-          downbeat_times_json = excluded.downbeat_times_json,
-          grid_rejected = excluded.grid_rejected,
-          grid_rejection_reason = excluded.grid_rejection_reason,
-          grid_source = excluded.grid_source,
-          musical_key = excluded.musical_key,
-          key_confidence = excluded.key_confidence,
-          key_mode = excluded.key_mode,
-          camelot_key = excluded.camelot_key,
-          tempo_stability = excluded.tempo_stability,
-          downbeat_confidence = excluded.downbeat_confidence,
-          integrated_lufs = excluded.integrated_lufs,
-          true_peak_db = excluded.true_peak_db,
-          low_band_energy = excluded.low_band_energy,
-          mid_band_energy = excluded.mid_band_energy,
-          high_band_energy = excluded.high_band_energy,
-          waveform_summary_json = excluded.waveform_summary_json,
-          beat_anchor_ms = excluded.beat_anchor_ms,
-          suggested_cues_json = excluded.suggested_cues_json,
-          descriptors_json = excluded.descriptors_json,
-          engine_runtime_ms = excluded.engine_runtime_ms,
-          analyzed_at = excluded.analyzed_at,
-          reference_bpm = excluded.reference_bpm`,
-      )
-      .run(
-        analysis.trackId,
-        analysis.analyzerName,
-        analysis.analyzerVersion,
-        analysis.bpm,
-        analysis.bpmConfidence,
-        analysis.bpmRaw,
-        JSON.stringify(analysis.beatTimesMs),
-        JSON.stringify(analysis.downbeatTimesMs),
-        analysis.gridRejected ? 1 : 0,
-        analysis.gridRejectionReason,
-        analysis.gridSource ?? "analyzed",
-        analysis.musicalKey,
-        analysis.keyConfidence,
-        analysis.keyMode,
-        analysis.camelotKey,
-        analysis.tempoStability,
-        analysis.downbeatConfidence,
-        analysis.integratedLufs,
-        analysis.truePeakDb,
-        analysis.lowBandEnergy,
-        analysis.midBandEnergy,
-        analysis.highBandEnergy,
-        analysis.waveformSummary ? JSON.stringify(analysis.waveformSummary) : null,
-        analysis.beatAnchorMs,
-        JSON.stringify(analysis.suggestedCues),
-        analysis.descriptors ? JSON.stringify(analysis.descriptors) : null,
-        analysis.engineRuntimeMs,
-        analysis.analyzedAt,
-        analysis.referenceBpm ?? null,
-      );
-    this.replaceSections(analysis.trackId, analysis.analyzerName, analysis.sections ?? []);
+    // Row + sections are written atomically: a crash between them must not
+    // leave an analysis row without its sections.
+    const run = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO track_analyses (
+            track_id, analyzer_name, analyzer_version, bpm, bpm_confidence, bpm_raw,
+            beat_times_json, downbeat_times_json, grid_rejected, grid_rejection_reason, grid_source,
+            musical_key, key_confidence, key_mode, camelot_key, tempo_stability, downbeat_confidence,
+            integrated_lufs, true_peak_db, low_band_energy, mid_band_energy, high_band_energy,
+            waveform_summary_json, beat_anchor_ms, suggested_cues_json, descriptors_json,
+            engine_runtime_ms, analyzed_at, reference_bpm
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(track_id, analyzer_name) DO UPDATE SET
+            analyzer_version = excluded.analyzer_version,
+            bpm = excluded.bpm,
+            bpm_confidence = excluded.bpm_confidence,
+            bpm_raw = excluded.bpm_raw,
+            beat_times_json = excluded.beat_times_json,
+            downbeat_times_json = excluded.downbeat_times_json,
+            grid_rejected = excluded.grid_rejected,
+            grid_rejection_reason = excluded.grid_rejection_reason,
+            grid_source = excluded.grid_source,
+            musical_key = excluded.musical_key,
+            key_confidence = excluded.key_confidence,
+            key_mode = excluded.key_mode,
+            camelot_key = excluded.camelot_key,
+            tempo_stability = excluded.tempo_stability,
+            downbeat_confidence = excluded.downbeat_confidence,
+            integrated_lufs = excluded.integrated_lufs,
+            true_peak_db = excluded.true_peak_db,
+            low_band_energy = excluded.low_band_energy,
+            mid_band_energy = excluded.mid_band_energy,
+            high_band_energy = excluded.high_band_energy,
+            waveform_summary_json = excluded.waveform_summary_json,
+            beat_anchor_ms = excluded.beat_anchor_ms,
+            suggested_cues_json = excluded.suggested_cues_json,
+            descriptors_json = excluded.descriptors_json,
+            engine_runtime_ms = excluded.engine_runtime_ms,
+            analyzed_at = excluded.analyzed_at,
+            reference_bpm = excluded.reference_bpm`,
+        )
+        .run(
+          analysis.trackId,
+          analysis.analyzerName,
+          analysis.analyzerVersion,
+          analysis.bpm,
+          analysis.bpmConfidence,
+          analysis.bpmRaw,
+          JSON.stringify(analysis.beatTimesMs),
+          JSON.stringify(analysis.downbeatTimesMs),
+          analysis.gridRejected ? 1 : 0,
+          analysis.gridRejectionReason,
+          analysis.gridSource ?? "analyzed",
+          analysis.musicalKey,
+          analysis.keyConfidence,
+          analysis.keyMode,
+          analysis.camelotKey,
+          analysis.tempoStability,
+          analysis.downbeatConfidence,
+          analysis.integratedLufs,
+          analysis.truePeakDb,
+          analysis.lowBandEnergy,
+          analysis.midBandEnergy,
+          analysis.highBandEnergy,
+          analysis.waveformSummary ? JSON.stringify(analysis.waveformSummary) : null,
+          analysis.beatAnchorMs,
+          JSON.stringify(analysis.suggestedCues),
+          analysis.descriptors ? JSON.stringify(analysis.descriptors) : null,
+          analysis.engineRuntimeMs,
+          analysis.analyzedAt,
+          analysis.referenceBpm ?? null,
+        );
+      this.replaceSections(analysis.trackId, analysis.analyzerName, analysis.sections ?? []);
+    });
+    run();
     return this.findByTrackId(analysis.trackId, analysis.analyzerName)!;
   }
 

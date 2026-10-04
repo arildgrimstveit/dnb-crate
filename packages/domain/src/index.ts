@@ -1,4 +1,10 @@
-export { recordHourFeedbackSchema, listHourFeedbackSchema } from "./hour-feedback-contracts.ts";
+export {
+  recordHourFeedbackSchema,
+  listHourFeedbackSchema,
+  hourFeedbackSchema,
+  recordHourFeedbackDataSchema,
+  listHourFeedbackDataSchema,
+} from "./hour-feedback-contracts.ts";
 export {
   APP_NAME,
   APP_VERSION,

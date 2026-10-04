@@ -508,7 +508,13 @@ export function redactInvocation(executable: string, args: string[]): string {
     if (arg.startsWith("-")) {
       return arg;
     }
-    if (/[\\/]/.test(arg) || /^[A-Za-z]:/.test(arg)) {
+    // Absolute/relative paths and bare filenames with a media-ish extension:
+    // none of them belong in logs.
+    if (
+      /[\\/]/.test(arg) ||
+      /^[A-Za-z]:/.test(arg) ||
+      /^\w[\w.-]*\.(wav|flac|mp3|m4a|ogg|oga|opus|aiff|aif|json|log)$/i.test(arg)
+    ) {
       return "[path]";
     }
     return arg;

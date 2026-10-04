@@ -409,17 +409,19 @@ export class EnrichmentCoordinator {
     let bpmWritten = false;
     let bpmDisagreement = false;
     const writeBpm = this.config.enrichment?.writePublishedBpm !== false;
+    // One genre list drives both the fold decision and the written value, so
+    // the disagreement check and the persisted BPM can never disagree.
+    const deezerFoldedBpm =
+      deezer?.bpm != null
+        ? foldDeezerBpm(deezer.bpm, hasDrumAndBassGenre(track.genres ?? recording?.genres ?? []))
+        : null;
     if (
       deezer?.bpm &&
       writeBpm &&
       track.bpmSource !== "manual" &&
       track.bpmSource !== "published"
     ) {
-      const folded = foldDeezerBpm(
-        deezer.bpm,
-        hasDrumAndBassGenre(track.genres ?? recording?.genres ?? []),
-      );
-      if (acceptedGrid != null && Math.abs(folded - acceptedGrid) > 1) {
+      if (acceptedGrid != null && Math.abs(deezerFoldedBpm! - acceptedGrid) > 1) {
         bpmDisagreement = true;
       } else {
         bpmWritten = true;
@@ -466,10 +468,7 @@ export class EnrichmentCoordinator {
         recordingMbid: recording.id,
         artistCanonical: recording.artist ? normalizePersonName(recording.artist) : null,
         genres: recording.genres,
-        bpm:
-          bpmWritten && deezer?.bpm
-            ? foldDeezerBpm(deezer.bpm, hasDrumAndBassGenre(recording.genres))
-            : null,
+        bpm: bpmWritten ? deezerFoldedBpm : null,
       });
     } else if (bpmWritten && deezer?.bpm) {
       this.tracks.applyPublishedEnrichment(trackId, {
@@ -480,7 +479,7 @@ export class EnrichmentCoordinator {
         recordingMbid: null,
         artistCanonical: null,
         genres: [],
-        bpm: foldDeezerBpm(deezer.bpm, hasDrumAndBassGenre(track.genres ?? [])),
+        bpm: deezerFoldedBpm,
       });
     } else {
       this.tracks.refreshRecordingIdentity(trackId);

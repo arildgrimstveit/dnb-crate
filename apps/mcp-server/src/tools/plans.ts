@@ -1,7 +1,9 @@
 import type { CatalogService } from "@dnb-crate/catalog";
 import {
-  recordHourFeedbackSchema,
+  listHourFeedbackDataSchema,
   listHourFeedbackSchema,
+  recordHourFeedbackDataSchema,
+  recordHourFeedbackSchema,
   createSetPlanDataSchema,
   deleteSetPlanDataSchema,
   deleteSetPlanInputSchema,
@@ -106,6 +108,7 @@ export function registerPlansTools(server: McpServer, service: CatalogService): 
       description:
         "Record the user's explicit whole-hour verdict and original words against an exact full render/checksum. Never infer per-join ratings.",
       inputSchema: recordHourFeedbackSchema,
+      outputSchema: toolResultSchema(recordHourFeedbackDataSchema),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     },
     (input) => {
@@ -123,6 +126,7 @@ export function registerPlansTools(server: McpServer, service: CatalogService): 
       description:
         "Read artifact-specific whole-hour verdicts, newest first. Changed plans and new renders do not inherit these verdicts.",
       inputSchema: listHourFeedbackSchema,
+      outputSchema: toolResultSchema(listHourFeedbackDataSchema),
       annotations: { readOnlyHint: true },
     },
     ({ renderJobId }) => {

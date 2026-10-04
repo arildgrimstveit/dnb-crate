@@ -318,32 +318,37 @@ export class TrackRepository {
 
     const id = input.id ?? crypto.randomUUID();
     const timestamp = nowIso();
-    this.db
-      .prepare(
-        `INSERT INTO tracks (
-          id, file_path, file_fingerprint, artist, title, album, duration_ms, sample_rate_hz, channels,
-          bpm, bpm_source, musical_key, camelot_key, key_source, analysis_status, file_missing, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_analyzed', 0, ?, ?)`,
-      )
-      .run(
-        id,
-        input.filePath,
-        input.fileFingerprint,
-        input.artist,
-        input.title,
-        input.album,
-        input.durationMs,
-        input.sampleRateHz,
-        input.channels,
-        input.bpm,
-        input.bpmSource,
-        input.musicalKey,
-        input.camelotKey,
-        input.keySource,
-        timestamp,
-        timestamp,
-      );
-    this.applyTagFields(id, input);
+    // Insert, tag fields, and identity refresh are one unit: a crash between
+    // them must not leave a half-initialized track row.
+    const run = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO tracks (
+            id, file_path, file_fingerprint, artist, title, album, duration_ms, sample_rate_hz, channels,
+            bpm, bpm_source, musical_key, camelot_key, key_source, analysis_status, file_missing, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_analyzed', 0, ?, ?)`,
+        )
+        .run(
+          id,
+          input.filePath,
+          input.fileFingerprint,
+          input.artist,
+          input.title,
+          input.album,
+          input.durationMs,
+          input.sampleRateHz,
+          input.channels,
+          input.bpm,
+          input.bpmSource,
+          input.musicalKey,
+          input.camelotKey,
+          input.keySource,
+          timestamp,
+          timestamp,
+        );
+      this.applyTagFields(id, input);
+    });
+    run();
     const created = this.findById(id);
     if (!created) {
       throw new DomainError("SCAN_FAILED", "Failed to read track after insert");
@@ -418,6 +423,9 @@ export class TrackRepository {
     if (patch.isrc !== undefined) {
       sources.isrc = "manual";
     }
+    if (patch.genres !== undefined) {
+      sources.genres = "manual";
+    }
     const run = this.db.transaction(() => {
       this.db
         .prepare(
@@ -454,10 +462,6 @@ export class TrackRepository {
       }
       if (patch.genres !== undefined) {
         replaceGenres(this.db, id, patch.genres, "manual");
-        sources.genres = "manual";
-        this.db
-          .prepare("UPDATE tracks SET field_sources_json = ? WHERE id = ?")
-          .run(JSON.stringify(sources), id);
       }
     });
     run();
@@ -535,53 +539,58 @@ export class TrackRepository {
       existing?.keySource === "manual" ||
       (existing?.keySource === "analyzed" && existing.fileFingerprint === input.fileFingerprint) ||
       existing?.keySource === "published";
-    if (existing && existing.fileFingerprint !== input.fileFingerprint) {
-      this.setAnalysisStatus(id, "pending");
-      for (const stage of ["dsp", "key"]) {
-        this.db
-          .prepare(
-            "UPDATE analysis_stages SET state='pending', reason='Source fingerprint changed' WHERE track_id=? AND stage=?",
-          )
-          .run(id, stage);
-      }
-    }
     const timestamp = nowIso();
-    this.db
-      .prepare(
-        `UPDATE tracks SET
-          file_path = ?,
-          file_fingerprint = ?,
-          artist = ?,
-          title = ?,
-          duration_ms = ?,
-          sample_rate_hz = ?,
-          channels = ?,
-          bpm = ?,
-          bpm_source = ?,
-          musical_key = ?,
-          camelot_key = ?,
-          key_source = ?,
-          file_missing = 0,
-          updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        input.filePath,
-        input.fileFingerprint,
-        input.artist,
-        input.title,
-        input.durationMs,
-        input.sampleRateHz,
-        input.channels,
-        keepBpm && existing ? existing.bpm : input.bpm,
-        keepBpm && existing ? existing.bpmSource : input.bpmSource,
-        keepKey && existing ? existing.musicalKey : input.musicalKey,
-        keepKey && existing ? existing.camelotKey : input.camelotKey,
-        keepKey && existing ? existing.keySource : input.keySource,
-        timestamp,
-        id,
-      );
-    this.applyTagFields(id, input);
+    // Status reset, stage invalidation, row update, and tag refresh are one
+    // unit so a rescan crash cannot leave torn scan state.
+    const run = this.db.transaction(() => {
+      if (existing && existing.fileFingerprint !== input.fileFingerprint) {
+        this.setAnalysisStatus(id, "pending");
+        for (const stage of ["dsp", "key"]) {
+          this.db
+            .prepare(
+              "UPDATE analysis_stages SET state='pending', reason='Source fingerprint changed' WHERE track_id=? AND stage=?",
+            )
+            .run(id, stage);
+        }
+      }
+      this.db
+        .prepare(
+          `UPDATE tracks SET
+            file_path = ?,
+            file_fingerprint = ?,
+            artist = ?,
+            title = ?,
+            duration_ms = ?,
+            sample_rate_hz = ?,
+            channels = ?,
+            bpm = ?,
+            bpm_source = ?,
+            musical_key = ?,
+            camelot_key = ?,
+            key_source = ?,
+            file_missing = 0,
+            updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(
+          input.filePath,
+          input.fileFingerprint,
+          input.artist,
+          input.title,
+          input.durationMs,
+          input.sampleRateHz,
+          input.channels,
+          keepBpm && existing ? existing.bpm : input.bpm,
+          keepBpm && existing ? existing.bpmSource : input.bpmSource,
+          keepKey && existing ? existing.musicalKey : input.musicalKey,
+          keepKey && existing ? existing.camelotKey : input.camelotKey,
+          keepKey && existing ? existing.keySource : input.keySource,
+          timestamp,
+          id,
+        );
+      this.applyTagFields(id, input);
+    });
+    run();
     const updated = this.findById(id);
     if (!updated) {
       throw new DomainError("SCAN_FAILED", "Failed to read track after upsert");

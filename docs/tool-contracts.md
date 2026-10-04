@@ -51,7 +51,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 - Input: `{ trackIds?: UUID[], planningReadyOnly?: boolean, scope?: ids|planningReady|unanalyzed|stale|all, engines?: ["dnb-crate-dsp"] }` — pass trackIds, planningReadyOnly=true, or a non-ids scope. Whole-library is allowed via `scope`. DSP is the only analysis engine.
 - Output: analysis job
-- Errors: `TRACK_NOT_FOUND`, `ANALYSIS_FAILED`
+- Errors: `TRACK_NOT_FOUND`, `ANALYSIS_FAILED`, `INVALID_METADATA` when the selection resolves to zero tracks
 
 ## `get_analysis_status`
 
