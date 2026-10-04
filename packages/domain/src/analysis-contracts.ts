@@ -161,8 +161,8 @@ export const tempoEvidenceSchema = z.object({
 
 export const sonicDescriptorsSchema = z.object({
   integratedLufs: z.number().nullable(),
-  shortTermLufsMean: z.number().nullable(),
-  shortTermLufsMax: z.number().nullable(),
+  shortTermRmsDbfsMean: z.number().nullable(),
+  shortTermRmsDbfsMax: z.number().nullable(),
   truePeakDb: z.number().nullable(),
   subBassRatio: z.number().nullable(),
   brightness: z.number().nullable(),

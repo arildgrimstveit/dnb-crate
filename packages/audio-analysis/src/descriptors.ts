@@ -50,8 +50,8 @@ export type DescriptorPack = {
   melodicness: number;
   valence: number;
   suggestedEnergy: number;
-  shortTermLufsMean: number;
-  shortTermLufsMax: number;
+  shortTermRmsDbfsMean: number;
+  shortTermRmsDbfsMax: number;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -299,7 +299,7 @@ export function computeDescriptorPack(input: DescriptorPackInput): DescriptorPac
     melodicness: Number(melodicness.toFixed(4)),
     valence: Number(valence.toFixed(4)),
     suggestedEnergy: clamp(Math.round(1 + 9 * energy), 1, 10),
-    shortTermLufsMean: shortTerm.mean,
-    shortTermLufsMax: shortTerm.max,
+    shortTermRmsDbfsMean: shortTerm.mean,
+    shortTermRmsDbfsMax: shortTerm.max,
   };
 }

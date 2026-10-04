@@ -167,8 +167,8 @@ export async function runKeyEngine(
     sections: [],
     descriptors: {
       integratedLufs: null,
-      shortTermLufsMean: null,
-      shortTermLufsMax: null,
+      shortTermRmsDbfsMean: null,
+      shortTermRmsDbfsMax: null,
       truePeakDb: null,
       subBassRatio: null,
       brightness: null,

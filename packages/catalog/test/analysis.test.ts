@@ -56,7 +56,7 @@ describe("track analysis and aligned transitions", () => {
     expect(analysis.gridSource).toBe("analyzed");
     expect(Math.abs((analysis.bpm ?? 0) - 174)).toBeLessThan(1);
     expect(analysis.suggestedCues.length).toBeGreaterThan(0);
-    expect(analysis.analyzerVersion).toBe("3.4.0");
+    expect(analysis.analyzerVersion).toBe("3.5.0");
     expect(analysis.descriptors?.energy).toBeTypeOf("number");
     expect(analysis.descriptors?.danceability).toBeTypeOf("number");
   });

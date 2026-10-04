@@ -106,8 +106,8 @@ function testSonicDescriptors(
 ): SonicDescriptors {
   return {
     integratedLufs: null,
-    shortTermLufsMean: null,
-    shortTermLufsMax: null,
+    shortTermRmsDbfsMean: null,
+    shortTermRmsDbfsMax: null,
     truePeakDb: null,
     subBassRatio: descriptors.subBassRatio ?? 0.5,
     brightness: descriptors.brightness ?? 0.1,

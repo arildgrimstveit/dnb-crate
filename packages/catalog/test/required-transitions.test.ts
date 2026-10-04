@@ -99,8 +99,8 @@ function seedTrack(
     beatAnchorMs: null,
     descriptors: {
       integratedLufs: null,
-      shortTermLufsMean: null,
-      shortTermLufsMax: null,
+      shortTermRmsDbfsMean: null,
+      shortTermRmsDbfsMax: null,
       truePeakDb: null,
       subBassRatio: 0.5,
       brightness: 0.1,

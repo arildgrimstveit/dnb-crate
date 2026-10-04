@@ -21,6 +21,7 @@ import { migration017MixWorkflows } from "./migrations/017_mix_workflows.ts";
 
 import { migration018WorkerOwnerHeartbeat } from "./migrations/018_worker_owner_heartbeat.ts";
 import { migration019DoubleDropRetired } from "./migrations/019_double_drop_retired.ts";
+import { migration020DescriptorKeysRenamed } from "./migrations/020_descriptor_keys_renamed.ts";
 
 export type Migration = {
   id: number;
@@ -49,6 +50,7 @@ const MIGRATIONS: Migration[] = [
   migration017MixWorkflows,
   migration018WorkerOwnerHeartbeat,
   migration019DoubleDropRetired,
+  migration020DescriptorKeysRenamed,
 ];
 
 export function runMigrations(db: SqliteDatabase): void {

@@ -67,8 +67,8 @@ export type SonicDescriptors = {
   integratedLufs: number | null;
   /** Stored JSON key is historical: this is short-term RMS dBFS (no K-weighting,
    * no gating), not measured LUFS. Real loudness comes from ebur128. */
-  shortTermLufsMean: number | null;
-  shortTermLufsMax: number | null;
+  shortTermRmsDbfsMean: number | null;
+  shortTermRmsDbfsMax: number | null;
   truePeakDb: number | null;
   subBassRatio: number | null;
   brightness: number | null;

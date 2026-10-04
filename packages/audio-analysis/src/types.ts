@@ -64,8 +64,8 @@ export type AudioAnalyzer = {
 
 export const emptyDescriptors = (waveform: number[] = []): SonicDescriptors => ({
   integratedLufs: null,
-  shortTermLufsMean: null,
-  shortTermLufsMax: null,
+  shortTermRmsDbfsMean: null,
+  shortTermRmsDbfsMax: null,
   truePeakDb: null,
   subBassRatio: null,
   brightness: null,

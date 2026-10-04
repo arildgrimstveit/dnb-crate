@@ -29,8 +29,8 @@ describe("descriptor pack", () => {
     expect(d.acousticness ?? 1).toBeLessThanOrEqual(0.3);
     expect(d.energy ?? 0).toBeGreaterThanOrEqual(0.6);
     expect(d.suggestedEnergy).toBe(Math.round(1 + 9 * (d.energy ?? 0)));
-    expect(d.shortTermLufsMean).not.toBeNull();
-    expect(d.shortTermLufsMax).not.toBeNull();
+    expect(d.shortTermRmsDbfsMean).not.toBeNull();
+    expect(d.shortTermRmsDbfsMax).not.toBeNull();
   });
 
   it("scores a pad-only fixture as acoustic and low-energy", () => {
@@ -87,7 +87,7 @@ describe("descriptor pack", () => {
     expect(a.descriptors?.acousticness).toBe(b.descriptors?.acousticness);
     expect(a.descriptors?.melodicness).toBe(b.descriptors?.melodicness);
     expect(a.descriptors?.valence).toBe(b.descriptors?.valence);
-    expect(a.analyzerVersion).toBe("3.4.0");
+    expect(a.analyzerVersion).toBe("3.5.0");
   });
 
   it("maps suggestedEnergy from continuous energy", () => {

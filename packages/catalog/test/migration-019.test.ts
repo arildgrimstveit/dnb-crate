@@ -48,7 +48,7 @@ describe("migration 019: double_drop retired", () => {
 
     // Simulate a legacy pre-019 catalog: one double_drop entry transition and
     // one double_drop approved-recipe payload.
-    if (entry) {
+    if (entry && originalTransition) {
       runtime.db
         .prepare("UPDATE set_plan_entries SET transition_json = ? WHERE id = ?")
         .run(JSON.stringify({ ...originalTransition, type: "double_drop" }), entry.id);
@@ -72,7 +72,10 @@ describe("migration 019: double_drop retired", () => {
     cleanups.push(() => reopened.close());
 
     const stored = reopened.setPlans.findById(created.plan.id) as StoredSetPlan;
-    const storedEntry = stored.plan.entries.find((candidate) => candidate.id === entry.id);
+    expect(entry).toBeDefined();
+    const storedEntry = stored.plan.entries.find(
+      (candidate) => entry !== undefined && candidate.id === entry.id,
+    );
     expect(storedEntry?.transitionToNext?.type).toBe("phrase_mix");
     const payloadRow = reopened.db
       .prepare("SELECT payload_json FROM approved_recipes WHERE id = 'legacy-1'")
