@@ -7,6 +7,13 @@ a lean codebase with clear separation of concerns and documentation that
 explains the architecture, so future work (starting with the beatmatching
 phases) lands on clean ground.
 
+**Status: COMPLETE (October 2026).** R0–R3, R5, R6 shipped; R4 (pairwise
+render I/O) parked on measurement per its own go/no-go — a 40-join render
+takes ~5.3 minutes, under the 10-minute threshold. Two follow-up candidates
+are recorded in the R4 section: the manual/published-key evidence-freezing
+gap, and re-measuring before any tree-stitching work if multi-hour mixes
+become a real request.
+
 Companion history: `code-quality-debt.md` (Q0–Q5, complete) and
 `beatmatching-automation.md` (the follow-on feature work). Ordering below is by
 risk and dependency; each phase ships separately with the standard acceptance
@@ -143,17 +150,28 @@ Rename to what the values are: `shortTermRmsDbfsMean` / `shortTermRmsDbfsMax`.
 row returns the new keys; after `stale` re-analysis values are unchanged from
 3.4.0 (rename only — no computation change, so pre/post values must match).
 
-## Phase R4 — pairwise render I/O rework (L, engineering)
+## Phase R4 — pairwise render I/O rework (L, engineering) — PARKED WITH DATA (October 2026)
 
-Problem: N-join mixes run N pairwise renders plus N−1 stitches, and each stitch
-re-encodes the whole accumulated prefix → O(N²) bytes. Fine at ~15 joins
-(60-minute mix), punishing at 100+ joins (multi-hour).
+Baseline (this machine, real FFmpeg, synthetic 174 BPM phrase_mix plans, DSP
+3.5.0; harness kept at `tools/scripts/measure-pairwise-io.mts`):
 
-1. **Measure first** (throwaway script, as with previous session tooling):
-   render a synthetic 20-join and 40-join plan on the current code; record wall
-   time and bytes written. This is the baseline and the go/no-go input — if a
-   40-join render is already under ~10 minutes on this machine, park the
-   rework with the numbers recorded.
+| joins | wall time          | output tree |
+| ----- | ------------------ | ----------- |
+| 20    | 108.3 s            | 269 MB      |
+| 40    | 317.7 s (≈5.3 min) | 523 MB      |
+
+Growth is ~2.9× for 2× the joins — superlinear as expected, but a 40-join
+(~2-hour) mix renders in well under the 10-minute park threshold, so the
+rework is **parked**. Extrapolation puts the crossing at roughly 55–60 joins
+(3-hour mixes), which no current use case asks for. If that changes: re-measure
+with the harness, then implement the balanced-tree stitching below. The design
+and gates stay recorded for that day.
+
+Problem being solved: N-join mixes run N pairwise renders plus N−1 stitches,
+and each stitch re-encodes the whole accumulated prefix → O(N²) bytes. Fine at
+~15 joins (60-minute mix), punishing at 100+ joins (multi-hour).
+
+1. **Measure first** — done, above.
 2. **Design: balanced-tree stitching.** Keep per-join pairwise rendering and
    the shared-deck crossover guarantees exactly as they are; change only how
    partial results combine. Instead of `acc = stitch(acc, join_i)` linearly,
@@ -163,13 +181,19 @@ re-encodes the whole accumulated prefix → O(N²) bytes. Fine at ~15 joins
    naming gains a merge-level marker so the existing startup sweep covers it.
 3. **Gates:** duration must match the plan within the existing 1000 ms bound;
    `render:check` green on the fixture; one real audition A/B (linear vs tree)
-   on a 20-join plan before default. Keep the linear path as a fallback flag
-   for one release (config `render.stitchMode: "linear"`), then remove.
+   on a 20-join plan before default.
 4. Explicit non-goals: no single-graph whole-mix filter (it would re-derive the
    phase-equality guarantees), no changes to per-join audio.
 
-**Acceptance:** measured speedup recorded in the plan afterwards; full suite +
-compressed-audio integration green; audition note added here.
+**Found while measuring (follow-up candidate, not fixed here):**
+`snapshotTrackEvidence` (`catalog/src/evidence.ts`) copies `musicalKey`/
+`keyConfidence` only from analysis rows, so a catalog whose keys are
+**manual/published** (never analyzed) freezes `keyConfidence: 0` into render
+evidence — the render-time gate then rejects plans the live gate accepted.
+Catalogs with analyzed keys are unaffected. A proper fix (resolve the canonical
+key into the snapshot the way `resolveCanonicalKeyConfidence` does, and extend
+`analysisFromFrozen` to carry it) is a small, testable change that belongs in
+its own commit with render tests, not inside this perf phase.
 
 ## Phase R5 — README command reference (S)
 
