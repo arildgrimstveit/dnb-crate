@@ -353,6 +353,7 @@ export {
   listSetPlansDataSchema,
   listSetPlansInputSchema,
   planExplanationSchema,
+  scoreBreakdownSchema,
   planQualityReportSchema,
   planningConstraintsSchema,
   planningReadinessDataSchema,

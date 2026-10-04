@@ -37,7 +37,7 @@ export const findCompatibleTracksInputSchema = z.object({
   genres: genreFiltersSchema.optional(),
 });
 
-const scoreBreakdownSchema = z.object({
+export const scoreBreakdownSchema = z.object({
   total: z.number(),
   components: z.object({
     mood: z.number(),
