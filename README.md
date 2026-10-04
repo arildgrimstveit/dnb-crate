@@ -85,7 +85,7 @@ That preflights, scans, analyzes rhythm and keys, plans, renders, and checks the
 
 JSON goes to stdout. Diagnostics go to stderr.
 
-Individual stage commands remain available (`library:scan`, `analysis:run`, `plan:create`, `render:start`). Other useful commands: `library:stats`, `track:search`, `analysis:get`, `transition:plan`, `plan:list`, `plan:validate`.
+Individual stage commands remain available (`library:scan`, `analysis:run`, `plan:create`, `render:start`). The full command reference — all 41 commands with flags — lives in [docs/cli.md](docs/cli.md).
 
 ## MCP server (stdio)
 

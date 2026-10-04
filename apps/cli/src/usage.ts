@@ -51,6 +51,8 @@ Commands:
 Job commands without --wait enqueue only and require a live MCP (or other) worker.
 Pass --wait, or run analysis:gate, to process jobs in this CLI process.
 
+Full reference with flags: docs/cli.md
+
 ${APP_NAME} ${APP_VERSION}
 `;
 }
