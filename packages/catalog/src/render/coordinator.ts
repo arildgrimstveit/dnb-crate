@@ -1,4 +1,4 @@
-import { access, mkdir, stat } from "node:fs/promises";
+import { access, mkdir, stat, readFile, unlink } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 
@@ -107,6 +107,7 @@ import type { FrozenRenderRequest } from "../render-job-repository.ts";
 import type { SetPlanRepository } from "../set-plan-repository.ts";
 import type { RenderJobRepository, StoredRenderJob } from "../render-job-repository.ts";
 import type { AnalysisRepository } from "../analysis-repository.ts";
+import { diagnoseRenderedMix } from "./audio-diagnostics.ts";
 
 export type RenderCheckJoin = {
   order: number;
@@ -727,6 +728,73 @@ export class RenderCoordinator {
         overlapAtMs,
       });
     }
+    // Phase 4: for joins with high stored-grid residuals, verify against the
+    // actual rendered audio. Decode a window from the master centered on the
+    // overlap midpoint and measure onset coherence. If the audio is coherent,
+    // the onset-lock corrected the join and the stored-grid residual is a
+    // false negative. If the audio is also misaligned, the join is genuinely bad.
+    if (!allowGridResidual) {
+      for (const join of joins) {
+        if (
+          join.audioStatus !== "unmeasured" ||
+          join.storedGridResidualMs == null ||
+          Math.abs(join.storedGridResidualMs) <= RENDER_CHECK_RESIDUAL_FAIL_MS
+        ) {
+          continue;
+        }
+        if (join.overlapAtMs == null || join.overlapAtMs <= 0) {
+          continue;
+        }
+        try {
+          const windowMs = 8_000;
+          const startSec = Math.max(0, (join.overlapAtMs - windowMs / 2) / 1000);
+          const tempPcm = `${outputPath}.phase4-${join.order}.pcm`;
+          const pcmRun = await runner.run({
+            executable: binaries.ffmpegPath,
+            args: [
+              "-nostdin",
+              "-hide_banner",
+              "-y",
+              "-i",
+              outputPath,
+              "-ss",
+              startSec.toFixed(3),
+              "-t",
+              (windowMs / 1000).toFixed(3),
+              "-f",
+              "f32le",
+              "-ac",
+              "1",
+              "-ar",
+              "22050",
+              tempPcm,
+            ],
+          });
+          if (pcmRun.exitCode !== 0) continue;
+          const pcmBuffer = await readFile(tempPcm);
+          await unlink(tempPcm).catch(() => undefined);
+          const samples = new Float32Array(pcmBuffer.length / 4);
+          for (let i = 0; i < samples.length; i += 1) {
+            samples[i] = pcmBuffer.readFloatLE(i * 4);
+          }
+          if (samples.length < 22050) continue; // < 1 second
+          const diag = diagnoseRenderedMix({
+            sampleRate: 22_050,
+            mixPcm: samples,
+            overlapMs: windowMs,
+          });
+          if (diag.status === "pass" || diag.status === "advisory") {
+            join.audioStatus = diag.status === "pass" ? "pass" : "advisory";
+          } else if (diag.status === "review") {
+            join.audioStatus = "review";
+          } else if (diag.status === "fail") {
+            join.audioStatus = "fail";
+          }
+        } catch {
+          // Audio verification is best-effort; the stored-grid residual still applies.
+        }
+      }
+    }
     const residualFail =
       !allowGridResidual &&
       joins.some(
@@ -734,7 +802,9 @@ export class RenderCoordinator {
           (join.template === "phrase_mix" || join.template === "bass_swap") &&
           join.evidenceSource === "frozen-manifest" &&
           join.storedGridResidualMs != null &&
-          Math.abs(join.storedGridResidualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS,
+          Math.abs(join.storedGridResidualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS &&
+          join.audioStatus !== "pass" &&
+          join.audioStatus !== "advisory",
       );
     const levelFail = joins.some((join) => {
       const matched = plannedLevelStepLu(
