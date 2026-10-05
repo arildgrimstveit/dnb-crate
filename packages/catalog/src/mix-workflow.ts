@@ -485,6 +485,7 @@ export class MixWorkflowCoordinator {
           setPlanId: row.planId!,
           workflowJobId: row.renderJobId!,
           shouldEnqueue: () => !this.stopped && this.get(row.id).status !== "cancelled",
+          allowGridResidual: true,
         });
         job = this.renders.findById(row.renderJobId!);
       }

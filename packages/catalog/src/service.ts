@@ -713,6 +713,7 @@ export class CatalogService {
     edgeFadeMs?: number;
     allowLowConfidence?: boolean;
     allowExcessiveTempo?: boolean;
+    allowGridResidual?: boolean;
     allowOverlongDuration?: boolean;
   }) {
     this.assertPlanReadyForRender(input.setPlanId, {

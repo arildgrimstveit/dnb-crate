@@ -169,6 +169,12 @@ export const startSetRenderInputSchema = z.object({
     .optional()
     .describe("Allow phrase/bass-swap renders when analysis confidence is below the threshold."),
   allowExcessiveTempo: z.boolean().optional().describe("Allow playback rates beyond ±3%."),
+  allowGridResidual: z
+    .boolean()
+    .optional()
+    .describe(
+      "Skip the stored-grid residual check (for joins the onset-lock has corrected but frozen evidence disagrees).",
+    ),
   allowOverlongDuration: z
     .boolean()
     .optional()

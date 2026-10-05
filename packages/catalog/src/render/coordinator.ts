@@ -417,6 +417,7 @@ export class RenderCoordinator {
     edgeFadeMs?: number;
     allowLowConfidence?: boolean;
     allowExcessiveTempo?: boolean;
+    allowGridResidual?: boolean;
     allowOverlongDuration?: boolean;
   }): Promise<{ job: RenderJob; warnings: string[] }> {
     const stored = this.requirePlan(input.setPlanId);
@@ -458,6 +459,7 @@ export class RenderCoordinator {
         edgeFadeMs: input.edgeFadeMs ?? this.settings.edgeFadeMs,
         allowLowConfidence: input.allowLowConfidence,
         allowExcessiveTempo: input.allowExcessiveTempo,
+        allowGridResidual: input.allowGridResidual,
         allowOverlongDuration: input.allowOverlongDuration,
         request: freezeRenderRequest(stored.plan, this.analyses, this.tracks, this.settings),
       },
@@ -584,6 +586,8 @@ export class RenderCoordinator {
       );
     }
     const manifest = this.getManifest(renderJobId);
+    const storedJob = this.jobs.findById(renderJobId);
+    const allowGridResidual = storedJob?.params?.allowGridResidual === true;
     const outputPath = path.resolve(this.config.outputRoot, job.outputRootRelativePath);
     const binaries = requireFfmpeg(await this.detect());
     const silenceRun = await runner.run({
@@ -723,13 +727,15 @@ export class RenderCoordinator {
         overlapAtMs,
       });
     }
-    const residualFail = joins.some(
-      (join) =>
-        (join.template === "phrase_mix" || join.template === "bass_swap") &&
-        join.evidenceSource === "frozen-manifest" &&
-        join.storedGridResidualMs != null &&
-        Math.abs(join.storedGridResidualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS,
-    );
+    const residualFail =
+      !allowGridResidual &&
+      joins.some(
+        (join) =>
+          (join.template === "phrase_mix" || join.template === "bass_swap") &&
+          join.evidenceSource === "frozen-manifest" &&
+          join.storedGridResidualMs != null &&
+          Math.abs(join.storedGridResidualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS,
+      );
     const levelFail = joins.some((join) => {
       const matched = plannedLevelStepLu(
         join.outgoingLufs,
