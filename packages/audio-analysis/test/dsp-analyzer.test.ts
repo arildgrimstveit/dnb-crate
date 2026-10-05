@@ -422,6 +422,28 @@ describe("dnb-crate-dsp", () => {
     expect(septuple).toBeDefined();
   });
 
+  it("accepts a grid on a track with a long ambient intro (stability filter)", () => {
+    // 128 intro bars ≈ 35 seconds of sub/pad with no drums, then clear drops.
+    // The local windows over the intro produce noise-level tempo peaks that
+    // used to pollute the MAD and collapse stability to ~0. The confidence
+    // filter keeps them out; only the drop windows contribute.
+    const pcm = buildSyntheticDnbPcm({
+      bpm: 174,
+      introBars: 128,
+      dropBars: 32,
+      breakdownBars: 32,
+      drop2Bars: 32,
+      outroBars: 32,
+    });
+    const result = dspAnalyzer.analyze(pcm);
+    expect(result.gridRejected).toBe(false);
+    expect(result.bpm).not.toBeNull();
+    expect(Math.abs((result.bpm ?? 0) - 174)).toBeLessThan(1);
+    expect(result.bpmConfidence ?? 0).toBeGreaterThanOrEqual(0.6);
+    const evidence = result.descriptors?.tempoEvidence;
+    expect(evidence?.stability ?? 0).toBeGreaterThanOrEqual(0.4);
+  });
+
   it("recovers a 2-beat downbeat offset with high confidence", () => {
     const pcm = buildSyntheticDnbPcm({ bpm: 174, downbeatOffsetBeats: 2 });
     const result = dspAnalyzer.analyze(pcm);

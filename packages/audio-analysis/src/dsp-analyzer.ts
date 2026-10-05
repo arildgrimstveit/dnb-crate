@@ -38,6 +38,13 @@ const TEMPO_LOGISTIC_W_PROMINENCE = 1.0;
 const TEMPO_LOGISTIC_W_STABILITY = 3.2;
 const TEMPO_LOGISTIC_W_TEMPO_CONF = 1.2;
 
+/** Minimum peak confidence for a local tempo window to count toward
+ * stability. Below this, the window's autocorrelation peaks are
+ * indistinguishable from noise (ambient/sparse passages). Calibrated on the
+ * 544-track library: manual-BPM rejected tracks had local windows at
+ * 0.0-0.3 confidence producing garbage fold candidates. */
+const LOCAL_WINDOW_MIN_CONFIDENCE = 0.3;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -304,7 +311,11 @@ function estimateTempo(
   const locals: number[] = [];
   for (let start = 0; start + window < onset.length; start += Math.floor(window / 2)) {
     const local = peakBpm(onset.slice(start, start + window), hopMs, minBpm, maxBpm);
-    if (local) {
+    // Only windows with a clear tempo peak contribute to stability. Ambient
+    // and sparse sections produce noise-level autocorrelation peaks whose
+    // folded BPMs pollute the MAD and collapse stability toward zero — the
+    // dominant failure mode on real liquid/ambient DnB with long intros.
+    if (local && local.confidence >= LOCAL_WINDOW_MIN_CONFIDENCE) {
       locals.push(local.bpmRaw);
     }
   }
