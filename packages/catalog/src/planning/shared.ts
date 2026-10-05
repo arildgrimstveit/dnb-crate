@@ -81,7 +81,13 @@ export function grooveCompatibility(
   const onset = hasOnset ? cosineSim(outOnset.slice(-beatCount), inOnset.slice(0, beatCount)) : 0;
   const kickVsSnare = hasSnare ? cosineSim(outTail, inSnare.slice(0, beatCount)) : 0;
   const snareVsKick = hasSnare ? cosineSim(outSnare.slice(-beatCount), inHead) : 0;
-  return kick + snare + 0.45 * onset - 0.7 * (kickVsSnare + snareVsKick);
+  // Kick dominates: in DnB the kick pattern is the rhythmic anchor. If kicks
+  // don't lock, the gallop is immediate regardless of snare agreement.
+  // Snare confirms but can't rescue a kick conflict. Calibrated on X-Ray
+  // (rolling syncopation) → Somewhere (sparse big-hits): kick cosine 0.038,
+  // snare 0.49 — the combined 50/50 score (0.53) didn't trigger the penalty,
+  // but the user heard clear galloping.
+  return 0.8 * kick + 0.3 * snare + 0.45 * onset - 0.7 * (kickVsSnare + snareVsKick);
 }
 
 /**
