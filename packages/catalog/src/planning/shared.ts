@@ -83,3 +83,38 @@ export function grooveCompatibility(
   const snareVsKick = hasSnare ? cosineSim(outSnare.slice(-beatCount), inHead) : 0;
   return kick + snare + 0.45 * onset - 0.7 * (kickVsSnare + snareVsKick);
 }
+
+/**
+ * Sparse-overlap detection: measures whether the join region (outgoing tail +
+ * incoming head) has enough rhythmic content for a phrase_mix blend to feel
+ * continuous. Returns a penalty score where 0 = fine (enough rhythm on at
+ * least one side) and negative = the overlap lacks a rhythmic thread.
+ *
+ * Two tiers:
+ * - Both sides below 0.15 avg onsetDensity → strong penalty (no thread)
+ * - Incoming below 0.05 (extremely sparse head) → moderate penalty (the
+ *   incoming hasn't started; even a busy outgoing thins out in the blend)
+ *
+ * Calibrated on the Phase 4 test mix: all six user-identified problem joins
+ * had sparse overlap regions; all "good" joins had ≥0.15 on at least one side.
+ */
+export function sparseOverlapPenalty(
+  outgoingBars: { onsetDensity?: number[] } | null | undefined,
+  incomingBars: { onsetDensity?: number[] } | null | undefined,
+  barCount = 16,
+): number {
+  const outOnset = outgoingBars?.onsetDensity;
+  const inOnset = incomingBars?.onsetDensity;
+  if (!outOnset || !inOnset || outOnset.length === 0 || inOnset.length === 0) {
+    return 0; // no data, no penalty
+  }
+  const outTail = outOnset.slice(-barCount);
+  const inHead = inOnset.slice(0, barCount);
+  const avg = (values: number[]): number =>
+    values.length === 0 ? 0 : values.reduce((sum, v) => sum + v, 0) / values.length;
+  const outAvg = avg(outTail);
+  const inAvg = avg(inHead);
+  if (outAvg < 0.15 && inAvg < 0.15) return -1; // no rhythmic thread at all
+  if (inAvg < 0.05) return -0.5; // incoming head is essentially silent
+  return 0;
+}

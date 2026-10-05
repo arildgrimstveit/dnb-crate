@@ -6,9 +6,10 @@ import {
   PLANNER_CANDIDATE_CAP,
   PLANNER_LOOKAHEAD_CONTINUATIONS,
   PLANNER_LOOKAHEAD_WEIGHT,
+  PLANNER_JOIN_GROOVE_WEIGHT,
   PLANNER_OPENER_ATTEMPTS,
   PLANNER_SHORTLIST_SIZE,
-  PLANNER_JOIN_GROOVE_WEIGHT,
+  PLANNER_SPARSE_OVERLAP_WEIGHT,
   VARIETY_REPEATED_PAIR_COST,
   VARIETY_REPEATED_TRACK_COST,
   interpolateEnergy,
@@ -28,7 +29,7 @@ import {
 
 import { planDurationMs, type TimelineAnalysis } from "./timeline.ts";
 import { compilePlanningConstraints } from "./constraints.ts";
-import { artistKey, grooveCompatibility } from "./shared.ts";
+import { artistKey, grooveCompatibility, sparseOverlapPenalty } from "./shared.ts";
 import {
   hasShortPlayable,
   makeEntryRebuilder,
@@ -309,6 +310,19 @@ export function draftSetPlan(
       score.components.joinMood += grooveAdj;
       score.total += grooveAdj;
       if (groove < -0.15) score.reasons.push("GROOVE_CONFLICT");
+    }
+    // Sparse-overlap penalty: the join region (outgoing tail + incoming head)
+    // must have enough rhythmic content for a phrase_mix to feel continuous.
+    // All six user-identified problem joins on the Phase 4 test mix had
+    // sparse overlap regions; all "good" joins had ≥0.15 on at least one side.
+    if (source) {
+      const sparse = sparseOverlapPenalty(srcA?.bars, candA?.bars);
+      if (sparse < 0) {
+        const sparseAdj = sparse * PLANNER_SPARSE_OVERLAP_WEIGHT;
+        score.components.joinMood += sparseAdj;
+        score.total += sparseAdj;
+        score.reasons.push(sparse === -1 ? "SPARSE_OVERLAP" : "SPARSE_INCOMING_HEAD");
+      }
     }
     return score;
   };

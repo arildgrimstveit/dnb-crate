@@ -99,6 +99,11 @@ export const VARIETY_REPEATED_PAIR_COST = 4;
  * Conservative weight until Phase 2 (hat-band dispersion) adds the missing
  * spectral signal. */
 export const PLANNER_JOIN_GROOVE_WEIGHT = 3;
+/** Sparse-overlap penalty weight: how strongly the planner avoids joins where
+ * both tracks' overlap regions lack rhythmic content (the blend feels like
+ * it dips, gets quiet, or loses momentum). Calibrated on the Phase 4 test
+ * mix: all six user-identified problem joins had sparse overlap regions. */
+export const PLANNER_SPARSE_OVERLAP_WEIGHT = 6;
 
 export const DEFAULT_LOUDNESS_TARGET_LUFS = -14;
 export const DEFAULT_TRUE_PEAK_CEILING_DB = -1;
