@@ -120,7 +120,9 @@ export const setPlanEntrySchema = z.object({
   order: z.number().int().nonnegative(),
   sourceStartMs: z.number().int().nonnegative(),
   sourceEndMs: z.number().int().positive(),
-  timelineStartMs: z.number().int().nonnegative(),
+  // Timeline positions are derived from BPM/rate math and are inherently
+  // fractional (4*60000/bpm is irrational for almost every tempo).
+  timelineStartMs: z.number().nonnegative(),
   playbackRate: z.number(),
   gainDb: z.number(),
   transitionToNext: transitionPlanSchema.nullable(),

@@ -96,7 +96,7 @@ export async function run(
             code: "RENDER_CHECK_FAILED",
             message: "Render checks failed; inspect the joins and warnings in details.",
             retryable: false,
-            details: { warnings: checked.warnings },
+            details: { failures: checked.failures, warnings: checked.warnings },
           },
         });
         process.exitCode = 1;
