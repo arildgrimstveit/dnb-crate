@@ -39,6 +39,7 @@ import {
 } from "@dnb-crate/domain";
 
 import { constrainMixOut, pickMixIn, pickMixOut, sectionEnergyAt } from "./cues.ts";
+import { grooveCompatibility } from "./shared.ts";
 import {
   applySequentialDefaults,
   recallApprovedHandoff,
@@ -355,7 +356,17 @@ export function chooseTransition(
           outgoingHeadEndMs: options.outgoingHeadEndMs,
         })
       : window;
-  const aligned = { type: "phrase_mix" as const, reason: "continuity-window" };
+  // Groove-triggered bass_swap: when the outgoing and incoming kick patterns
+  // are incompatible, blending mid/high frequencies creates a galloping
+  // effect (the two drum lines fight each other). Bass_swap keeps the drums
+  // separate — the outgoing plays until the handover bar, then the incoming
+  // takes over. This is Phase 3-lite: the existing groove signal triggers a
+  // different template instead of just penalizing the pair.
+  const groove = grooveCompatibility(outgoing.analysis?.bars, incoming.analysis?.bars);
+  const grooveTriggeredSwap = groove != null && groove < 0.0;
+  const aligned = grooveTriggeredSwap
+    ? { type: "bass_swap" as const, reason: "groove-kick-conflict" }
+    : { type: "phrase_mix" as const, reason: "continuity-window" };
   const phraseBars: PhraseBarCount = normalizePhraseBars(forcedBars ?? resolvedWindow.barCount);
   const phraseShape =
     recalled?.phraseShape ??
