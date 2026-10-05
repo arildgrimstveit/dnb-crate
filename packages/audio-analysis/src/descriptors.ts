@@ -248,18 +248,34 @@ export function computeDescriptorPack(input: DescriptorPackInput): DescriptorPac
   const prominence = input.tempoEvidence?.prominence ?? 0;
   const stability = input.tempoEvidence?.stability ?? 0;
   const onsetDensityNorm = clamp(0.45 * (input.onsetDensity / 0.3) + 0.55 * prominence, 0, 1);
-  const energyRaw = clamp(
-    0.4 * loud + 0.3 * clamp(input.dropIntensity, 0, 1) + 0.3 * onsetDensityNorm,
-    0,
-    1,
-  );
-  const energy = stretch(energyRaw, ENERGY_RAW_LO, ENERGY_RAW_HI, ENERGY_OUT_LO, ENERGY_OUT_HI);
+  const brightnessNorm = clamp(input.brightness / 0.15, 0, 1);
+
+  // Danceability, melodicness, and valence are computed first: energy uses
+  // valence to separate chill/dark DnB from aggressive/bright DnB at the same
+  // loudness and onset density (the dominant failure mode on the 544-track
+  // library, where 85% of tracks scored 7–9).
   const dfaRaw = dfaDanceabilityTerm(input.samples, input.sampleRateHz);
   const dfaTerm = Math.max(dfaRaw, prominence * stability);
   const danceability = clamp(0.5 * dfaTerm + 0.3 * prominence + 0.2 * stability, 0, 1);
   const strongPeak = clamp(input.chroma.strongPeakRatio, 0, 1);
   const clarity = clamp(input.chroma.chromaClarity, 0, 1);
   const sub = clamp(input.subBassRatio, 0, 1);
+  const keyConf = clamp(input.chroma.keyConfidence, 0, 1);
+  const keyWeight = clarity >= 0.45 ? 2.2 : 0.2;
+  const peakTerm = clarity >= 0.45 ? 0.15 * strongPeak * strongPeak : 0.04 * strongPeak;
+  const melodicness = clamp(
+    keyWeight * keyConf + peakTerm * (1 - clamp(input.onsetDensity, 0, 1)),
+    0,
+    1,
+  );
+  const valence = clamp(
+    0.35 * clamp(input.chroma.majorness, 0, 1) +
+      0.25 * brightnessNorm +
+      0.2 * melodicness +
+      0.2 * danceability,
+    0,
+    1,
+  );
   const acousticRaw = clamp(
     0.35 * (1 - clamp(sub / 0.5, 0, 1)) +
       0.3 * strongPeak * (1 - clamp(sub / 0.45, 0, 1)) +
@@ -275,22 +291,20 @@ export function computeDescriptorPack(input: DescriptorPackInput): DescriptorPac
     ACOUSTIC_OUT_LO,
     ACOUSTIC_OUT_HI,
   );
-  const keyConf = clamp(input.chroma.keyConfidence, 0, 1);
-  const keyWeight = clarity >= 0.45 ? 2.2 : 0.2;
-  const peakTerm = clarity >= 0.45 ? 0.15 * strongPeak * strongPeak : 0.04 * strongPeak;
-  const melodicness = clamp(
-    keyWeight * keyConf + peakTerm * (1 - clamp(input.onsetDensity, 0, 1)),
+  // Energy combines loudness and rhythmic intensity (the old formula) with
+  // spectral brightness and tonal valence — the two signals that actually
+  // differentiate "driving Pendulum main-floor" from "chill deep roller" in
+  // DnB, where BPM, onset density, and mastering loudness are uniform.
+  const energyRaw = clamp(
+    0.3 * loud +
+      0.15 * clamp(input.dropIntensity, 0, 1) +
+      0.2 * onsetDensityNorm +
+      0.2 * brightnessNorm +
+      0.15 * valence,
     0,
     1,
   );
-  const valence = clamp(
-    0.35 * clamp(input.chroma.majorness, 0, 1) +
-      0.25 * clamp(input.brightness / 0.15, 0, 1) +
-      0.2 * melodicness +
-      0.2 * danceability,
-    0,
-    1,
-  );
+  const energy = stretch(energyRaw, ENERGY_RAW_LO, ENERGY_RAW_HI, ENERGY_OUT_LO, ENERGY_OUT_HI);
   const shortTerm = shortTermLoudness(input.samples, input.sampleRateHz);
   return {
     energy: Number(energy.toFixed(4)),

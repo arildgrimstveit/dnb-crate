@@ -87,7 +87,7 @@ describe("descriptor pack", () => {
     expect(a.descriptors?.acousticness).toBe(b.descriptors?.acousticness);
     expect(a.descriptors?.melodicness).toBe(b.descriptors?.melodicness);
     expect(a.descriptors?.valence).toBe(b.descriptors?.valence);
-    expect(a.analyzerVersion).toBe("3.7.0");
+    expect(a.analyzerVersion).toBe("3.8.0");
   });
 
   it("maps suggestedEnergy from continuous energy", () => {
@@ -107,9 +107,51 @@ describe("descriptor pack", () => {
         tonalPeakRatio: 0.5,
         strongPeakRatio: 0.5,
         majorness: 0.5,
-        keyConfidence: 0.4,
+        keyConfidence: 0.5,
       },
     });
     expect(pack.suggestedEnergy).toBe(Math.round(1 + 9 * pack.energy));
+  });
+
+  it("separates bright/aggressive from dark/chill at the same loudness and onset density", () => {
+    // Same loudness, same onsets — only brightness and valence (via chroma)
+    // differ. This is the Granite vs Pherentic case from the real library.
+    const base = {
+      samples: new Float32Array(22_050 * 8).fill(0.01), // minimal DFA contribution
+      sampleRateHz: 22_050,
+      rms: 0.2,
+      dropIntensity: 0.6,
+      onsetDensity: 0.32,
+      subBassRatio: 0.52,
+      dynamicRangeDb: 10,
+      tempoEvidence: { prominence: 0.5, stability: 0.5, tempoConf: 0.5, onGridRatio: 0.5 },
+    };
+    const bright = computeDescriptorPack({
+      ...base,
+      brightness: 0.1,
+      chroma: {
+        chromaClarity: 0.5,
+        tonalStability: 0.5,
+        tonalPeakRatio: 0.5,
+        strongPeakRatio: 0.5,
+        majorness: 0.7,
+        keyConfidence: 0.5,
+      },
+    });
+    const dark = computeDescriptorPack({
+      ...base,
+      brightness: 0.05,
+      chroma: {
+        chromaClarity: 0.5,
+        tonalStability: 0.5,
+        tonalPeakRatio: 0.5,
+        strongPeakRatio: 0.5,
+        majorness: 0.2,
+        keyConfidence: 0.5,
+      },
+    });
+    // The bright/aggressive track should score meaningfully higher energy
+    expect(bright.energy).toBeGreaterThan(dark.energy + 0.05);
+    expect(bright.suggestedEnergy).toBeGreaterThan(dark.suggestedEnergy);
   });
 });
