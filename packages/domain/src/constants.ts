@@ -91,6 +91,14 @@ export const PLANNER_MIN_POOL_ESTIMATE = 16;
 export const PLANNER_OPENER_ATTEMPTS = 3;
 export const VARIETY_REPEATED_TRACK_COST = 8;
 export const VARIETY_REPEATED_PAIR_COST = 4;
+/** Groove-compatibility scoring weight: how strongly the planner avoids
+ * pairing tracks whose drum patterns fight. Calibrated on the 544-track
+ * library: catches the "galloping" joins (Out of Time→Deep Space scores 0.486)
+ * but not spectral-clutter noise (Freefall→Go scores 0.725 despite being
+ * noisy — that's a mid/high crossover issue, not a rhythmic conflict).
+ * Conservative weight until Phase 2 (hat-band dispersion) adds the missing
+ * spectral signal. */
+export const PLANNER_JOIN_GROOVE_WEIGHT = 3;
 
 export const DEFAULT_LOUDNESS_TARGET_LUFS = -14;
 export const DEFAULT_TRUE_PEAK_CEILING_DB = -1;

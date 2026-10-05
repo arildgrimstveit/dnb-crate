@@ -8,6 +8,7 @@ import {
   PLANNER_LOOKAHEAD_WEIGHT,
   PLANNER_OPENER_ATTEMPTS,
   PLANNER_SHORTLIST_SIZE,
+  PLANNER_JOIN_GROOVE_WEIGHT,
   VARIETY_REPEATED_PAIR_COST,
   VARIETY_REPEATED_TRACK_COST,
   interpolateEnergy,
@@ -27,7 +28,7 @@ import {
 
 import { planDurationMs, type TimelineAnalysis } from "./timeline.ts";
 import { compilePlanningConstraints } from "./constraints.ts";
-import { artistKey } from "./shared.ts";
+import { artistKey, grooveCompatibility } from "./shared.ts";
 import {
   hasShortPlayable,
   makeEntryRebuilder,
@@ -294,6 +295,21 @@ export function draftSetPlan(
     score.total -= cost;
     if (repeatedTrack) score.reasons.push("RECENT_MIX_RECORDING");
     if (repeatedPair) score.reasons.push("RECENT_MIX_PAIR");
+    // Groove compatibility: penalize joins whose drum patterns fight. The
+    // beat profiles (kick/snare per beat) capture the "very noisy" and
+    // "galloping" perception when two incompatible grooves are blended by
+    // phrase_mix — a signal no aggregate descriptor can see (beatmatching
+    // followups item 1: verified on Freefall→Go vs Just a Thought→Freefall).
+    const groove = source ? grooveCompatibility(srcA?.bars, candA?.bars) : null;
+    if (groove != null) {
+      // Clamp to [−1, 1.45]; the onset-lock's raw range. Rescale so that
+      // groove ≈ 0 (neutral) contributes 0, strong alignment contributes
+      // positively, and conflict contributes negatively.
+      const grooveAdj = Math.max(-1, Math.min(1.45, groove)) * PLANNER_JOIN_GROOVE_WEIGHT;
+      score.components.joinMood += grooveAdj;
+      score.total += grooveAdj;
+      if (groove < -0.15) score.reasons.push("GROOVE_CONFLICT");
+    }
     return score;
   };
 
