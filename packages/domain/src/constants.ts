@@ -106,7 +106,12 @@ export const RENDER_DURATION_TOLERANCE_MS = 1_000;
 export const RENDER_CHECK_RESIDUAL_FAIL_MS = 40;
 export const RENDER_CHECK_AUDIO_CONFIDENT_MS = 20;
 export const RENDER_CHECK_AUDIO_REVIEW_MS = 40;
-export const RENDER_CHECK_LEVEL_STEP_FAIL_LU = 3;
+/** Adjacent-track level step that fails a full render check. 5 LU (widened
+ * from 3 in October 2026): DnB library loudness spans ~9 LU and the renderer
+ * gain clamp is asymmetric (+3/−6), so a 3 LU threshold was unachievable for
+ * many valid energy-arc transitions once the energy descriptor spread opened
+ * up. The planner's joinLevel scoring still penalizes gaps at 1/3 falloff. */
+export const RENDER_CHECK_LEVEL_STEP_FAIL_LU = 5;
 export const LEVEL_MATCH_GAIN_MIN_DB = -6;
 export const LEVEL_MATCH_GAIN_MAX_DB = 3;
 export const RENDER_JOB_LIST_LIMIT_MAX = 50;
