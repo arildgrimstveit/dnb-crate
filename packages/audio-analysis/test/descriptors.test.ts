@@ -87,7 +87,7 @@ describe("descriptor pack", () => {
     expect(a.descriptors?.acousticness).toBe(b.descriptors?.acousticness);
     expect(a.descriptors?.melodicness).toBe(b.descriptors?.melodicness);
     expect(a.descriptors?.valence).toBe(b.descriptors?.valence);
-    expect(a.analyzerVersion).toBe("3.5.0");
+    expect(a.analyzerVersion).toBe("3.6.0");
   });
 
   it("maps suggestedEnergy from continuous energy", () => {

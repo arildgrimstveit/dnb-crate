@@ -397,6 +397,57 @@ describe("metadata enrichment", () => {
     expect(other.catalog.service.getEnrichmentReport().bpmDisagreements).toBe(1);
   });
 
+  it("does not write a published BPM when the audio analysis rejected its grid", async () => {
+    const http = createFakeHttpClient([
+      { match: `/recording/${MBID}`, body: mbRecording() },
+      { match: `/release/${RELEASE}`, body: mbRelease() },
+      { match: "/track/isrc:", body: deezerTrack({ bpm: 126 }) },
+    ]);
+    const { catalog, library } = await workspace(http);
+    const seeded = await seedTrack(catalog, library);
+    catalog.db.prepare("UPDATE tracks SET recording_mbid = ? WHERE id = ?").run(MBID, seeded.id);
+    catalog.repository.updateMetadata(seeded.id, { genres: ["drum and bass"] });
+    catalog.analyses.upsert({
+      trackId: seeded.id,
+      analyzerName: DSP_ANALYZER_NAME,
+      analyzerVersion: "3.0.0",
+      bpm: null,
+      bpmConfidence: 0.749,
+      bpmRaw: 126,
+      referenceBpm: null,
+      beatTimesMs: [],
+      downbeatTimesMs: [],
+      gridRejected: true,
+      gridRejectionReason: "No plausible DnB tempo (160–190 after ratio fold)",
+      gridSource: "analyzed",
+      musicalKey: null,
+      keyConfidence: null,
+      keyMode: null,
+      camelotKey: null,
+      tempoStability: null,
+      downbeatConfidence: null,
+      integratedLufs: null,
+      truePeakDb: null,
+      lowBandEnergy: null,
+      midBandEnergy: null,
+      highBandEnergy: null,
+      waveformSummary: null,
+      beatAnchorMs: null,
+      descriptors: null,
+      engineRuntimeMs: 1,
+      analyzedAt: new Date().toISOString(),
+      suggestedCues: [],
+      sections: [],
+    });
+    const started = catalog.service.startMetadataEnrichment({
+      scope: "ids",
+      trackIds: [seeded.id],
+    });
+    await catalog.service.waitForEnrichmentJob(started.job.id, 15_000);
+    // The published 126 stays unwritten: the audio cannot confirm it.
+    expect(catalog.service.getTrack(seeded.id).bpm).toBeNull();
+    expect(catalog.service.getEnrichmentReport().bpmDisagreements).toBe(1);
+  });
   it("never overwrites a manual BPM", async () => {
     const http = createFakeHttpClient([
       { match: `/recording/${MBID}`, body: mbRecording() },

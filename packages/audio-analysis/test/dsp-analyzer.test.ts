@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { dspAnalyzer } from "../src/dsp-analyzer.ts";
-import { resolveBpmHint } from "@dnb-crate/domain";
+import { publishedReferenceCandidates, resolveBpmHint } from "@dnb-crate/domain";
 
 import {
   buildChordPcm,
@@ -400,6 +400,26 @@ describe("dnb-crate-dsp", () => {
     const result = dspAnalyzer.analyze(pcm);
     expect(result.gridRejected).toBe(false);
     expect(result.gridSource).toBe("analyzed");
+  });
+
+  it("folds a 7:5 published 126 reference onto a 175 grid", () => {
+    const pcm = buildClickTrackPcm({ bpm: 175, durationMs: 12_000, sampleRateHz: 22_050 });
+    const result = dspAnalyzer.analyze(pcm, { referenceBpm: 126 });
+    expect(result.gridRejected).toBe(false);
+    expect(Math.abs((result.bpm ?? 0) - 175)).toBeLessThan(1);
+  });
+
+  it("folds a 4:3 published 130 reference onto a 173 grid", () => {
+    const pcm = buildClickTrackPcm({ bpm: 173, durationMs: 12_000, sampleRateHz: 22_050 });
+    const result = dspAnalyzer.analyze(pcm, { referenceBpm: 130 });
+    expect(result.gridRejected).toBe(false);
+    expect(Math.abs((result.bpm ?? 0) - 173)).toBeLessThan(1);
+  });
+
+  it("publishedReferenceCandidates(126) includes 176.4 via 7:5", () => {
+    const candidates = publishedReferenceCandidates(126);
+    const septuple = candidates.find((value) => Math.abs(value - 176.4) < 0.1);
+    expect(septuple).toBeDefined();
   });
 
   it("recovers a 2-beat downbeat offset with high confidence", () => {

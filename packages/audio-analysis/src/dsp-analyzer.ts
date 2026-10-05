@@ -401,6 +401,27 @@ function scoreReferenceTempo(
   };
 }
 
+/** Musically plausible ratio multiples tried when the raw periodicity cannot
+ * fold into range via half/double alone. Matches the published-reference set
+ * (minus the trivial ×1 which the caller already handles) plus ×2 and ×1/2
+ * for the case where the free estimate missed them. */
+const RATIO_FOLD_CANDIDATES = [
+  2,
+  1 / 2,
+  3 / 2,
+  2 / 3,
+  5 / 4,
+  4 / 5,
+  4 / 3,
+  3 / 4,
+  5 / 3,
+  3 / 5,
+  6 / 5,
+  5 / 6,
+  7 / 5,
+  5 / 7,
+];
+
 function tryRatioFold(
   onset: number[],
   hopMs: number,
@@ -423,7 +444,7 @@ function tryRatioFold(
     onGridRatio: number;
   };
 } | null {
-  const ratioBpms = [bpmRaw * (2 / 3), bpmRaw * (3 / 2)].filter(
+  const ratioBpms = RATIO_FOLD_CANDIDATES.map((ratio) => bpmRaw * ratio).filter(
     (value) => value > 40 && value < 400,
   );
   const scored = ratioBpms.map((candidate) => ({
@@ -488,7 +509,7 @@ function tryRatioFold(
         bpmConfidence: Number(better.confidence.toFixed(3)),
         offsetMs: better.offsetMs,
         gridRejected: true,
-        gridRejectionReason: "No plausible DnB tempo (160–190 after 2/3–3/2 fold)",
+        gridRejectionReason: "No plausible DnB tempo (160–190 after ratio fold)",
         tempoEvidence: better.tempoEvidence,
       };
     }
@@ -1184,7 +1205,7 @@ export const dspAnalyzer: AudioAnalyzer = {
       (freeConfidence ?? 0) >= 0.45 &&
       publishedTag != null &&
       publishedAgreesWithFree(publishedTag, freeBpm);
-    const ratioConfused = (gridRejectionReason ?? "").includes("2/3–3/2");
+    const ratioConfused = (gridRejectionReason ?? "").includes("after ratio fold");
     if (publishedTag != null && publishedTag > 0 && (gridRejected || disagrees)) {
       const scoredLocks = lockCandidates.map((candidate) => ({
         bpm: candidate,

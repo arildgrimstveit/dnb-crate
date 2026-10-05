@@ -229,7 +229,8 @@ export function resolvePublishedReferenceBpm(
   return { bpm: publishedBpm, foldedFrom: null };
 }
 
-/** Half/double, 3:2, 5:4 (140↔175), 4:3 (130↔173), 5:3 (105↔175), 6:5 (145↔174). */
+/** Half/double, 3:2, 5:4 (140↔175), 4:3 (130↔173), 5:3 (105↔175), 6:5 (145↔174),
+ * 7:5 (126↔176.4, Pendulum-style half-time grooves). */
 const PUBLISHED_REFERENCE_RATIOS = [
   1,
   2,
@@ -244,6 +245,8 @@ const PUBLISHED_REFERENCE_RATIOS = [
   3 / 5,
   6 / 5,
   5 / 6,
+  7 / 5,
+  5 / 7,
 ];
 
 /**

@@ -423,6 +423,12 @@ export class EnrichmentCoordinator {
     ) {
       if (acceptedGrid != null && Math.abs(deezerFoldedBpm! - acceptedGrid) > 1) {
         bpmDisagreement = true;
+      } else if (dsp != null && dsp.gridRejected) {
+        // The audio analysis exists but rejected its grid: we cannot verify
+        // the published value. Deezer/MusicBrainz half-time BPMs are common
+        // on DnB (86 for 172, 126 for 175); writing one silently poisons the
+        // track and blocks the reference lock on the next analysis pass.
+        bpmDisagreement = true;
       } else {
         bpmWritten = true;
       }
