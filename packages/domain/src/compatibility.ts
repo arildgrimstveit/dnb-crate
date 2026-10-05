@@ -192,7 +192,11 @@ export function scoreCandidate(
     ctx.sourceLufs != null && ctx.candidateLufs != null
       ? Math.abs(ctx.candidateLufs - ctx.sourceLufs)
       : 0;
-  const joinLevelRaw = source ? -Math.max(0, deltaLufs - 3) / 6 : 0;
+  // Steep falloff: each LU above the 3 LU grace zone costs 1/3 of a point
+  // (doubled from the original 1/6). The wider energy range opened by the
+  // 3.8.0 energy recalibration needs a stronger loudness continuity signal
+  // to prevent audible level jumps at joins.
+  const joinLevelRaw = source ? -Math.max(0, deltaLufs - 3) / 3 : 0;
   const joinStructureRaw =
     source && (ctx.candidateDropBars ?? 0) >= 16 && ctx.sourceQuietTail
       ? 1
