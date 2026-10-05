@@ -17,6 +17,7 @@ The planner is deterministic. A host model turns “soulful liquid, peak at 45 m
 | Join structure              | 8                         | Incoming drop ≥ 16 bars and/or outgoing quiet tail                                                                                        |
 | Join aligned                | 10                        | Both grids accepted and BPM within ±3%                                                                                                    |
 | Join harmonic               | 8                         | Same as harmonic, used in lookahead                                                                                                       |
+| Join mood                   | 7                         | Valence/brightness continuity between adjacent tracks; ≥0.3 valence gap penalized (`JOIN_MOOD_CLASH`)                                     |
 | Genre prior                 | 4                         | liquid funk / neurofunk / jump up / jungle                                                                                                |
 | Personal rating             | 6                         | 1–5 scaled to 0–1                                                                                                                         |
 | Preferred-artist bonus      | 8                         |                                                                                                                                           |

@@ -56,6 +56,7 @@ export const scoreBreakdownSchema = z.object({
     joinStructure: z.number(),
     joinAligned: z.number(),
     joinHarmonic: z.number(),
+    joinMood: z.number(),
     genrePrior: z.number(),
     feedback: z.number(),
   }),

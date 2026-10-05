@@ -120,6 +120,83 @@ describe("scoreCandidate", () => {
     };
     expect(scoreCandidate(ctx).total).toBe(scoreCandidate(ctx).total);
   });
+
+  it("penalizes large valence gaps between adjacent tracks (join mood)", () => {
+    const source = track({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      title: "Bright source",
+    });
+    // Granite-like: high valence, high brightness
+    const bright = track({
+      id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      title: "Bright candidate",
+    });
+    // Pherentic-like: low valence, low brightness
+    const dark = track({
+      id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      title: "Dark candidate",
+    });
+    const ctx = {
+      source,
+      targetEnergy: 8,
+      direction: "any" as const,
+      preferredMoods: [],
+      preferredSubgenres: [],
+      preferredTags: [],
+      preferredArtists: [],
+      recentArtistIds: [],
+      artistRepeatSpacing: 1,
+      harmonicImportance: 1,
+      explorationWeight: 0,
+      seed: 1,
+      alreadyUsed: false,
+      sourceDescriptors: { valence: 0.65, brightness: 0.1 },
+    };
+    const smoothScore = scoreCandidate({
+      ...ctx,
+      candidate: bright,
+      descriptors: { valence: 0.6, brightness: 0.09 },
+    });
+    const jarringScore = scoreCandidate({
+      ...ctx,
+      candidate: dark,
+      descriptors: { valence: 0.2, brightness: 0.05 },
+    });
+    expect(smoothScore.components.joinMood).toBeGreaterThan(jarringScore.components.joinMood);
+    expect(jarringScore.reasons).toContain("JOIN_MOOD_CLASH");
+    expect(smoothScore.reasons).not.toContain("JOIN_MOOD_CLASH");
+    // The jarring pair loses roughly 6 points of joinMood (weight 7)
+    expect(smoothScore.components.joinMood - jarringScore.components.joinMood).toBeGreaterThan(5);
+  });
+
+  it("gives neutral mood score when descriptors are missing", () => {
+    const source = track({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      title: "No descriptors",
+    });
+    const candidate = track({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      title: "Also no descriptors",
+    });
+    const result = scoreCandidate({
+      source,
+      candidate,
+      targetEnergy: 5,
+      direction: "any" as const,
+      preferredMoods: [],
+      preferredSubgenres: [],
+      preferredTags: [],
+      preferredArtists: [],
+      recentArtistIds: [],
+      artistRepeatSpacing: 1,
+      harmonicImportance: 1,
+      explorationWeight: 0,
+      seed: 1,
+      alreadyUsed: false,
+    });
+    // 0.5 (neutral) × weight 7 = 3.5
+    expect(result.components.joinMood).toBe(3.5);
+  });
 });
 
 describe("interpolateEnergy", () => {

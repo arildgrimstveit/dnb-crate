@@ -59,6 +59,32 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+/**
+ * Mood continuity between adjacent tracks: penalizes large valence swings
+ * (bright/uplifting into dark/brooding or vice versa) and, secondarily,
+ * large brightness gaps. 1.0 = smooth mood, 0.0 = jarring shift.
+ *
+ * Calibrated on the 544-track library: Granite (valence 0.665) into
+ * Pherentic (valence 0.204) scored identically on every other join metric
+ * but felt wrong — the 0.46 valence gap was invisible to the planner.
+ */
+function joinMoodScore(
+  sourceValence: number | null | undefined,
+  candidateValence: number | null | undefined,
+  sourceBrightness: number | null | undefined,
+  candidateBrightness: number | null | undefined,
+): number {
+  if (sourceValence == null || candidateValence == null) return 0.5; // neutral
+  const vGap = Math.abs(candidateValence - sourceValence);
+  // Free zone: ≤0.1 valence gap is imperceptible. Full penalty at ≥0.4.
+  const vScore = clamp01(1 - Math.max(0, vGap - 0.1) / 0.3);
+  if (sourceBrightness == null || candidateBrightness == null) return vScore;
+  const bGap = Math.abs(candidateBrightness - sourceBrightness);
+  // Brightness range in DnB is narrow (~0.03–0.15); free zone ≤0.02.
+  const bScore = clamp01(1 - Math.max(0, bGap - 0.02) / 0.04);
+  return vScore * 0.7 + bScore * 0.3;
+}
+
 export function hashSeed(seed: number, trackId: string): number {
   let h = seed >>> 0;
   for (let i = 0; i < trackId.length; i += 1) {
@@ -179,6 +205,12 @@ export function scoreCandidate(
     Math.abs(candidateBpm - sourceBpm) / Math.max(sourceBpm, 1) <= 0.03;
   const joinAlignedRaw = source && ctx.candidateGridOk && ctx.sourceGridOk && bpmClose ? 1 : 0;
   const joinHarmonicRaw = harmonic;
+  const joinMoodRaw = joinMoodScore(
+    ctx.sourceDescriptors?.valence,
+    ctx.descriptors?.valence,
+    ctx.sourceDescriptors?.brightness,
+    ctx.descriptors?.brightness,
+  );
   const priorLabels = new Set(["liquid funk", "neurofunk", "jump up", "jungle"]);
   const candidateGenres = (ctx.candidateGenres ?? candidate.genres ?? []).map(normalizeGenre);
   const preferredGenres = new Set(ctx.preferredSubgenres.map(normalizeGenre));
@@ -243,6 +275,9 @@ export function scoreCandidate(
   if (candidateEnergy == null) {
     reasons.push("MISSING_ENERGY");
   }
+  if (joinMoodRaw < 0.15) {
+    reasons.push("JOIN_MOOD_CLASH");
+  }
   if (structureRaw >= 0.7) {
     reasons.push("STRUCTURE_COMPATIBLE");
   }
@@ -267,6 +302,7 @@ export function scoreCandidate(
     joinStructure: joinStructureRaw * weights.joinStructure,
     joinAligned: joinAlignedRaw * weights.joinAligned,
     joinHarmonic: joinHarmonicRaw * weights.joinHarmonic,
+    joinMood: joinMoodRaw * weights.joinMood,
     genrePrior: genrePriorRaw * weights.genrePrior,
     feedback: (ctx.feedbackBonus ?? 0) * weights.feedback,
   };

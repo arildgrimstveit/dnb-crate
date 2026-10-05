@@ -74,6 +74,7 @@ export const DEFAULT_SCORE_WEIGHTS = {
   joinStructure: 8,
   joinAligned: 10,
   joinHarmonic: 8,
+  joinMood: 7,
   genrePrior: 4,
   feedback: 6,
 } as const;

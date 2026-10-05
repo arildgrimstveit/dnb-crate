@@ -88,6 +88,7 @@ export type ScoreComponents = {
   joinStructure: number;
   joinAligned: number;
   joinHarmonic: number;
+  joinMood: number;
   genrePrior: number;
   feedback: number;
 };

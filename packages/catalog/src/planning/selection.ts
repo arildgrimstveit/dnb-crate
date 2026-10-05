@@ -64,6 +64,7 @@ export function scoreBuckets(
       structure: number;
       harmonic: number;
       joinHarmonic: number;
+      joinMood: number;
       bpm: number;
       feedback: number;
     };
@@ -78,7 +79,7 @@ export function scoreBuckets(
       components.joinStructure +
       components.joinAligned +
       components.structure,
-    keyCoverage: components.harmonic + components.joinHarmonic,
+    keyCoverage: components.harmonic + components.joinHarmonic + components.joinMood,
     timeFit: components.bpm,
     lookahead,
     feedback: components.feedback,
