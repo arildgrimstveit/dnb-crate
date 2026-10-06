@@ -8,7 +8,7 @@ export const DJ_HANDOFF_POLICY = "dj-continuity-v1" as const;
 export const DEFAULT_RENDER_OUTPUT_FORMAT = "flac" as const;
 export const DEFAULT_RENDER_OUTPUT_EXTENSION = ".flac";
 export const DSP_ANALYZER_NAME = "dnb-crate-dsp";
-export const DSP_ANALYZER_VERSION = "3.10.0";
+export const DSP_ANALYZER_VERSION = "3.11.0";
 export const ANALYSIS_ENGINE_IDS = ["dnb-crate-dsp"] as const;
 export const DEFAULT_ANALYSIS_ENGINE = "dnb-crate-dsp" as const;
 export const ANALYSIS_SAMPLE_RATE_HZ = 22_050;
@@ -164,6 +164,15 @@ export const ATEMPO_SKIP_THRESHOLD = 1e-12;
 /** Accumulated |rate−1|·duration below this may skip atempo (10 ms landmark budget). */
 export const ATEMPO_DRIFT_BUDGET_MS = 10;
 export const MIN_ANALYSIS_CONFIDENCE = 0.6;
+/** Acceptance bar for reference-tempo locks (manual/published BPM hint
+ * rescuing a rejected or disagreeing free estimate). The reference scorer
+ * runs on a lower scale than the free estimator's confidence: 20
+ * well-gridded library tracks (free confidence >= 0.85) score 0.35-0.70
+ * on it (min 0.348, p25 0.413, median 0.503, October 2026 calibration) —
+ * MIN_ANALYSIS_CONFIDENCE (0.6) sits at the controls' p90 and made the
+ * lock path unreachable for real tracks. 0.42 accepts references that
+ * grid at least as well as the control p25. */
+export const REFERENCE_LOCK_MIN_CONFIDENCE = 0.42;
 export const MIN_BPM_HINT_CONFIDENCE = 0.3;
 export const PUBLISHED_BPM_INTEGER_TOLERANCE = 1.0;
 export const PUBLISHED_BPM_FRACTION_TOLERANCE = 0.5;

@@ -60,7 +60,7 @@ describe("grooveCompatibility syncopation penalty", () => {
   });
 });
 
-function gridTrack(id: string, syncopation: number | null, barSync?: number): TimelineTrack {
+function gridTrack(id: string, syncopation: number | null, barSync?: number | null): TimelineTrack {
   return {
     id,
     title: `Track ${id.slice(0, 4)}`,

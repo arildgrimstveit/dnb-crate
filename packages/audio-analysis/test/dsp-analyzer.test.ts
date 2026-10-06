@@ -7,6 +7,7 @@ import {
   buildChordPcm,
   buildKeyedDnbPcm,
   buildOffbeatHatPcm,
+  buildPadOnlyPcm,
   buildSyntheticDnbPcm,
 } from "../src/synthetic-dnb.ts";
 import { buildClickTrackPcm } from "../src/click-track.ts";
@@ -281,7 +282,9 @@ describe("dnb-crate-dsp", () => {
     expect(dspAnalyzer.analyze(sparse).gridRejected).toBe(true);
     const result = dspAnalyzer.analyze(sparse, { referenceBpm: 150 });
     expect(result.gridRejected).toBe(true);
-    expect(result.gridRejectionReason ?? "").toMatch(/Reference tempo 150 does not fit/i);
+    expect(result.gridRejectionReason ?? "").toMatch(
+      /Reference tempo 150(→\d+(\.\d+)?)? does not fit/i,
+    );
     expect(result.bpm).toBeNull();
   });
 
@@ -527,5 +530,38 @@ describe("dnb-crate-dsp", () => {
     const straightMean = meanOf(straightBarSync!);
     expect(syncDrop - syncIntro).toBeGreaterThan(0.15);
     expect(Math.abs(syncIntro - straightMean)).toBeLessThan(0.1);
+  });
+
+  it("locks a manual reference through 3:2 metrical ambiguity", () => {
+    // The "Ghost" shape: a clean 174 backbone plus a loud triplet layer at
+    // 116 (= 174 × 2/3). The free estimator leans toward the 116
+    // periodicity, but a manual 174 reference must be able to lock — the
+    // detected periodicity is the reference's exact metrical partner.
+    const base = buildSyntheticDnbPcm({ bpm: 174 });
+    const samples = base.samples.slice();
+    const beatMs = 60_000 / 174;
+    const triPeriod = Math.round((1.5 * beatMs * base.sampleRateHz) / 1000);
+    const n = Math.round(0.05 * base.sampleRateHz);
+    for (let at = 0; at < samples.length; at += triPeriod) {
+      for (let j = 0; j < n && at + j < samples.length; j += 1) {
+        const t = j / base.sampleRateHz;
+        samples[at + j] =
+          (samples[at + j] ?? 0) + Math.sin(2 * Math.PI * 220 * t) * Math.exp(-t * 30) * 0.9;
+      }
+    }
+    const pcm = { ...base, samples };
+    const locked = dspAnalyzer.analyze(pcm, { referenceBpm: 174 });
+    expect(locked.gridRejected).toBe(false);
+    expect(locked.bpm).not.toBeNull();
+    expect(Math.abs((locked.bpm ?? 0) - 174)).toBeLessThan(1);
+  });
+
+  it("still rejects a reference that does not fit the onsets", () => {
+    // Pad-only audio has no beat-grid content: a 174 reference cannot
+    // produce a trustworthy grid, so it must stay rejected.
+    const pcm = buildPadOnlyPcm({ key: "C", durationMs: 60_000 });
+    const rejected = dspAnalyzer.analyze(pcm, { referenceBpm: 174 });
+    expect(rejected.gridRejected).toBe(true);
+    expect(rejected.bpm).toBeNull();
   });
 });

@@ -4,6 +4,7 @@ import {
   DNB_BPM_MAX,
   DNB_BPM_MIN,
   MIN_ANALYSIS_CONFIDENCE,
+  REFERENCE_LOCK_MIN_CONFIDENCE,
   normalizeDnbBpm,
   publishedBpmTolerance,
   publishedReferenceCandidates,
@@ -558,6 +559,25 @@ function outOfRangePartnerBeats(
     }
   }
   return false;
+}
+
+/** Metrical-partner tolerance for the 3:2 ambiguity: a detected raw
+ * periodicity at ~⅔ or ~1.5× of the reference is CONSISTENT with the
+ * reference under a triplet reading, not contradictory. Human-asserted
+ * references may lock through that ambiguity; arbitrary disagreements
+ * (e.g. raw 165 vs reference 174) still cannot. */
+const METRICAL_PARTNER_TOLERANCE_BPM = 0.75;
+
+function isMetricalPartner(rawBpm: number | null, referenceBpm: number): boolean {
+  if (rawBpm == null || !(rawBpm > 0) || !(referenceBpm > 0)) {
+    return false;
+  }
+  const twoThirds = referenceBpm * (2 / 3);
+  const threeHalves = referenceBpm * (3 / 2);
+  return (
+    Math.abs(rawBpm - twoThirds) <= METRICAL_PARTNER_TOLERANCE_BPM ||
+    Math.abs(rawBpm - threeHalves) <= METRICAL_PARTNER_TOLERANCE_BPM
+  );
 }
 
 function uniqueTempos(values: number[]): number[] {
@@ -1220,32 +1240,84 @@ export const dspAnalyzer: AudioAnalyzer = {
       publishedTag != null &&
       publishedAgreesWithFree(publishedTag, freeBpm);
     const ratioConfused = (gridRejectionReason ?? "").includes("after ratio fold");
+    /** Kick-band head-to-head: does the kick envelope prefer the reference
+     *  candidate over its out-of-range ⅔/1.5 confusion partners? The drums,
+     *  not triplets or hats, must sit on the reference grid. */
+    const kickBandPrefersReference = (candidateBpm: number): boolean => {
+      if (kickOnset.length === 0) {
+        return false;
+      }
+      const current = scoreReferenceTempo(kickOnset, hopMs, candidateBpm).confidence;
+      for (const partner of [candidateBpm * (2 / 3), candidateBpm * (3 / 2)]) {
+        if (partner >= minBpm - 1e-6 && partner <= maxBpm + 1e-6) {
+          continue;
+        }
+        const partnerConf = scoreReferenceTempo(kickOnset, hopMs, partner).confidence;
+        if (partnerConf > current + 1e-6) {
+          return false;
+        }
+      }
+      return true;
+    };
     if (publishedTag != null && publishedTag > 0 && (gridRejected || disagrees)) {
       const scoredLocks = lockCandidates.map((candidate) => ({
         bpm: candidate,
         ...scoreReferenceTempo(tempoOnset, tempoHopMs, candidate),
       }));
-      const inRangeLocks = scoredLocks
-        .filter(
-          (row) =>
-            row.bpm >= minBpm - 1e-6 &&
-            row.bpm <= maxBpm + 1e-6 &&
-            !outOfRangePartnerBeats(tempoOnset, tempoHopMs, row.bpm, minBpm, maxBpm),
-        )
-        .sort((a, b) => b.confidence - a.confidence);
-      const bestLock =
-        inRangeLocks[0] ?? scoredLocks.sort((a, b) => b.confidence - a.confidence)[0];
+      // No partner-beat veto here: outOfRangePartnerBeats only ever tests
+      // ⅔/1.5 partners, i.e. exactly the metrical ambiguity a human
+      // reference exists to resolve. The calibrated bar carries the
+      // decision; candidates are already constrained to the reference's
+      // plausible fold set.
+      const scoredDesc = [...scoredLocks].sort((a, b) => b.confidence - a.confidence);
+      const inRange = scoredDesc.filter(
+        (row) => row.bpm >= minBpm - 1e-6 && row.bpm <= maxBpm + 1e-6,
+      );
+      // Partner-beaten candidates drop out of the strict ranking, but the
+      // fallback to the full scored set is the historical behavior (the
+      // partner itself is usually not a candidate of the reference's fold
+      // set, so the veto re-ranks rather than blocks).
+      const strictBest =
+        inRange.find(
+          (row) => !outOfRangePartnerBeats(tempoOnset, tempoHopMs, row.bpm, minBpm, maxBpm),
+        ) ?? scoredDesc[0];
+      const corroboratedBest = inRange[0];
+      // Tiered acceptance. The broadband bar alone cannot separate good
+      // references from plausible-but-wrong ones (fold candidates can ride
+      // short or hat-dominated audio), so the calibrated 0.42 bar is gated
+      // by corroboration:
+      // - agreement rescue: the free estimate already found the reference's
+      //   fold family and only lacked confidence (weak-evidence rejects).
+      // - metrical rescue: the free estimate landed on the reference's exact
+      //   ⅔/1.5 partner (3:2 ambiguity) AND the kick band prefers the
+      //   reference over the confusion partner — the drums, not the
+      //   triplets/hats, must sit on the reference grid.
+      // Anything else keeps the legacy strict bar, blocked when the free
+      // estimate was ratio-confused.
+      const agreementRescue = freeBpm != null && publishedAgreesWithFree(publishedTag, freeBpm);
+      const metricalRescue =
+        ratioConfused &&
+        isMetricalPartner(bpmRaw, publishedTag) &&
+        corroboratedBest != null &&
+        kickBandPrefersReference(corroboratedBest.bpm);
+      const strictPass =
+        strictBest != null &&
+        Number(strictBest.confidence.toFixed(3)) >= MIN_ANALYSIS_CONFIDENCE &&
+        !ratioConfused;
+      const corroboratedPass =
+        corroboratedBest != null &&
+        Number(corroboratedBest.confidence.toFixed(3)) >= REFERENCE_LOCK_MIN_CONFIDENCE &&
+        (agreementRescue || metricalRescue);
+      const bestLock = strictPass ? strictBest : corroboratedBest;
       const refConf = Number((bestLock?.confidence ?? 0).toFixed(3));
       const lockBpm = bestLock?.bpm ?? primaryLock;
-      if (
-        bestLock &&
-        refConf >= MIN_ANALYSIS_CONFIDENCE &&
-        !keepPassingFree &&
-        !keepAgreedNearMiss &&
-        !ratioConfused
-      ) {
+      if (bestLock && (strictPass || corroboratedPass) && !keepPassingFree && !keepAgreedNearMiss) {
         bpm = lockBpm;
-        bpmConfidence = refConf;
+        // The acceptance bar is the calibration (controls p25); floor the
+        // reported confidence at the planning gate so reference-locked grids
+        // are usable, mirroring the agreed-near-miss path. The measured
+        // reference score stays visible in tempoEvidence.
+        bpmConfidence = Math.max(refConf, MIN_ANALYSIS_CONFIDENCE);
         gridOffsetMs = bestLock.offsetMs;
         gridRejected = false;
         gridRejectionReason = null;
