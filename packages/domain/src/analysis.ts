@@ -20,6 +20,10 @@ export type BarEnergySeries = {
   sub?: number[];
   midFlux?: number[];
   onsetDensity?: number[];
+  /** Per-bar backbone (kick+snare) syncopation; null bars have no
+   * measurable backbone energy (breakdown/pads — no groove to conflict
+   * with). Index i covers the bar starting at downbeat[0] + i*barMs. */
+  syncopation?: Array<number | null>;
   beatKick?: number[];
   beatSnare?: number[];
   beatOnset?: number[];

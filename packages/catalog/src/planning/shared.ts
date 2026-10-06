@@ -1,5 +1,6 @@
 import {
   normalizePersonName,
+  PLANNER_GROOVE_LOCAL_WINDOW_BARS,
   PLANNER_GROOVE_SYNCOPATION_PENALTY_SLOPE,
   PLANNER_GROOVE_SYNCOPATION_TOLERANCE,
   type Track,
@@ -146,4 +147,59 @@ export function sparseOverlapPenalty(
   if (outAvg < 0.15 && inAvg < 0.15) return -1; // no rhythmic thread at all
   if (inAvg < 0.05) return -0.5; // incoming head is essentially silent
   return 0;
+}
+
+/** One side of an overlap-local groove window. */
+export type LocalGrooveSide = {
+  /** Per-bar backbone syncopation series (bars.syncopation). */
+  syncopation?: Array<number | null>;
+  bpm?: number | null;
+  /** First downbeat time, the bar-series origin. */
+  downbeat0Ms?: number | null;
+  /** Start of the window in source time: mix-out minus the window length
+   * for the outgoing side, mix-in for the incoming side. */
+  windowStartMs: number;
+};
+
+function localSyncopation(side: LocalGrooveSide): number | null {
+  const series = side.syncopation;
+  const bpm = side.bpm;
+  if (!Array.isArray(series) || series.length === 0 || !bpm || !(bpm > 0)) {
+    return null;
+  }
+  const barMs = (4 * 60_000) / bpm;
+  const origin = side.downbeat0Ms ?? 0;
+  const fromBar = Math.round((side.windowStartMs - origin) / barMs);
+  const slice = series.slice(
+    Math.max(0, fromBar),
+    Math.max(0, fromBar) + PLANNER_GROOVE_LOCAL_WINDOW_BARS,
+  );
+  const measured = slice.filter((v): v is number => v != null);
+  // A drum-sparse window has no groove to conflict with; below two measured
+  // bars the estimate is noise.
+  if (measured.length < 2) {
+    return null;
+  }
+  return measured.reduce((sum, v) => sum + v, 0) / measured.length;
+}
+
+/**
+ * Overlap-local structural groove conflict: |syncopation gap| between the
+ * outgoing's last bars before mix-out and the incoming's first bars after
+ * mix-in, measured from the per-bar series. True only when BOTH sides are
+ * locally measurable — a drum-sparse side cannot gallop against anything,
+ * and whole-track averages demonstrably cannot separate praised joins
+ * (LAMG→Barren 0.365 praised) from bad ones (X-Ray→Somewhere 0.400 gallops).
+ */
+export function structuralGrooveConflict(
+  outgoing: LocalGrooveSide,
+  incoming: LocalGrooveSide,
+  threshold: number,
+): boolean {
+  const outSync = localSyncopation(outgoing);
+  const inSync = localSyncopation(incoming);
+  if (outSync == null || inSync == null) {
+    return false;
+  }
+  return Math.abs(outSync - inSync) > threshold;
 }

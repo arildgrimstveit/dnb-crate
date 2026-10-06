@@ -71,6 +71,7 @@ export type PhraseWindow = {
     coexistenceBars: number;
     evidence: string;
     landingFadeBars?: 2 | 4 | 8;
+    landingIncomingFadeBars?: 8 | 16;
   };
 };
 
@@ -570,6 +571,7 @@ function relativeWindowBars(track: WindowTrack, startBar: number, count: number)
         ),
       );
     }),
+    onsetDensity: analysis?.bars?.onsetDensity?.slice(startBar, startBar + count),
   };
 }
 
@@ -612,15 +614,13 @@ export function planPhraseWindow(
     });
     const mixOut = pickOutgoingExit(outgoing, options.maxBars ?? 16, outBpm);
     const manualIn = incoming.analysis?.manualMixInMs;
+    const nonDropMixInMs =
+      manualIn != null && Number.isFinite(manualIn) ? Math.round(manualIn) : mixIn.ms;
     return bakeWindowAlignment(
       outgoing,
       incoming,
       {
-        mixInMs: avoidSourceZero(
-          manualIn != null && Number.isFinite(manualIn) ? Math.round(manualIn) : mixIn.ms,
-          inDownbeats,
-          inStart,
-        ),
+        mixInMs: avoidSourceZero(nonDropMixInMs, inDownbeats, inStart),
         mixOutMs: mixOut.mixOutMs,
         mixInBar: null,
         mixOutBar: mixOut.mixOutBar,
@@ -633,6 +633,44 @@ export function planPhraseWindow(
         alignmentPeriodMs: null,
         alignmentMode: null,
         onsetLockBeats: null,
+        // Non-drop-anchored windows previously carried no continuity, so
+        // sparse incoming heads faded from bar 0. Compute the sparse-head
+        // hold (landing mids/highs wait for the incoming's drums); other
+        // continuity fields stay unemitted to keep this path's behavior
+        // otherwise unchanged.
+        continuity: (() => {
+          const bars = options.maxBars ?? 16;
+          const barMs = barMsFor(options.targetBpm ?? inBpm);
+          const startBar =
+            barMs > 0
+              ? Math.max(0, Math.round((nonDropMixInMs - (inDownbeats[0] ?? 0)) / barMs))
+              : 0;
+          const scored = scoreHandoff({
+            barCount: bars,
+            phraseShape: mixOut.phraseShape,
+            exitKind: mixOut.exitKind,
+            incomingHeadEnergy: incomingHeadRelEnergy(incoming, nonDropMixInMs, inBpm),
+            outgoingTailEnergy: relEnergy(
+              sectionAtMs(outAnalysis?.sections ?? [], mixOut.mixOutMs),
+              outAnalysis?.sections ?? [],
+            ),
+            incomingBars: relativeWindowBars(incoming, startBar, bars),
+            outgoingBars:
+              mixOut.mixOutBar == null
+                ? null
+                : relativeWindowBars(outgoing, mixOut.mixOutBar, bars),
+            incomingDropAligned: false,
+          });
+          return scored.landingIncomingFadeBars == null
+            ? undefined
+            : {
+                energyFloor: scored.energyFloor,
+                valleyBars: scored.valleyBars ?? 0,
+                coexistenceBars: scored.coexistenceBars ?? 0,
+                evidence: "sparse-head-hold",
+                landingIncomingFadeBars: scored.landingIncomingFadeBars,
+              };
+        })(),
       },
       { ...options, targetBpm: options.targetBpm ?? inBpm },
     );
@@ -815,14 +853,16 @@ export function planPhraseWindow(
             chosen.exit.mixOutBar == null
               ? null
               : relativeWindowBars(outgoing, chosen.exit.mixOutBar, chosen.barCount),
+          incomingDropAligned: true,
         });
         return {
           energyFloor: scored.energyFloor,
           valleyBars: scored.valleyBars ?? 0,
           landingFadeBars: scored.landingFadeBars,
+          landingIncomingFadeBars: scored.landingIncomingFadeBars,
           coexistenceBars: scored.coexistenceBars ?? 0,
           evidence:
-            inAnalysis?.bars?.rms.length && outAnalysis?.bars?.rms.length
+            inAnalysis?.bars?.rms?.length && outAnalysis?.bars?.rms?.length
               ? "relative-bar-energy-proxy"
               : "section-energy-proxy",
         };

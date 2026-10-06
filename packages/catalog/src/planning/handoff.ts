@@ -27,6 +27,10 @@ export type HandoffCandidate = {
   audioStartMs?: number | null;
   incomingBars?: BarSeries | null;
   outgoingBars?: BarSeries | null;
+  /** True when the window anchors the incoming's drop: the renderer then
+   * aligns the fade arrival to the drop via incomingDropMs, which is more
+   * precise than the onset-density hold, so the hold must not fire. */
+  incomingDropAligned?: boolean;
 };
 
 export type HandoffScore = {
@@ -39,6 +43,9 @@ export type HandoffScore = {
   valleyBars?: number;
   coexistenceBars?: number;
   landingFadeBars?: 2 | 4 | 8;
+  /** Sparse-head hold: hold the incoming mids/highs fade until the back
+   * half of the window when the head is drum-empty but drums enter later. */
+  landingIncomingFadeBars?: 8 | 16;
 };
 
 export function sliceBars(
@@ -74,6 +81,7 @@ export function scoreHandoff(candidate: HandoffCandidate): HandoffScore {
           ? 4
           : 8
       : undefined;
+  const landingIncomingFadeBars = heldIncomingFadeBars(candidate);
   const events = expandPreset(
     "phrase_mix",
     {
@@ -81,6 +89,7 @@ export function scoreHandoff(candidate: HandoffCandidate): HandoffScore {
       intent,
       sequentialHandoff: "supported",
       landingFadeBars,
+      landingIncomingFadeBars,
     },
     bars,
     1,
@@ -140,10 +149,14 @@ export function scoreHandoff(candidate: HandoffCandidate): HandoffScore {
     valleyBars,
     coexistenceBars,
     landingFadeBars,
+    landingIncomingFadeBars,
     reasons: [
       "source-window continuity proxy",
       `${valleyBars.toFixed(1)} weighted valley bars`,
       ...(lengthBias > 0 ? [`prefer ${bars}-bar landing`] : []),
+      ...(landingIncomingFadeBars
+        ? [`held incoming fade (${landingIncomingFadeBars}-bar) for sparse head`]
+        : []),
     ],
   };
 }
@@ -242,4 +255,41 @@ function mean(values: number[]): number {
     return 0;
   }
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+/** Sparse-head onset thresholds, in bars.onsetDensity currency (fraction of
+ * frames above the track's mean onset). Calibrated so pad-only heads stay
+ * below and drum-entering backs clear it. */
+const SPARSE_HEAD_ONSET_MAX = 0.15;
+const DRUM_ENTRY_ONSET_MIN = 0.3;
+
+/**
+ * Sparse-head hold: when a landing's incoming head is drum-empty for its
+ * first half but drums enter later in the window (onset-density front/back
+ * split), hold the incoming mids/highs fade until the back half instead of
+ * fading pads in from bar 0 — the incoming arrives as its drums do.
+ *
+ * 8-bar windows get no hold (the param clamps to the full window, which is
+ * the no-hold default). Drop-aligned windows are excluded: the renderer
+ * aligns fade arrival to the incoming's drop via incomingDropMs, which is
+ * more precise than this onset-density heuristic.
+ */
+function heldIncomingFadeBars(candidate: HandoffCandidate): 8 | 16 | undefined {
+  if (candidate.phraseShape !== "landing" || candidate.incomingDropAligned) {
+    return undefined;
+  }
+  if (candidate.barCount !== 16 && candidate.barCount !== 32) {
+    return undefined;
+  }
+  const onset = candidate.incomingBars?.onsetDensity;
+  if (!onset || onset.length < 4) {
+    return undefined;
+  }
+  const half = Math.max(2, Math.floor(onset.length / 2));
+  const front = mean(onset.slice(0, half));
+  const back = mean(onset.slice(half));
+  if (front >= SPARSE_HEAD_ONSET_MAX || back < DRUM_ENTRY_ONSET_MIN) {
+    return undefined;
+  }
+  return candidate.barCount === 32 ? 16 : 8;
 }

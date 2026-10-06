@@ -332,4 +332,92 @@ describe("handoff candidate scoring", () => {
     expect(laterStart.incomingEarly).toBeGreaterThan(quietFront.incomingEarly);
     expect(laterStart.score).toBeGreaterThan(quietFront.score);
   });
+
+  it("holds the incoming fade for a sparse-head landing until drums enter", () => {
+    const sparse = () => ({
+      rms: Array.from({ length: 16 }, (_, i) => (i < 8 ? 0.05 : 0.8)),
+      onsetDensity: Array.from({ length: 16 }, (_, i) => (i < 8 ? 0.05 : 0.45)),
+    });
+    expect(
+      scoreHandoff({
+        barCount: 16,
+        exitKind: "dropLanding",
+        phraseShape: "landing",
+        incomingHeadEnergy: 0.1,
+        outgoingTailEnergy: 0.85,
+        incomingBars: sparse(),
+      }).landingIncomingFadeBars,
+    ).toBe(8);
+    expect(
+      scoreHandoff({
+        barCount: 32,
+        exitKind: "dropLanding",
+        phraseShape: "landing",
+        incomingHeadEnergy: 0.1,
+        outgoingTailEnergy: 0.85,
+        incomingBars: sparse(),
+      }).landingIncomingFadeBars,
+    ).toBe(16);
+  });
+
+  it("does not hold the incoming fade for dense heads, 8-bar windows, or non-landings", () => {
+    const dense = {
+      rms: Array(16).fill(0.8),
+      onsetDensity: Array(16).fill(0.45),
+    };
+    expect(
+      scoreHandoff({
+        barCount: 16,
+        exitKind: "dropLanding",
+        phraseShape: "landing",
+        incomingHeadEnergy: 0.7,
+        outgoingTailEnergy: 0.85,
+        incomingBars: dense,
+      }).landingIncomingFadeBars,
+    ).toBeUndefined();
+    const sparse8 = {
+      rms: Array.from({ length: 8 }, (_, i) => (i < 4 ? 0.05 : 0.8)),
+      onsetDensity: Array.from({ length: 8 }, (_, i) => (i < 4 ? 0.05 : 0.45)),
+    };
+    expect(
+      scoreHandoff({
+        barCount: 8,
+        exitKind: "dropLanding",
+        phraseShape: "landing",
+        incomingHeadEnergy: 0.1,
+        outgoingTailEnergy: 0.85,
+        incomingBars: sparse8,
+      }).landingIncomingFadeBars,
+    ).toBeUndefined();
+    expect(
+      scoreHandoff({
+        barCount: 16,
+        exitKind: "quietTail",
+        phraseShape: "complementary",
+        incomingHeadEnergy: 0.1,
+        outgoingTailEnergy: 0.3,
+        incomingBars: {
+          rms: Array.from({ length: 16 }, (_, i) => (i < 8 ? 0.05 : 0.8)),
+          onsetDensity: Array.from({ length: 16 }, (_, i) => (i < 8 ? 0.05 : 0.45)),
+        },
+      }).landingIncomingFadeBars,
+    ).toBeUndefined();
+  });
+
+  it("defers to the drop-aligned fade when the window anchors the incoming drop", () => {
+    expect(
+      scoreHandoff({
+        barCount: 16,
+        exitKind: "dropLanding",
+        phraseShape: "landing",
+        incomingHeadEnergy: 0.1,
+        outgoingTailEnergy: 0.85,
+        incomingBars: {
+          rms: Array.from({ length: 16 }, (_, i) => (i < 8 ? 0.05 : 0.8)),
+          onsetDensity: Array.from({ length: 16 }, (_, i) => (i < 8 ? 0.05 : 0.45)),
+        },
+        incomingDropAligned: true,
+      }).landingIncomingFadeBars,
+    ).toBeUndefined();
+  });
 });

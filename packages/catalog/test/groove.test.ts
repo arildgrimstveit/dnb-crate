@@ -60,7 +60,7 @@ describe("grooveCompatibility syncopation penalty", () => {
   });
 });
 
-function gridTrack(id: string, syncopation: number | null): TimelineTrack {
+function gridTrack(id: string, syncopation: number | null, barSync?: number): TimelineTrack {
   return {
     id,
     title: `Track ${id.slice(0, 4)}`,
@@ -120,7 +120,7 @@ function gridTrack(id: string, syncopation: number | null): TimelineTrack {
       tailEnergy: 0.2,
       integratedLufs: -10,
       keyConfidence: 1,
-      ...(syncopation == null
+      ...(syncopation == null && barSync == null
         ? {}
         : {
             descriptors: {
@@ -134,7 +134,16 @@ function gridTrack(id: string, syncopation: number | null): TimelineTrack {
               suggestedEnergy: 0.7,
               grooveSyncopation: syncopation,
               backbeatConcentration: 0.6,
-              bars: null,
+              bars: {
+                rms: Array.from({ length: 131 }, (_, i) => (i < 16 ? 0.3 : i < 109 ? 0.8 : 0.3)),
+                ...(barSync == null
+                  ? {}
+                  : {
+                      // Constant per-bar syncopation: any overlap-local
+                      // window reads exactly barSync.
+                      syncopation: Array.from({ length: 131 }, () => barSync),
+                    }),
+              },
             },
           }),
     },
@@ -142,23 +151,43 @@ function gridTrack(id: string, syncopation: number | null): TimelineTrack {
 }
 
 describe("chooseTransition structural groove conflict", () => {
-  it("crossfades when the syncopation gap exceeds the structural threshold", () => {
-    const outgoing = gridTrack("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 0.84);
-    const incoming = gridTrack("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", 0.44);
-    // The measured X-Ray vs Somewhere pair must clear the threshold.
-    expect(0.84 - 0.44).toBeGreaterThan(PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP);
+  it("crossfades when the overlap-local syncopation gap exceeds the threshold", () => {
+    // Calibrated on X-Ray→Somewhere: local K=16 gap 0.706 (0.925 vs 0.219),
+    // the only labeled pair that gallops under every grid-aligned template.
+    const outgoing = gridTrack("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 0.84, 0.9);
+    const incoming = gridTrack("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", 0.44, 0.2);
     const chosen = chooseTransition(outgoing, incoming, { chainTargetBpm: 174 });
-    // 0.84 - 0.44 = 0.40 > 0.25: no grid-aligned template can blend these
-    // backbones; the only non-fighting option is an equal-power crossfade.
+    expect(0.9 - 0.2).toBeGreaterThan(PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP);
     expect(chosen.transition.type).toBe("crossfade");
     expect(chosen.transition.parameters.reason).toBe("groove-syncopation-conflict");
   });
 
-  it("keeps grid-aligned templates for compatible syncopation levels", () => {
-    const outgoing = gridTrack("caaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 0.6);
-    const incoming = gridTrack("cbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", 0.5);
+  it("keeps grid-aligned templates for locally compatible grooves", () => {
+    // LAMG→Barren shape: local gap 0.48 (0.20 straight tail vs 0.68
+    // syncopated head) — user-praised ("Very very good / deep"). The gate
+    // must stay silent below the calibrated band.
+    const outgoing = gridTrack("caaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 0.32, 0.2);
+    const incoming = gridTrack("cbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", 0.68, 0.68);
     const chosen = chooseTransition(outgoing, incoming, { chainTargetBpm: 174 });
-    expect(chosen.transition.type).not.toBe("crossfade");
+    expect(Math.abs(0.2 - 0.68)).toBeLessThan(PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP);
+    expect(chosen.transition.type).toBe("phrase_mix");
+  });
+
+  it("never fires the gate on whole-track syncopation alone", () => {
+    // Whole-track gap 0.40 cannot separate praised joins (LAMG→Barren 0.365)
+    // from bad ones (X-Ray→Somewhere 0.400): without per-bar data the gate
+    // must stay silent and the planner penalty alone steers the pairing.
+    const outgoing = gridTrack("daaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 0.84);
+    const incoming = gridTrack("dbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", 0.44);
+    const chosen = chooseTransition(outgoing, incoming, { chainTargetBpm: 174 });
+    expect(chosen.transition.type).toBe("phrase_mix");
+  });
+
+  it("does not fire the gate when either overlap window is drum-sparse", () => {
+    // Sparse incoming head (null bars): no groove to conflict with.
+    const outgoing = gridTrack("eaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 0.84, 0.9);
+    const incoming = gridTrack("ebbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", 0.44, null);
+    const chosen = chooseTransition(outgoing, incoming, { chainTargetBpm: 174 });
     expect(chosen.transition.type).toBe("phrase_mix");
   });
 
@@ -168,4 +197,44 @@ describe("chooseTransition structural groove conflict", () => {
     const chosen = chooseTransition(outgoing, incoming, { chainTargetBpm: 174 });
     expect(chosen.transition.type).toBe("phrase_mix");
   });
+
+  it("glides the low end on a groove-triggered bass_swap", () => {
+    // Swapped kick/snare labels: the incoming's kicks sit where the
+    // outgoing's snares are and vice versa — kick cosine dead, cross-terms
+    // maximal — while syncopation stays compatible (no structural conflict).
+    const outgoing = gridTrack("eaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 0.55);
+    outgoing.analysis!.bars = swappedBackbone(false);
+    const incoming = gridTrack("ebbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", 0.6);
+    incoming.analysis!.bars = swappedBackbone(true);
+    const chosen = chooseTransition(outgoing, incoming, { chainTargetBpm: 174 });
+    expect(chosen.transition.type).toBe("bass_swap");
+    expect(chosen.transition.parameters.reason).toBe("groove-kick-conflict");
+    expect([8, 12]).toContain(chosen.transition.parameters.lowFadeBars);
+    expect(chosen.transition.parameters.lowFadeBars).toBe(
+      chosen.transition.parameters.barCount === 32 ? 12 : 8,
+    );
+  });
 });
+
+/** Two-step backbone with optionally swapped kick/snare placement. */
+function swappedBackbone(swap: boolean): {
+  rms: number[];
+  beatKick: number[];
+  beatSnare: number[];
+  beatOnset: number[];
+} {
+  const beatKick: number[] = [];
+  const beatSnare: number[] = [];
+  const beatOnset: number[] = [];
+  const rms: number[] = [];
+  for (let beat = 0; beat < 64; beat += 1) {
+    const pos = beat % 4;
+    const kickPos = swap ? pos === 1 || pos === 3 : pos === 0;
+    const snarePos = swap ? pos === 0 : pos === 1 || pos === 3;
+    beatKick.push(kickPos ? 1 : 0);
+    beatSnare.push(snarePos ? 1 : 0);
+    beatOnset.push(kickPos || snarePos ? 0.8 : 0.1);
+    rms.push(kickPos || snarePos ? 0.8 : 0.3);
+  }
+  return { rms, beatKick, beatSnare, beatOnset };
+}

@@ -507,5 +507,25 @@ describe("dnb-crate-dsp", () => {
     // Backbeat concentration: snares sit on beats 2/4 in both fixtures.
     expect(straight.descriptors?.backbeatConcentration ?? 0).toBeGreaterThan(0.6);
     expect(syncopated.descriptors?.backbeatConcentration ?? 0).toBeGreaterThan(0.6);
+    // Per-bar series: present and bar-aligned with the other series.
+    const straightBarSync = straight.descriptors?.bars?.syncopation;
+    const syncBarSync = syncopated.descriptors?.bars?.syncopation;
+    expect(Array.isArray(straightBarSync)).toBe(true);
+    expect(Array.isArray(syncBarSync)).toBe(true);
+    expect(straightBarSync!.length).toBe(straight.descriptors?.bars?.rms.length);
+    expect(syncBarSync!.length).toBe(syncopated.descriptors?.bars?.rms.length);
+    // Locality: extra kicks land only in drop bars, so the syncopated
+    // fixture's drop bars must exceed its intro bars, and its intro bars
+    // must sit near the straight fixture's (which are uniformly low).
+    const dropStartBar = 8; // default introBars
+    const meanOf = (values: Array<number | null | undefined>): number => {
+      const nums = values.filter((v): v is number => v != null);
+      return nums.length === 0 ? NaN : nums.reduce((a, b) => a + b, 0) / nums.length;
+    };
+    const syncIntro = meanOf(syncBarSync!.slice(0, dropStartBar));
+    const syncDrop = meanOf(syncBarSync!.slice(dropStartBar, dropStartBar + 16));
+    const straightMean = meanOf(straightBarSync!);
+    expect(syncDrop - syncIntro).toBeGreaterThan(0.15);
+    expect(Math.abs(syncIntro - straightMean)).toBeLessThan(0.1);
   });
 });

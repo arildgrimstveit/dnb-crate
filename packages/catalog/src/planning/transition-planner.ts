@@ -274,6 +274,7 @@ function propose(
             phraseShape: window.phraseShape,
             sequentialHandoff: "supported",
             landingFadeBars: window.continuity?.landingFadeBars,
+            landingIncomingFadeBars: window.continuity?.landingIncomingFadeBars,
           }
         : undefined,
     ),

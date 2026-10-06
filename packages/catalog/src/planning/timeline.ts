@@ -7,6 +7,7 @@ import {
   LEVEL_MATCH_GAIN_MAX_DB,
   LEVEL_MATCH_GAIN_MIN_DB,
   MAX_TEMPO_DEVIATION,
+  PLANNER_GROOVE_LOCAL_WINDOW_BARS,
   PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP,
   SHORT_CROSSFADE_MS,
   MIN_ANALYSIS_CONFIDENCE,
@@ -40,7 +41,7 @@ import {
 } from "@dnb-crate/domain";
 
 import { constrainMixOut, pickMixIn, pickMixOut, sectionEnergyAt } from "./cues.ts";
-import { grooveCompatibility } from "./shared.ts";
+import { grooveCompatibility, structuralGrooveConflict } from "./shared.ts";
 import {
   applySequentialDefaults,
   recallApprovedHandoff,
@@ -106,6 +107,7 @@ export type TimelineAnalysis = {
       sub?: number[];
       midFlux?: number[];
       onsetDensity?: number[];
+      syncopation?: Array<number | null>;
       beatKick?: number[];
       beatSnare?: number[];
       beatOnset?: number[];
@@ -325,24 +327,6 @@ export function chooseTransition(
     }
     return recalled.chosen;
   }
-  // Structurally incompatible grooves: the two backbone drum patterns
-  // (kick+snare) place their energy at different positions relative to
-  // the beat grid (a syncopated two-step against a straight one). Any
-  // grid-aligned template superimposes the two patterns and gallops —
-  // phrase_mix aligns the grids and the off-grid hits collide, and
-  // bass_swap still crossfades the mids/highs. An equal-power crossfade
-  // is the only template that doesn't fight; the planner's syncopation
-  // penalty in grooveCompatibility steers away from the pairing entirely
-  // when alternatives exist.
-  const outgoingSyncopation = outgoing.analysis?.descriptors?.grooveSyncopation ?? null;
-  const incomingSyncopation = incoming.analysis?.descriptors?.grooveSyncopation ?? null;
-  const syncopationGap =
-    outgoingSyncopation != null && incomingSyncopation != null
-      ? Math.abs(outgoingSyncopation - incomingSyncopation)
-      : null;
-  if (syncopationGap != null && syncopationGap > PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP) {
-    return crossfade("groove-syncopation-conflict");
-  }
   const forcedBars = recalled?.barCount;
   const window =
     options.window ??
@@ -383,6 +367,32 @@ export function chooseTransition(
   // separate — the outgoing plays until the handover bar, then the incoming
   // takes over. This is Phase 3-lite: the existing groove signal triggers a
   // different template instead of just penalizing the pair.
+  const outgoingSyncopation = outgoing.analysis?.descriptors?.grooveSyncopation ?? null;
+  const incomingSyncopation = incoming.analysis?.descriptors?.grooveSyncopation ?? null;
+  // Structurally incompatible grooves, measured where they'd actually meet:
+  // the outgoing's last bars before mix-out against the incoming's first
+  // bars after mix-in. Whole-track averages demonstrably cannot separate
+  // praised joins from bad ones, and a drum-sparse side cannot gallop
+  // against anything — the gate fires only on local, measurable conflict.
+  const outgoingBarMs = (4 * 60_000) / (outgoing.analysis?.bpm ?? target ?? 174);
+  const structuralConflict = structuralGrooveConflict(
+    {
+      syncopation: outgoing.analysis?.descriptors?.bars?.syncopation,
+      bpm: outgoing.analysis?.bpm,
+      downbeat0Ms: outgoing.analysis?.downbeatTimesMs?.[0] ?? null,
+      windowStartMs: resolvedWindow.mixOutMs - PLANNER_GROOVE_LOCAL_WINDOW_BARS * outgoingBarMs,
+    },
+    {
+      syncopation: incoming.analysis?.descriptors?.bars?.syncopation,
+      bpm: incoming.analysis?.bpm,
+      downbeat0Ms: incoming.analysis?.downbeatTimesMs?.[0] ?? null,
+      windowStartMs: resolvedWindow.mixInMs,
+    },
+    PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP,
+  );
+  if (structuralConflict) {
+    return crossfade("groove-syncopation-conflict");
+  }
   const groove = grooveCompatibility(outgoing.analysis?.bars, incoming.analysis?.bars, 64, {
     outgoingSyncopation,
     incomingSyncopation,
@@ -424,6 +434,11 @@ export function chooseTransition(
         rampMs: DEFAULT_BASS_SWAP_RAMP_MS,
         lowAttenuationDb: DEFAULT_BASS_LOW_ATTENUATION_DB,
         midDipDb: DEFAULT_MID_DIP_DB,
+        // Phase 3: groove-triggered bass_swaps glide the low end across the
+        // handover (12 bars for 32-bar / 8 for 16-bar) instead of a hard
+        // dump — the auditioned treatment for incompatible kick patterns
+        // with compatible syncopation (structural conflicts crossfade).
+        ...(grooveTriggeredSwap ? { lowFadeBars: phraseBars === 32 ? 12 : 8 } : {}),
         phraseShape,
         intent,
         sequentialHandoff: policyHandoff.sequentialHandoff,
@@ -453,6 +468,11 @@ export function chooseTransition(
               windowPolicy: DJ_HANDOFF_POLICY,
               ...(resolvedWindow.continuity.landingFadeBars
                 ? { landingFadeBars: resolvedWindow.continuity.landingFadeBars }
+                : {}),
+              ...(resolvedWindow.continuity.landingIncomingFadeBars
+                ? {
+                    landingIncomingFadeBars: resolvedWindow.continuity.landingIncomingFadeBars,
+                  }
                 : {}),
             }
           : {}),
@@ -829,6 +849,7 @@ export function analysisToTimeline(
         sub?: number[];
         midFlux?: number[];
         onsetDensity?: number[];
+        syncopation?: Array<number | null>;
         beatKick?: number[];
         beatSnare?: number[];
         beatOnset?: number[];

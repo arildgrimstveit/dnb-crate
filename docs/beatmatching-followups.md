@@ -56,21 +56,26 @@ ear-labeled conflict pair decisively (X-Ray 0.84 vs Somewhere 0.44; gap 0.40 vs 
 library IQR width of ~0.11). `backbeatConcentration` ships alongside it.
 
 Planner consumption: a syncopation-gap penalty in `grooveCompatibility` (tolerance
-0.12, slope 3) and a structural-conflict fallback in `chooseTransition` (gap > 0.25
-→ crossfade, reason `groove-syncopation-conflict`) because no grid-aligned template
-can blend structurally incompatible backbones — bass_swap still crossfades
-mids/highs and gallops (verified by audition).
+0.12, slope 3, whole-track — soft steering) and a structural-conflict fallback in
+`chooseTransition` gated on the **overlap-local** per-bar gap (K=16, threshold
+0.58, drum-sparse windows silent) → crossfade (reason
+`groove-syncopation-conflict`) because no grid-aligned template can blend
+structurally incompatible backbones — bass_swap still crossfades mids/highs and
+gallops (verified by audition). Approved recipes recall first and keep precedence.
+See §Calibration dataset for why the gate is local-only: user-praised joins at
+whole-track gaps up to 0.425 falsify any whole-track threshold.
 
 Distinct failure mode confirmed by the same metric: Sakura → I Don't Wanna Wake Up
 (0.753 vs 0.671, gap 0.08 — correctly NOT structural) gallops from misalignment,
 not pattern conflict. Structural conflict and alignment error are now separable
 before rendering.
 
-## 4. Post-render audio verification
+## 4. Post-render audio verification — RESOLVED October 2026
 
-`render:check` correlates frozen beat timestamps (`storedGridResidualMs`), never audio
-(`audioStatus: "unmeasured"` on every join). A real onset-coincidence measurement on
-rendered overlaps would catch what grids can't. See item 6 for why grids can lie.
+`render:check` now measures onset coincidence on rendered overlaps
+(`diagnoseRenderedMix`: decode overlap regions, band-split transients,
+coincidence-vs-shift) and reports per-join `audioStatus`. Sparse builds report
+unmeasured, never fail.
 
 ## 5. Recipe persistence for hand-tuned joins
 
@@ -110,6 +115,15 @@ Labeled joins from this session (all on 174 BPM material, all verified by ear):
   tolerance (its gallop is alignment, not structure). Library distribution:
   min 0.243 (Technimatic — You Call Me), median 0.558, max 0.883 (DJ Crystl —
   Mind Games); face-valid ordering (liquid rollers lowest, choppy/jungle highest).
+- October 2026 local recalibration (DSP 3.10.0, per-bar syncopation): the
+  whole-track gate at 0.25 was falsified by replaying 5457 historical joins —
+  four user-praised joins sit at whole-track gaps 0.354–0.425 (Look At Me Go →
+  Barren "Very very good / deep. More of this"; Deep Space → Look At Me Go
+  "very nice"; Sanctuary → Look At Me Go "Almost perfect"), overlapping the
+  bad X-Ray → Somewhere pair (0.400). Overlap-local windows (K=16 bars per
+  side) separate all four labeled pairs cleanly: praised pairs 0.174 / 0.176 /
+  0.447 vs bad 0.706 — threshold 0.58 in the empty band. Gate fires only on
+  local measurement; sparse or unmeasured windows leave it silent.
 - October 2026 groove-sync plan audition (23 tracks, same seed/brief as the
   kick-weighted plan): X-Ray drops out of the set entirely, all 22 joins
   phrase_mix within a 0.44–0.65 syncopation band, render:check green, and the

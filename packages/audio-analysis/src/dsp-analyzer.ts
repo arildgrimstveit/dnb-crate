@@ -704,6 +704,9 @@ type BarFeatures = {
   midFlux: number;
   highRatio: number;
   onsetDensity: number;
+  /** Backbone (kick+snare) syncopation within this bar; null when the bar
+   * has no measurable backbone energy (breakdown/pad bars). */
+  syncopation: number | null;
 };
 
 function featureVec(bar: BarFeatures): number[] {
@@ -1299,6 +1302,7 @@ export const dspAnalyzer: AudioAnalyzer = {
     const highEnergy = highEnergySeries;
     const barMs = bpm ? (4 * 60_000) / bpm : 2000;
     const onsetMeanAll = mean(onset);
+    const barSyncMeasurable = !gridRejected && beatTimesMs.length >= 8;
     const collectBars = (gridStart: number): BarFeatures[] => {
       const collected: BarFeatures[] = [];
       for (let t = gridStart; t < durationMs; t += barMs) {
@@ -1318,7 +1322,25 @@ export const dspAnalyzer: AudioAnalyzer = {
           onsetSlice.length === 0
             ? 0
             : onsetSlice.filter((value) => value > onsetMeanAll).length / onsetSlice.length;
-        collected.push({ startMs: t, rms: e, sub, midFlux, highRatio, onsetDensity });
+        const syncopation = barSyncMeasurable
+          ? syncopationInRange(
+              kickOnset,
+              snareOnset,
+              hopMs,
+              beatTimesMs,
+              lo,
+              clamp(frameEnd, lo + 1, kickOnset.length),
+            )
+          : null;
+        collected.push({
+          startMs: t,
+          rms: e,
+          sub,
+          midFlux,
+          highRatio,
+          onsetDensity,
+          syncopation,
+        });
       }
       return collected;
     };
@@ -1453,6 +1475,13 @@ export const dspAnalyzer: AudioAnalyzer = {
           sub: bars.map((bar) => Number(bar.sub.toFixed(2))),
           midFlux: bars.map((bar) => Number(bar.midFlux.toFixed(2))),
           onsetDensity: bars.map((bar) => Number(bar.onsetDensity.toFixed(2))),
+          ...(barSyncMeasurable
+            ? {
+                syncopation: bars.map((bar) =>
+                  bar.syncopation == null ? null : Number(bar.syncopation.toFixed(3)),
+                ),
+              }
+            : {}),
           ...(beatTimesMs.length >= 8
             ? {
                 beatKick: beatTimesMs.map((time) =>
@@ -1491,16 +1520,42 @@ function computeGrooveSyncopation(
   beatTimesMs: number[],
 ): number {
   if (beatTimesMs.length < 4 || kickOnset.length === 0) return 0.5;
+  const frames = Math.min(kickOnset.length, snareOnset.length);
+  return syncopationInRange(kickOnset, snareOnset, hopMs, beatTimesMs, 0, frames) ?? 0.5;
+}
+
+/**
+ * Range-local syncopation over STFT frames [lo, hi). Returns null when the
+ * range holds no measurable backbone energy (fewer than MIN_BACKBONE_FRAMES
+ * frames above the energy floor — breakdowns, pads, silence): a drum-sparse
+ * region cannot gallop against anything, so callers treat null as "no
+ * groove to conflict with" rather than a neutral value.
+ */
+const BACKBONE_FRAME_FLOOR = 0.02;
+const MIN_BACKBONE_FRAMES = 4;
+
+function syncopationInRange(
+  kickOnset: number[],
+  snareOnset: number[],
+  hopMs: number,
+  beatTimesMs: number[],
+  lo: number,
+  hi: number,
+): number | null {
+  if (beatTimesMs.length < 4) return null;
   const beatPeriodMs =
     beatTimesMs[1] != null && beatTimesMs[0] != null ? beatTimesMs[1] - beatTimesMs[0] : 344;
   const onBeatZone = beatPeriodMs * 0.15; // within ±15% of a beat = on-beat
   let onBeat = 0;
   let offBeat = 0;
+  let activeFrames = 0;
   let beatIdx = 0;
-  const frames = Math.min(kickOnset.length, snareOnset.length);
-  for (let i = 0; i < frames; i += 1) {
+  const first = Math.max(0, lo);
+  const last = Math.min(hi, Math.min(kickOnset.length, snareOnset.length));
+  for (let i = first; i < last; i += 1) {
     const energy = (kickOnset[i] ?? 0) + (snareOnset[i] ?? 0);
     if (energy < 0.01) continue; // skip silence
+    if (energy >= BACKBONE_FRAME_FLOOR) activeFrames += 1;
     const timeMs = i * hopMs;
     while (beatIdx < beatTimesMs.length - 1) {
       const nextBeat = beatTimesMs[beatIdx + 1];
@@ -1518,7 +1573,8 @@ function computeGrooveSyncopation(
     if (dist <= onBeatZone) onBeat += energy;
     else offBeat += energy;
   }
-  return onBeat + offBeat > 0 ? offBeat / (onBeat + offBeat) : 0.5;
+  if (activeFrames < MIN_BACKBONE_FRAMES) return null;
+  return onBeat + offBeat > 0 ? offBeat / (onBeat + offBeat) : null;
 }
 
 /**
