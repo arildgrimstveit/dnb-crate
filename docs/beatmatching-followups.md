@@ -44,15 +44,27 @@ the fade until drums enter is strictly better behaved. Needs one audition on a f
 pair before encoding (the one held-fade preview that shipped galloped for content
 reasons, not envelope reasons — see item 1).
 
-## 3. Feel-conformance analysis (prerequisite for item 1)
+## 3. Feel-conformance analysis (prerequisite for item 1) — RESOLVED October 2026
 
-To trigger item 1 safely the planner needs a per-section groove-conformance signal:
-hat-band transient phase dispersion vs. own grid, plus backbeat concentration, measured
-at analysis time and stored on the analysis row. Today's `beatKick`/`beatSnare` profiles
-are sampled _at_ beats, so off-grid content is invisible to them by construction —
-this is the same blind spot behind the ±2-beat label-swap ambiguity below.
+To trigger item 1 safely the planner needs a per-section groove-conformance signal.
+Shipped as `descriptors.grooveSyncopation` (DSP 3.9.1): the fraction of **kick+snare
+backbone** onset energy between beats vs at beats. The originally proposed hat-band
+dispersion was measured and rejected first: hats sit off-beat in nearly every DnB
+track, so broadband/hat metrics compress the whole library into one high band
+(X-Ray 0.63 vs Somewhere 0.76 — no separation). The backbone metric separates the
+ear-labeled conflict pair decisively (X-Ray 0.84 vs Somewhere 0.44; gap 0.40 vs a
+library IQR width of ~0.11). `backbeatConcentration` ships alongside it.
 
-Requires an analyzer version bump and a one-time library re-analysis.
+Planner consumption: a syncopation-gap penalty in `grooveCompatibility` (tolerance
+0.12, slope 3) and a structural-conflict fallback in `chooseTransition` (gap > 0.25
+→ crossfade, reason `groove-syncopation-conflict`) because no grid-aligned template
+can blend structurally incompatible backbones — bass_swap still crossfades
+mids/highs and gallops (verified by audition).
+
+Distinct failure mode confirmed by the same metric: Sakura → I Don't Wanna Wake Up
+(0.753 vs 0.671, gap 0.08 — correctly NOT structural) gallops from misalignment,
+not pattern conflict. Structural conflict and alignment error are now separable
+before rendering.
 
 ## 4. Post-render audio verification
 
@@ -91,3 +103,15 @@ Labeled joins from this session (all on 174 BPM material, all verified by ear):
 - Remaining liquid rise re-render (21 tracks, 20 joins): all phrase_mix, residuals 0.
 - High energy twenty-two (6 tracks, 5 joins): green; Scorpio Moon quarantined to
   `Music/unmixable` as unmixable after audition.
+- October 2026 groove-metric calibration (544-track library, DSP 3.9.1):
+  X-Ray (Metrik Remix) 0.841 / Somewhere (Grafix) 0.442 — gap 0.399, gallops under
+  every grid-aligned template including bass_swap; crossfade is the only clean
+  treatment. Sakura 0.753 / I Don't Wanna Wake Up 0.671 — gap 0.082, within
+  tolerance (its gallop is alignment, not structure). Library distribution:
+  min 0.243 (Technimatic — You Call Me), median 0.558, max 0.883 (DJ Crystl —
+  Mind Games); face-valid ordering (liquid rollers lowest, choppy/jungle highest).
+- October 2026 groove-sync plan audition (23 tracks, same seed/brief as the
+  kick-weighted plan): X-Ray drops out of the set entirely, all 22 joins
+  phrase_mix within a 0.44–0.65 syncopation band, render:check green, and the
+  user reports all joins mostly good — the first full mix with no gallop
+  complaints after four iterations (4 → 6 → 2 → 0 problem joins).
