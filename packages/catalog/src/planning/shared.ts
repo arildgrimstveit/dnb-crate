@@ -1,4 +1,9 @@
-import { normalizePersonName, type Track } from "@dnb-crate/domain";
+import {
+  normalizePersonName,
+  PLANNER_GROOVE_SYNCOPATION_PENALTY_SLOPE,
+  PLANNER_GROOVE_SYNCOPATION_TOLERANCE,
+  type Track,
+} from "@dnb-crate/domain";
 
 /** Canonical artist identity for spacing/penalties: the published canonical
  * name when present, else the normalized artist. Shared by the planner and
@@ -54,6 +59,10 @@ export function grooveCompatibility(
     | null
     | undefined,
   beatCount = 64,
+  groove?: {
+    outgoingSyncopation?: number | null;
+    incomingSyncopation?: number | null;
+  },
 ): number | null {
   const outKick = outgoingBars?.beatKick;
   const inKick = incomingBars?.beatKick;
@@ -87,7 +96,21 @@ export function grooveCompatibility(
   // (rolling syncopation) → Somewhere (sparse big-hits): kick cosine 0.038,
   // snare 0.49 — the combined 50/50 score (0.53) didn't trigger the penalty,
   // but the user heard clear galloping.
-  return 0.8 * kick + 0.3 * snare + 0.45 * onset - 0.7 * (kickVsSnare + snareVsKick);
+  let score = 0.8 * kick + 0.3 * snare + 0.45 * onset - 0.7 * (kickVsSnare + snareVsKick);
+  // Syncopation mismatch: the strongest gallop predictor. A straight two-step
+  // blended with a syncopated two-step gallops under ANY alignment because
+  // the off-grid hits fill the gaps the other track leaves empty. Penalize
+  // proportionally to the syncopation gap (0 = both straight or both
+  // syncopated, 0.3+ = one straight + one heavily syncopated).
+  if (groove?.outgoingSyncopation != null && groove?.incomingSyncopation != null) {
+    const syncGap = Math.abs(groove.outgoingSyncopation - groove.incomingSyncopation);
+    if (syncGap > PLANNER_GROOVE_SYNCOPATION_TOLERANCE) {
+      // Linear penalty above the tolerance zone
+      score -=
+        (syncGap - PLANNER_GROOVE_SYNCOPATION_TOLERANCE) * PLANNER_GROOVE_SYNCOPATION_PENALTY_SLOPE;
+    }
+  }
+  return score;
 }
 
 /**

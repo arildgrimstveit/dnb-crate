@@ -301,7 +301,12 @@ export function draftSetPlan(
     // "galloping" perception when two incompatible grooves are blended by
     // phrase_mix — a signal no aggregate descriptor can see (beatmatching
     // followups item 1: verified on Freefall→Go vs Just a Thought→Freefall).
-    const groove = source ? grooveCompatibility(srcA?.bars, candA?.bars) : null;
+    const groove = source
+      ? grooveCompatibility(srcA?.bars, candA?.bars, 64, {
+          outgoingSyncopation: srcA?.descriptors?.grooveSyncopation ?? null,
+          incomingSyncopation: candA?.descriptors?.grooveSyncopation ?? null,
+        })
+      : null;
     if (groove != null) {
       // Clamp to [−1, 1.45]; the onset-lock's raw range. Rescale so that
       // groove ≈ 0 (neutral) contributes 0, strong alignment contributes

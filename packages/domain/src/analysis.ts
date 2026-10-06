@@ -91,6 +91,14 @@ export type SonicDescriptors = {
   audioEndMs?: number | null;
   bars?: BarEnergySeries | null;
   keyCandidates?: string[] | null;
+  /** Fraction of onset energy BETWEEN beats vs AT beats (0 = straight
+   * two-step, ~0.5 = heavily syncopated). Two tracks with very different
+   * syncopation scores will gallop when blended by phrase_mix — the
+   * syncopated track's off-grid hits fill the straight track's gaps. */
+  grooveSyncopation?: number | null;
+  /** Fraction of snare-band onset energy on the backbeat (beats 2 and 4
+   * of each bar). High = clean backbeat, low = scattered. */
+  backbeatConcentration?: number | null;
 };
 
 export type TrackAnalysis = {

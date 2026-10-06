@@ -14,6 +14,11 @@ export type SyntheticDnbOptions = {
   includeSub?: boolean;
   downbeatOffsetBeats?: number;
   barAccentEvery?: number;
+  /** Fractional beat positions within each bar that get an extra
+   * (syncopated) kick in drop sections — e.g. [1.75, 3.75] adds the
+   * classic DnB "boom bap BOOMBAP" second kick on the "a" of beats 2
+   * and 4. Used to test groove-syncopation measurement. */
+  extraKickOffbeats?: number[];
 };
 
 function addKick(samples: Float32Array, sampleRateHz: number, start: number, gain: number): void {
@@ -127,6 +132,15 @@ export function buildSyntheticDnbPcm(options: SyntheticDnbOptions = {}): PcmAudi
     const accent = barIndex % accentEvery === 0 ? 1 : 0.55;
     if (pos === 0) {
       addKick(samples, sampleRateHz, start, kickGain * accent);
+    }
+    if (options.extraKickOffbeats && inDrop && pos === 0) {
+      for (const offbeat of options.extraKickOffbeats) {
+        const atMs = (beat - pos + offbeat) * beatMs;
+        const at = Math.round((atMs / 1000) * sampleRateHz);
+        if (at < samples.length) {
+          addKick(samples, sampleRateHz, at, kickGain * accent * 0.85);
+        }
+      }
     }
     if (pos === 1 || pos === 3) {
       addSnare(samples, sampleRateHz, start, snareGain);

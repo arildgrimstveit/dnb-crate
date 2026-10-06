@@ -8,7 +8,7 @@ export const DJ_HANDOFF_POLICY = "dj-continuity-v1" as const;
 export const DEFAULT_RENDER_OUTPUT_FORMAT = "flac" as const;
 export const DEFAULT_RENDER_OUTPUT_EXTENSION = ".flac";
 export const DSP_ANALYZER_NAME = "dnb-crate-dsp";
-export const DSP_ANALYZER_VERSION = "3.8.0";
+export const DSP_ANALYZER_VERSION = "3.9.1";
 export const ANALYSIS_ENGINE_IDS = ["dnb-crate-dsp"] as const;
 export const DEFAULT_ANALYSIS_ENGINE = "dnb-crate-dsp" as const;
 export const ANALYSIS_SAMPLE_RATE_HZ = 22_050;
@@ -99,6 +99,21 @@ export const VARIETY_REPEATED_PAIR_COST = 4;
  * Conservative weight until Phase 2 (hat-band dispersion) adds the missing
  * spectral signal. */
 export const PLANNER_JOIN_GROOVE_WEIGHT = 3;
+/** Syncopation-gap tolerance for groove scoring: gaps below this are
+ * normal variation between compatible DnB grooves and score no penalty.
+ * Calibrated on X-Ray (Metrik Remix) vs Somewhere (Grafix): 0.84 vs 0.44
+ * measured syncopation — the pair gallops under every grid-aligned blend
+ * because the syncopated backbone fills the straight pattern's gaps. */
+export const PLANNER_GROOVE_SYNCOPATION_TOLERANCE = 0.12;
+/** Linear penalty slope applied to the syncopation gap above the
+ * tolerance, subtracted from the groove-compatibility score. */
+export const PLANNER_GROOVE_SYNCOPATION_PENALTY_SLOPE = 3;
+/** Above this syncopation gap the grooves are structurally incompatible:
+ * ANY grid-aligned template superimposes two conflicting backbone
+ * patterns (phrase_mix aligns grids and the off-grid hits collide;
+ * bass_swap still crossfades mids/highs). chooseTransition falls back
+ * to an equal-power crossfade for such pairs. */
+export const PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP = 0.25;
 /** Sparse-overlap penalty weight: how strongly the planner avoids joins where
  * both tracks' overlap regions lack rhythmic content (the blend feels like
  * it dips, gets quiet, or loses momentum). Calibrated on the Phase 4 test

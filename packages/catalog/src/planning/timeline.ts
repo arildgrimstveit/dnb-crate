@@ -7,6 +7,7 @@ import {
   LEVEL_MATCH_GAIN_MAX_DB,
   LEVEL_MATCH_GAIN_MIN_DB,
   MAX_TEMPO_DEVIATION,
+  PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP,
   SHORT_CROSSFADE_MS,
   MIN_ANALYSIS_CONFIDENCE,
   MIN_PLAYABLE_DURATION_MS,
@@ -98,6 +99,8 @@ export type TimelineAnalysis = {
     subBassRatio: number | null;
     brightness: number | null;
     suggestedEnergy: number | null;
+    grooveSyncopation?: number | null;
+    backbeatConcentration?: number | null;
     bars?: {
       rms: number[];
       sub?: number[];
@@ -322,6 +325,24 @@ export function chooseTransition(
     }
     return recalled.chosen;
   }
+  // Structurally incompatible grooves: the two backbone drum patterns
+  // (kick+snare) place their energy at different positions relative to
+  // the beat grid (a syncopated two-step against a straight one). Any
+  // grid-aligned template superimposes the two patterns and gallops —
+  // phrase_mix aligns the grids and the off-grid hits collide, and
+  // bass_swap still crossfades the mids/highs. An equal-power crossfade
+  // is the only template that doesn't fight; the planner's syncopation
+  // penalty in grooveCompatibility steers away from the pairing entirely
+  // when alternatives exist.
+  const outgoingSyncopation = outgoing.analysis?.descriptors?.grooveSyncopation ?? null;
+  const incomingSyncopation = incoming.analysis?.descriptors?.grooveSyncopation ?? null;
+  const syncopationGap =
+    outgoingSyncopation != null && incomingSyncopation != null
+      ? Math.abs(outgoingSyncopation - incomingSyncopation)
+      : null;
+  if (syncopationGap != null && syncopationGap > PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP) {
+    return crossfade("groove-syncopation-conflict");
+  }
   const forcedBars = recalled?.barCount;
   const window =
     options.window ??
@@ -362,7 +383,10 @@ export function chooseTransition(
   // separate — the outgoing plays until the handover bar, then the incoming
   // takes over. This is Phase 3-lite: the existing groove signal triggers a
   // different template instead of just penalizing the pair.
-  const groove = grooveCompatibility(outgoing.analysis?.bars, incoming.analysis?.bars);
+  const groove = grooveCompatibility(outgoing.analysis?.bars, incoming.analysis?.bars, 64, {
+    outgoingSyncopation,
+    incomingSyncopation,
+  });
   const grooveTriggeredSwap = groove != null && groove < 0.0;
   const aligned = grooveTriggeredSwap
     ? { type: "bass_swap" as const, reason: "groove-kick-conflict" }
@@ -796,6 +820,8 @@ export function analysisToTimeline(
       melodicness?: number | null;
       subBassRatio?: number | null;
       brightness?: number | null;
+      grooveSyncopation?: number | null;
+      backbeatConcentration?: number | null;
       audioStartMs?: number | null;
       audioEndMs?: number | null;
       bars?: {
@@ -894,6 +920,8 @@ export function analysisToTimeline(
           subBassRatio: analysis.descriptors.subBassRatio ?? null,
           brightness: analysis.descriptors.brightness ?? null,
           suggestedEnergy: analysis.descriptors.suggestedEnergy ?? null,
+          grooveSyncopation: analysis.descriptors.grooveSyncopation ?? null,
+          backbeatConcentration: analysis.descriptors.backbeatConcentration ?? null,
           bars: analysis.descriptors.bars ?? null,
         }
       : null,

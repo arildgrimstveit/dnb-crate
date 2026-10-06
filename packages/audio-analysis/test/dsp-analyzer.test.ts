@@ -483,4 +483,29 @@ describe("dnb-crate-dsp", () => {
     });
     expect(result.descriptors?.audioEndMs ?? 0).toBeGreaterThan(pcm.durationMs - 200);
   });
+
+  it("measures groove syncopation: straight two-step low, syncopated high", () => {
+    // Straight: kick on 1, snare on 2/4 — backbone energy sits on the grid.
+    const straight = dspAnalyzer.analyze(buildSyntheticDnbPcm({ bpm: 174 }));
+    // Syncopated: extra kicks on the "a" of beats 2 and 4 (1.75 / 3.75
+    // fractional beat positions) — the classic "boom bap boombap" DnB
+    // backbone that gallops when blended with a straight groove.
+    const syncopated = dspAnalyzer.analyze(
+      buildSyntheticDnbPcm({ bpm: 174, extraKickOffbeats: [1.75, 3.75] }),
+    );
+    const straightSync = straight.descriptors?.grooveSyncopation ?? null;
+    const syncopatedSync = syncopated.descriptors?.grooveSyncopation ?? null;
+    expect(straightSync).not.toBeNull();
+    expect(syncopatedSync).not.toBeNull();
+    // The straight baseline is not ~0: the snare-band onset flux also
+    // responds to off-beat 8th hats (measured baseline ≈ 0.37). Real-track
+    // calibration matches: Somewhere (straight two-step) measures 0.44.
+    expect(straightSync!).toBeLessThan(0.45);
+    // The pair must clear the structural-conflict threshold (0.25): this
+    // separation is what routes incompatible pairs to crossfade.
+    expect(syncopatedSync! - straightSync!).toBeGreaterThan(0.25);
+    // Backbeat concentration: snares sit on beats 2/4 in both fixtures.
+    expect(straight.descriptors?.backbeatConcentration ?? 0).toBeGreaterThan(0.6);
+    expect(syncopated.descriptors?.backbeatConcentration ?? 0).toBeGreaterThan(0.6);
+  });
 });

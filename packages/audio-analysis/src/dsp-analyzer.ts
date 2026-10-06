@@ -1433,6 +1433,21 @@ export const dspAnalyzer: AudioAnalyzer = {
         tempoEvidence,
         audioStartMs: bounds.audioStartMs,
         audioEndMs: bounds.audioEndMs,
+        grooveSyncopation:
+          beatTimesMs.length >= 8
+            ? Number(computeGrooveSyncopation(kickOnset, snareOnset, hopMs, beatTimesMs).toFixed(4))
+            : null,
+        backbeatConcentration:
+          beatTimesMs.length >= 8 && downbeatTimesMs.length >= 2
+            ? Number(
+                computeBackbeatConcentration(
+                  snareOnset,
+                  hopMs,
+                  beatTimesMs,
+                  downbeatTimesMs,
+                ).toFixed(4),
+              )
+            : null,
         bars: {
           rms: bars.map((bar) => Number(bar.rms.toFixed(2))),
           sub: bars.map((bar) => Number(bar.sub.toFixed(2))),
@@ -1457,6 +1472,112 @@ export const dspAnalyzer: AudioAnalyzer = {
     };
   },
 };
+
+/**
+ * Groove syncopation: fraction of kick+snare onset energy BETWEEN beats vs
+ * AT beats. Measured on the backbone drum pattern, NOT the broadband onset
+ * envelope — hats/shakers sit off-beat in nearly every DnB track and would
+ * compress all tracks into the same high range. A straight DnB two-step
+ * (kick on 1, snare on the backbeat) has its backbone energy at beat
+ * positions → low syncopation. A syncopated pattern (extra kicks on the
+ * "e"/"a" of beats, ghost snares) has significant backbone energy between
+ * beats → high syncopation. Blending a straight groove with a syncopated
+ * one causes galloping: the off-grid hits fill the gaps.
+ */
+function computeGrooveSyncopation(
+  kickOnset: number[],
+  snareOnset: number[],
+  hopMs: number,
+  beatTimesMs: number[],
+): number {
+  if (beatTimesMs.length < 4 || kickOnset.length === 0) return 0.5;
+  const beatPeriodMs =
+    beatTimesMs[1] != null && beatTimesMs[0] != null ? beatTimesMs[1] - beatTimesMs[0] : 344;
+  const onBeatZone = beatPeriodMs * 0.15; // within ±15% of a beat = on-beat
+  let onBeat = 0;
+  let offBeat = 0;
+  let beatIdx = 0;
+  const frames = Math.min(kickOnset.length, snareOnset.length);
+  for (let i = 0; i < frames; i += 1) {
+    const energy = (kickOnset[i] ?? 0) + (snareOnset[i] ?? 0);
+    if (energy < 0.01) continue; // skip silence
+    const timeMs = i * hopMs;
+    while (beatIdx < beatTimesMs.length - 1) {
+      const nextBeat = beatTimesMs[beatIdx + 1];
+      const curBeat = beatTimesMs[beatIdx];
+      if (
+        nextBeat == null ||
+        curBeat == null ||
+        Math.abs(nextBeat - timeMs) >= Math.abs(curBeat - timeMs)
+      ) {
+        break;
+      }
+      beatIdx += 1;
+    }
+    const dist = Math.abs(timeMs - (beatTimesMs[beatIdx] ?? timeMs));
+    if (dist <= onBeatZone) onBeat += energy;
+    else offBeat += energy;
+  }
+  return onBeat + offBeat > 0 ? offBeat / (onBeat + offBeat) : 0.5;
+}
+
+/**
+ * Backbeat concentration: fraction of snare-band onset energy on beats 2
+ * and 4 (the backbeat) vs all snare energy. High = clean backbeat,
+ * low = scattered or syncopated snare placement.
+ */
+function computeBackbeatConcentration(
+  snareOnset: number[],
+  hopMs: number,
+  beatTimesMs: number[],
+  downbeatTimesMs: number[],
+): number {
+  if (beatTimesMs.length < 8 || downbeatTimesMs.length < 2 || snareOnset.length === 0) {
+    return 0.5;
+  }
+  // Map each beat to its position in the bar (0-3), anchored by downbeats
+  const beatPeriodMs =
+    beatTimesMs[1] != null && beatTimesMs[0] != null ? beatTimesMs[1] - beatTimesMs[0] : 344;
+  const beatZone = beatPeriodMs * 0.2; // generous zone around the beat
+  const downbeatTolerance = Math.max(1, hopMs / 2); // downbeats sit on beats
+  let backbeat = 0;
+  let total = 0;
+  let beatIdx = 0;
+  // Determine which beats are backbeats (bar positions 1 and 3) by finding
+  // the beat index of the first downbeat
+  let firstDownbeatBeat = 0;
+  for (let i = 0; i < beatTimesMs.length; i++) {
+    if (downbeatTimesMs.some((d) => Math.abs(d - (beatTimesMs[i] ?? 0)) <= downbeatTolerance)) {
+      firstDownbeatBeat = i;
+      break;
+    }
+  }
+  for (let i = 0; i < snareOnset.length; i += 1) {
+    const energy = snareOnset[i] ?? 0;
+    if (energy < 0.01) continue;
+    const timeMs = i * hopMs;
+    while (beatIdx < beatTimesMs.length - 1) {
+      const nextBeat = beatTimesMs[beatIdx + 1];
+      const curBeat = beatTimesMs[beatIdx];
+      if (
+        nextBeat == null ||
+        curBeat == null ||
+        Math.abs(nextBeat - timeMs) >= Math.abs(curBeat - timeMs)
+      ) {
+        break;
+      }
+      beatIdx += 1;
+    }
+    const dist = Math.abs(timeMs - (beatTimesMs[beatIdx] ?? timeMs));
+    if (dist > beatZone) continue; // not near any beat
+    total += energy;
+    const barPosition = (((beatIdx - firstDownbeatBeat) % 4) + 4) % 4;
+    if (barPosition === 1 || barPosition === 3) {
+      backbeat += energy; // beats 2 and 4 (0-indexed: 1 and 3)
+    }
+  }
+  return total > 0 ? backbeat / total : 0.5;
+}
 
 function bandEnergyTime(
   samples: Float32Array,

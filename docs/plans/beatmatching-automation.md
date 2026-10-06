@@ -35,24 +35,42 @@ head has drums. **Out of scope:** changing fade shapes, touching the lock.
 
 ## Phase 2 — feel-conformance analysis (L, prerequisite for Phase 3)
 
-**Goal:** give the planner the one signal aggregates can't provide: does this
-window's percussion sit on a grid?
+**Status: core metric shipped October 2026 (DSP 3.9.x).** The X-Ray (Metrik
+Remix) → Somewhere (Grafix) investigation replaced the planned hat-band
+dispersion with a stronger discriminator: **backbone (kick+snare)
+syncopation** — the fraction of kick+snare onset energy between beats vs at
+beats, stored as `descriptors.grooveSyncopation` (plus
+`descriptors.backbeatConcentration` for snare placement). Broadband/hat-band
+energy was measured first and rejected: hats sit off-beat in nearly every DnB
+track, so it compressed all tracks into the same high range (X-Ray 0.63 vs
+Somewhere 0.76 — no separation). The backbone metric separates the
+ear-diagnosed pair decisively: X-Ray 0.84 (syncopated two-step, "boom bap
+**boombap**") vs Somewhere 0.44 (straight two-step, "boom bap boom bap").
 
-**Steps:**
+Shipped with it, calibrated on that pair:
 
-1. Extend the DSP analyzer (`packages/audio-analysis/src/dsp-analyzer.ts`) with
-   per-section groove metrics: hat-band transient phase dispersion vs. own grid,
-   snare-backbeat concentration. Store on the analysis row (descriptors extension).
-2. Bump `DSP_ANALYZER_VERSION`; run `analysis:run --scope stale` over the library
-   (one-time cost, ~545 tracks here).
-3. Calibrate thresholds against the labeled joins in `beatmatching-followups.md`
-   §Calibration dataset: must separate Somewhere-build (conflict) from
-   Rosewood-head (clean) and Livid-build (clean) with margin on both sides.
-4. Tests: synthetic fixtures (straight vs. swung vs. sparse-syncopated builds).
+- `grooveCompatibility` syncopation-gap penalty (tolerance 0.12, slope 3,
+  `PLANNER_GROOVE_*` constants) — steers the planner away from
+  structurally incompatible pairs.
+- `chooseTransition` structural-conflict fallback: gap > 0.25 → `crossfade`
+  ("groove-syncopation-conflict"), because **no grid-aligned template works**
+  for such pairs — phrase_mix aligns grids and the off-grid hits collide;
+  bass_swap still crossfades mids/highs and gallops (verified by audition,
+  October 2026). Approved recipes recall first and keep precedence.
 
-**Risk:** high if miscalibrated (flips good joins). Mitigations: thresholds need
-clearance on all three calibration cases; new metric is advisory-only until Phase 3
-auditions pass. **Do not build Phase 3 on uncalibrated metrics.**
+**Remaining for this phase:**
+
+1. Calibration against the labeled joins in `beatmatching-followups.md`
+   §Calibration dataset beyond the X-Ray/Somewhere pair — especially
+   confirming the 0.25 structural threshold doesn't crossfade joins that
+   used to pass.
+2. Tests: synthetic fixtures (straight vs swung vs sparse-syncopated builds).
+
+**Risk:** high if miscalibrated (flips good joins). Mitigations: thresholds
+need clearance on all calibration cases; the planner penalty is advisory
+scoring, but the structural fallback changes template choice — audition every
+pair it fires on before trusting it. **Do not build Phase 3 on uncalibrated
+metrics.**
 
 ## Phase 3 — automatic bass_swap-plus-glide (M, needs Phase 2 + audition)
 
