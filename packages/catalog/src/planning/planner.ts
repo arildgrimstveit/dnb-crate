@@ -12,6 +12,7 @@ import {
   PLANNER_SPARSE_OVERLAP_WEIGHT,
   VARIETY_REPEATED_PAIR_COST,
   VARIETY_REPEATED_TRACK_COST,
+  VARIETY_RECENT_ARTIST_COST,
   interpolateEnergy,
   pairKey,
   harmonicRelation,
@@ -29,7 +30,12 @@ import {
 
 import { planDurationMs, type TimelineAnalysis } from "./timeline.ts";
 import { compilePlanningConstraints } from "./constraints.ts";
-import { artistKey, grooveCompatibility, sparseOverlapPenalty } from "./shared.ts";
+import {
+  artistKey,
+  grooveCompatibility,
+  primaryArtistKey,
+  sparseOverlapPenalty,
+} from "./shared.ts";
 import {
   hasShortPlayable,
   makeEntryRebuilder,
@@ -60,6 +66,10 @@ export function draftSetPlan(
     varietyHistory?: {
       trackIds: string[];
       pairs: Array<{ outgoingTrackId: string; incomingTrackId: string }>;
+      /** Primary-artist key -> number of recent plans containing that
+       * artist. Penalizes artists heard in recent mixes so prolific
+       * catalogs don't just rotate tracks. */
+      recentArtistUses?: Record<string, number>;
     };
     /** Internal single retry with complete-chain candidates; keeps the user's brief and seed. */
     chainSearch?: boolean;
@@ -93,6 +103,7 @@ export function draftSetPlan(
       pairKey(recordingOf(pair.outgoingTrackId), recordingOf(pair.incomingTrackId)),
     ),
   );
+  const recentArtistUses = options.varietyHistory?.recentArtistUses ?? {};
   const planningPool = buildPlanningPool(catalog, input, {
     analyses,
     percentiles: options.percentiles,
@@ -288,14 +299,17 @@ export function draftSetPlan(
       historyPairs.has(
         pairKey(source.recordingKey ?? source.id, candidate.recordingKey ?? candidate.id),
       );
+    const recentArtistUse = recentArtistUses[primaryArtistKey(candidate) ?? ""] ?? 0;
     const cost =
       varietyStrength *
       ((repeatedTrack ? VARIETY_REPEATED_TRACK_COST : 0) +
-        (repeatedPair ? VARIETY_REPEATED_PAIR_COST : 0));
+        (repeatedPair ? VARIETY_REPEATED_PAIR_COST : 0) +
+        recentArtistUse * VARIETY_RECENT_ARTIST_COST);
     score.components.recentlyUsed -= cost;
     score.total -= cost;
     if (repeatedTrack) score.reasons.push("RECENT_MIX_RECORDING");
     if (repeatedPair) score.reasons.push("RECENT_MIX_PAIR");
+    if (recentArtistUse > 0) score.reasons.push(`RECENT_MIX_ARTIST(${recentArtistUse})`);
     // Groove compatibility: penalize joins whose drum patterns fight. The
     // beat profiles (kick/snare per beat) capture the "very noisy" and
     // "galloping" perception when two incompatible grooves are blended by

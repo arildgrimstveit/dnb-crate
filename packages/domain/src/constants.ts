@@ -91,6 +91,19 @@ export const PLANNER_MIN_POOL_ESTIMATE = 16;
 export const PLANNER_OPENER_ATTEMPTS = 3;
 export const VARIETY_REPEATED_TRACK_COST = 8;
 export const VARIETY_REPEATED_PAIR_COST = 4;
+/** How many of the most recent plans feed the automatic variety history
+ * when a brief doesn't name explicit reference plans. Without this, every
+ * name+seed mix plans against zero history and the highest-scoring
+ * tracks (the "honor roll") fill every set — measured October 2026:
+ * Pendulum appeared in 16/16 recent plans, 178 of 252 library artists
+ * in none. */
+export const VARIETY_RECENT_PLAN_WINDOW = 6;
+/** Per-plan penalty for an artist already heard in the recent-plan
+ * history. Track-level penalties alone just rotate through a prolific
+ * artist's catalog (Pendulum: 26 tracks); this pushes selection toward
+ * artists not recently heard while keeping them pickable when they
+ * genuinely fit best. */
+export const VARIETY_RECENT_ARTIST_COST = 2;
 /** Groove-compatibility scoring weight: how strongly the planner avoids
  * pairing tracks whose drum patterns fight. Calibrated on the 544-track
  * library: catches the "galloping" joins (Out of Time→Deep Space scores 0.486)

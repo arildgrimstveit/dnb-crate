@@ -51,6 +51,7 @@ import {
   resolveCanonicalKeyConfidence,
   resolveDescriptorFilters,
   toPublicTrack,
+  VARIETY_RECENT_PLAN_WINDOW,
 } from "@dnb-crate/domain";
 import { ffmpegMixReady } from "@dnb-crate/audio-renderer";
 import type { HourFeedbackRepository } from "./hour-feedback-repository.ts";
@@ -76,6 +77,7 @@ import {
 } from "./service/quality-evidence.ts";
 import type { RecipeRecallLookup } from "./planning/recall.ts";
 import { draftSetPlan } from "./planning/planner.ts";
+import { primaryArtistKey } from "./planning/shared.ts";
 import { PlanningConstraintError } from "./planning/constraints.ts";
 import type { TrackQualityEvidence } from "./planning/quality.ts";
 import { analysisToTimeline } from "./planning/timeline.ts";
@@ -589,19 +591,47 @@ export class CatalogService {
     candidateTrackIds?: ReadonlySet<string>,
   ): CreateSetPlanResult {
     try {
-      const referencePlans = (input.variety?.referencePlanIds ?? []).map(
-        (id) => this.requirePlan(id).plan,
-      );
-      const varietyHistory = {
-        trackIds: [
-          ...new Set(referencePlans.flatMap((plan) => plan.entries.map((entry) => entry.trackId))),
-        ],
-        pairs: referencePlans.flatMap((plan) =>
-          plan.entries.slice(1).map((entry, i) => ({
+      const explicitReferenceIds = input.variety?.referencePlanIds ?? [];
+      let referencePlanIds = explicitReferenceIds;
+      if (explicitReferenceIds.length === 0) {
+        // Freshness default: when the brief doesn't name reference plans,
+        // plan against the most recent mixes so the same honor roll doesn't
+        // fill every set (measured: Pendulum 16/16 plans, 178 of 252
+        // artists never selected). Explicit referencePlanIds still win.
+        const recent = this.setPlans.list(VARIETY_RECENT_PLAN_WINDOW * 2).plans;
+        referencePlanIds = recent
+          .filter((summary) => summary.entryCount >= 8)
+          .slice(0, VARIETY_RECENT_PLAN_WINDOW)
+          .map((summary) => summary.id);
+      }
+      const referencePlans = referencePlanIds.map((id) => this.requirePlan(id).plan);
+      const recentArtistUses: Record<string, number> = {};
+      const trackIds = new Set<string>();
+      const pairs: Array<{ outgoingTrackId: string; incomingTrackId: string }> = [];
+      for (const plan of referencePlans) {
+        const artistsThisPlan = new Set<string>();
+        for (const entry of plan.entries) {
+          trackIds.add(entry.trackId);
+        }
+        for (let i = 0; i + 1 < plan.entries.length; i += 1) {
+          pairs.push({
             outgoingTrackId: plan.entries[i]!.trackId,
-            incomingTrackId: entry.trackId,
-          })),
-        ),
+            incomingTrackId: plan.entries[i + 1]!.trackId,
+          });
+        }
+        for (const entry of plan.entries) {
+          const track = this.repository.findById(entry.trackId);
+          const key = track ? primaryArtistKey(track) : null;
+          if (key) artistsThisPlan.add(key);
+        }
+        for (const key of artistsThisPlan) {
+          recentArtistUses[key] = (recentArtistUses[key] ?? 0) + 1;
+        }
+      }
+      const varietyHistory = {
+        trackIds: [...trackIds],
+        pairs,
+        recentArtistUses,
       };
       const allTracks = this.repository.listAll();
       const descriptorPercentiles = this.getLibraryStats().descriptorPercentiles;

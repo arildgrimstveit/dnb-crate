@@ -213,6 +213,39 @@ describe("set planning", () => {
       createPlan(catalog, { ...brief, variety: { referencePlanIds: [crypto.randomUUID()] } }),
     ).toThrow();
   });
+
+  it("auto-references recent plans and rotates prolific artists out", () => {
+    const catalog = runtime();
+    // One prolific artist plus a field of single-track artists.
+    for (let i = 0; i < 6; i += 1)
+      seedTrack(catalog, {
+        title: `Prolific ${i}`,
+        artist: "Prolific",
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+      });
+    for (let i = 0; i < 14; i += 1)
+      seedTrack(catalog, {
+        title: `Solo ${i}`,
+        artist: `Soloist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+      });
+    const brief = { name: "Freshness", targetDurationMs: 1_050_000, seed: 3, explorationWeight: 0 };
+    const first = createPlan(catalog, brief);
+    expect(first.plan.entries.length).toBeGreaterThanOrEqual(8);
+    // Second plan: no explicit variety — the service auto-references the
+    // recent plan, so Prolific tracks carry both track- and artist-level
+    // penalties while unused soloists stay fresh.
+    const second = createPlan(catalog, { ...brief, name: "Freshness 2" });
+    const prolificInSecond = second.plan.entries.filter((entry) => {
+      const track = catalog.repository.findById(entry.trackId);
+      return track?.artist === "Prolific";
+    });
+    expect(prolificInSecond.length).toBe(0);
+  });
   it("builds a deterministic plan that honors start, end, and seed", () => {
     const catalog = runtime();
     const start = seedTrack(catalog, {

@@ -16,6 +16,20 @@ export function artistKey(track: Track): string | null {
   return track.artist ? normalizePersonName(track.artist) : null;
 }
 
+/** Primary-artist identity for cross-plan freshness: the lead name before
+ * the first collaborator comma ("Pendulum, Venus Demilo" → "Pendulum").
+ * Used by both the variety-history builder (service) and the planner
+ * penalty so prolific lead artists rotate out of recent sets instead of
+ * just cycling through their catalogs. */
+export function primaryArtistKey(track: Track): string | null {
+  const full = artistKey(track);
+  if (full == null) {
+    return null;
+  }
+  const first = full.split(",")[0]!.trim();
+  return first.length > 0 ? normalizePersonName(first) : null;
+}
+
 function cosineSim(left: number[], right: number[]): number {
   let dot = 0;
   let leftNorm = 0;
