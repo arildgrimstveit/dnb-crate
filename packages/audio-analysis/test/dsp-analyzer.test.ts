@@ -564,4 +564,64 @@ describe("dnb-crate-dsp", () => {
     expect(rejected.gridRejected).toBe(true);
     expect(rejected.bpm).toBeNull();
   });
+
+  it("flags a drifting grid with gridPhaseSuspect and measures the error", () => {
+    // First minute at exactly 174, second minute drifting to ~174.6: the
+    // single fitted grid matches the first half and accumulates phase
+    // error against the second — the WCHIA class.
+    const sampleRateHz = 22_050;
+    const totalMs = 120_000;
+    const frameCount = Math.round((sampleRateHz * totalMs) / 1000);
+    const samples = new Float32Array(frameCount);
+    const clickFrames = Math.max(2, Math.round((sampleRateHz * 6) / 1000));
+    let tMs = 0;
+    let beatIndex = 0;
+    while (tMs < totalMs) {
+      const drift = 1 + (Math.max(0, tMs - 60_000) / 60_000) * 0.008; // up to +0.8%
+      const beatMs = (60_000 / 174) * drift;
+      const start = Math.round((tMs / 1000) * sampleRateHz);
+      for (let i = 0; i < clickFrames && start + i < frameCount; i += 1) {
+        samples[start + i] =
+          Math.sin((2 * Math.PI * 2000 * i) / sampleRateHz) * (1 - i / clickFrames);
+      }
+      tMs += beatMs;
+      beatIndex += 1;
+    }
+    expect(beatIndex).toBeGreaterThan(300);
+    const result = dspAnalyzer.analyze({ samples, sampleRateHz, durationMs: totalMs, channels: 1 });
+    expect(result.gridRejected).toBe(false);
+    const maxErr = result.descriptors?.gridPhaseMaxErrorMs ?? 0;
+    expect(maxErr).toBeGreaterThan(60);
+    expect(result.descriptors?.gridPhaseSuspect).toBe(true);
+  });
+
+  it("records triplet content in the beat-phase histogram", () => {
+    // The Ghost shape: straight 174 backbone plus a loud triplet layer at
+    // 116 (= 174 × 2/3). The histogram must show substantial energy at the
+    // ⅓/⅔ beat positions, not only on the beat.
+    const base = buildSyntheticDnbPcm({ bpm: 174 });
+    const samples = base.samples.slice();
+    const beatMs = 60_000 / 174;
+    // Triplet layer: a pulse every 2/3 beat cycles phases 0, 2/3, 1/3 —
+    // the classic triplet chop placement (period 230 ms at 174).
+    const triPeriod = Math.round(((2 / 3) * beatMs * base.sampleRateHz) / 1000);
+    const n = Math.round(0.03 * base.sampleRateHz);
+    for (let at = 0; at < samples.length; at += triPeriod) {
+      for (let j = 0; j < n && at + j < samples.length; j += 1) {
+        const t = j / base.sampleRateHz;
+        samples[at + j] =
+          (samples[at + j] ?? 0) + Math.sin(2 * Math.PI * 220 * t) * Math.exp(-t * 30) * 0.9;
+      }
+    }
+    const result = dspAnalyzer.analyze({ ...base, samples }, { referenceBpm: 174 });
+    const hist = result.descriptors?.beatPhaseHistogram;
+    expect(Array.isArray(hist)).toBe(true);
+    expect(hist!.length).toBe(20);
+    const onBeat = hist![0] ?? 0;
+    const third = Math.max(hist![6] ?? 0, hist![7] ?? 0);
+    const twoThirds = Math.max(hist![13] ?? 0, hist![14] ?? 0);
+    // Triplet zones must carry real energy (not just the on-beat peak).
+    expect(Math.max(third, twoThirds)).toBeGreaterThan(0.3);
+    expect(onBeat).toBeGreaterThan(0.3);
+  });
 });

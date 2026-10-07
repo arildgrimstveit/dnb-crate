@@ -1347,6 +1347,8 @@ export const dspAnalyzer: AudioAnalyzer = {
     let beatTimesMs: number[] = [];
     let downbeatTimesMs: number[] = [];
     let downbeatConfidence: number | null = null;
+    let gridPhaseMaxErrorMs: number | null = null;
+    let beatPhaseHistogram: number[] | null = null;
     const dropHint = detectDropMs(subEnergy, hopMs, durationMs);
     if (bpm !== null && !gridRejected) {
       beatTimesMs = trackBeats(tempoOnset, tempoHopMs, bpm, gridOffsetMs, durationMs);
@@ -1356,6 +1358,11 @@ export const dspAnalyzer: AudioAnalyzer = {
       const down = downbeatPhase(beatTimesMs, kickOnset, snareOnset, hopMs, firstAnchors);
       downbeatTimesMs = down.downbeats;
       downbeatConfidence = Number(down.confidence.toFixed(3));
+      // Grid diagnostics: does the stored grid track the actual audio
+      // everywhere, and where does the onset energy sit within the beat?
+      const phaseDiag = gridPhaseDiagnostics(tempoOnset, tempoHopMs, beatTimesMs, bpm, durationMs);
+      gridPhaseMaxErrorMs = phaseDiag?.maxErrorMs ?? null;
+      beatPhaseHistogram = phaseDiag?.beatPhaseHistogram ?? null;
     }
 
     const dropFrame = dropHint !== null ? Math.round(dropHint / hopMs) : 0;
@@ -1531,6 +1538,11 @@ export const dspAnalyzer: AudioAnalyzer = {
           beatTimesMs.length >= 8
             ? Number(computeGrooveSyncopation(kickOnset, snareOnset, hopMs, beatTimesMs).toFixed(4))
             : null,
+        gridPhaseMaxErrorMs:
+          gridPhaseMaxErrorMs == null ? null : Number(gridPhaseMaxErrorMs.toFixed(1)),
+        gridPhaseSuspect:
+          gridPhaseMaxErrorMs == null ? null : gridPhaseMaxErrorMs > GRID_PHASE_SUSPECT_MS,
+        beatPhaseHistogram: beatPhaseHistogram?.map((v) => Number(v.toFixed(3))) ?? null,
         backbeatConcentration:
           beatTimesMs.length >= 8 && downbeatTimesMs.length >= 2
             ? Number(
@@ -1705,6 +1717,114 @@ function computeBackbeatConcentration(
     }
   }
   return total > 0 ? backbeat / total : 0.5;
+}
+
+/** Trust threshold for the stored grid's phase: above this the grid
+ * disagrees with the audio enough that grid-aligned blends risk constant
+ * sub-beat flams. Calibrated on We Can Have It All (93 ms global grid
+ * offset — audible) against clean tracks (≤10 ms per window). */
+const GRID_PHASE_SUSPECT_MS = 40;
+
+/**
+ * Grid diagnostics on the fitted grid:
+ *
+ * 1. Phase tracking — for up to six 30 s windows across the track, scan
+ *    the audio onset envelope's best phase against the stored grid. A
+ *    grid that fits the audio everywhere reads ≤10 ms; drifting or
+ *    globally offset grids read large in the offending windows. This is
+ *    the "slightly off, drums don't line up" detector (WCHIA class).
+ *
+ * 2. Beat-phase content — onset energy binned by position within the beat
+ *    (20 bins). On-beat-dominated content peaks at bin 0; triplet grooves
+ *    peak at the ⅓/⅔ positions (bins ~7/13). Off-beat-dominated material
+ *    reads as misaligned when blended under straight material regardless
+ *    of grid correctness (Snow class).
+ */
+export function gridPhaseDiagnostics(
+  onset: number[],
+  hopMs: number,
+  beatTimesMs: number[],
+  bpm: number,
+  durationMs: number,
+): { maxErrorMs: number; beatPhaseHistogram: number[] } | null {
+  if (beatTimesMs.length < 8 || onset.length === 0 || !(bpm > 0)) {
+    return null;
+  }
+  const periodMs = 60_000 / bpm;
+  // --- 1. per-window phase scan ---
+  const windowMs = 30_000;
+  const strideMs = Math.max(windowMs, (durationMs - windowMs) / 5);
+  let maxErrorMs = 0;
+  let windowsMeasured = 0;
+  for (let startMs = 0; startMs + windowMs <= durationMs; startMs += strideMs) {
+    const fromF = Math.floor(startMs / hopMs);
+    const toF = Math.floor((startMs + windowMs) / hopMs);
+    let energy = 0;
+    for (let f = fromF; f < toF && f < onset.length; f += 1) energy += onset[f] ?? 0;
+    if (energy <= 0) continue;
+    let bestOff = 0;
+    let bestScore = -Infinity;
+    for (let off = 0; off < periodMs; off += hopMs / 2) {
+      let score = 0;
+      let n = 0;
+      for (let tMs = off; tMs < windowMs; tMs += periodMs) {
+        score += interpolateOnset(onset, (startMs + tMs) / hopMs);
+        n += 1;
+      }
+      const s = n === 0 ? 0 : score / n;
+      if (s > bestScore) {
+        bestScore = s;
+        bestOff = off;
+      }
+    }
+    // Stored grid phase inside this window: the first grid beat at/after start
+    let firstBeat = beatTimesMs[0] ?? 0;
+    for (const b of beatTimesMs) {
+      if (b >= startMs) {
+        firstBeat = b;
+        break;
+      }
+      firstBeat = b;
+    }
+    const storedPhase = (((firstBeat - startMs) % periodMs) + periodMs) % periodMs;
+    let err = bestOff - storedPhase;
+    if (err > periodMs / 2) err -= periodMs;
+    if (err < -periodMs / 2) err += periodMs;
+    maxErrorMs = Math.max(maxErrorMs, Math.abs(err));
+    windowsMeasured += 1;
+  }
+  if (windowsMeasured === 0) {
+    return null;
+  }
+  // --- 2. beat-phase histogram ---
+  const bins = new Array<number>(20).fill(0);
+  const floor = mean(onset) * 2;
+  let counted = 0;
+  for (let f = 0; f < onset.length; f += 1) {
+    const value = onset[f] ?? 0;
+    if (value < floor) continue;
+    const tMs = f * hopMs;
+    // nearest grid beat at or before tMs
+    let lo = 0;
+    let hi = beatTimesMs.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if ((beatTimesMs[mid] ?? 0) <= tMs) lo = mid;
+      else hi = mid - 1;
+    }
+    const phase = ((tMs - (beatTimesMs[lo] ?? 0)) / periodMs + 1) % 1;
+    const bin = Math.min(19, Math.floor(phase * 20));
+    bins[bin] = (bins[bin] ?? 0) + value;
+    counted += 1;
+  }
+  if (counted < 8) {
+    return { maxErrorMs: Math.round(maxErrorMs), beatPhaseHistogram: [] };
+  }
+  const peak = Math.max(...bins, 1e-9);
+  return {
+    maxErrorMs: Math.round(maxErrorMs),
+    beatPhaseHistogram: bins.map((v) => v / peak),
+  };
 }
 
 function bandEnergyTime(

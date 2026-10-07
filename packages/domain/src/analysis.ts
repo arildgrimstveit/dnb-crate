@@ -103,6 +103,23 @@ export type SonicDescriptors = {
   /** Fraction of snare-band onset energy on the backbeat (beats 2 and 4
    * of each bar). High = clean backbeat, low = scattered. */
   backbeatConcentration?: number | null;
+  /** Largest grid-vs-audio phase error found across 30 s windows (ms).
+   * Small (<40) means the stored grid tracks the audio everywhere; large
+   * values mark drifting or globally offset grids (the "slightly off,
+   * drums don't line up" join class — verified on We Can Have It All,
+   * whose grid ran 93 ms early against its own audio). Null when there is
+   * no measurable grid. */
+  gridPhaseMaxErrorMs?: number | null;
+  /** True when gridPhaseMaxErrorMs exceeds the trust threshold: the stored
+   * grid phase is unreliable somewhere, so grid-aligned blends on this
+   * track risk constant sub-beat flams. */
+  gridPhaseSuspect?: boolean | null;
+  /** Onset energy by beat phase, 20 bins over one beat (bin 0 = on the
+   * beat, bin 10 = the off-beat 8th, bins ~7/13 = triplet positions).
+   * Detects off-beat-dominated content (Seba's Snow blend region peaked
+   * at the ⅓ and ⅔ positions) that reads as misaligned when blended
+   * under straight material. Peak-normalized to 1. */
+  beatPhaseHistogram?: number[] | null;
 };
 
 export type TrackAnalysis = {
