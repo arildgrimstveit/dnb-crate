@@ -141,10 +141,10 @@ Labeled joins from this session (all on 174 BPM material, all verified by ear):
     triplet-groove (beat-phase histogram peaks at ⅓/⅔ beat, local sync
     0.70) under a straight dense tail. An 8-bar landing into Snow's
     straighter bars (sync 0.30–0.60) still wasn't fully clean → quarantined.
-  Both join types are now measurable: grid phase error via per-region
-  phase scan, triplet content via beat-phase histogram — candidates for
-  analyzer diagnostics (see item 6).
-  After quarantine, the plan was surgically rebuilt (24 of 26 entries kept
-  their auditioned transitions; only the two orphaned joins recomputed) and
-  the final mix passed audition: "two new joins hold up. mix is good."
-  The beatmatching plan is fully auditioned.
+    Both join types are now measurable: grid phase error via per-region
+    phase scan, triplet content via beat-phase histogram — candidates for
+    analyzer diagnostics (see item 6).
+    After quarantine, the plan was surgically rebuilt (24 of 26 entries kept
+    their auditioned transitions; only the two orphaned joins recomputed) and
+    the final mix passed audition: "two new joins hold up. mix is good."
+    The beatmatching plan is fully auditioned.
