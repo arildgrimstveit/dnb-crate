@@ -63,13 +63,27 @@ export function downbeatAlignmentOffsetMs(input: {
     const k = Math.round((target - origin) / sourcePhraseMs);
     return origin + k * sourcePhraseMs;
   };
-  const outRef =
+  // Phrase anchors select WHICH phrase meets which; the beat phase comes
+  // from each side's actual grid. Section-derived origins can sit well off
+  // the beat grid (measured: a drop boundary 204 ms off its own beats), and
+  // aligning raw origins inherits that error as a constant sub-beat offset
+  // between the decks. Snap the phrase anchor to the nearest downbeat so
+  // phrase alignment and beat alignment hold simultaneously.
+  const outAnchor =
     phraseMode && input.outgoingPhraseOriginMs != null
       ? nearestPhrase(input.outgoingPhraseOriginMs, input.outgoingOverlapStartMs, outgoingRate)
-      : nearestTime(input.outgoingDownbeatsMs, input.outgoingOverlapStartMs);
-  const inRef =
+      : null;
+  const inAnchor =
     phraseMode && input.incomingPhraseOriginMs != null
       ? nearestPhrase(input.incomingPhraseOriginMs, input.incomingOverlapStartMs, incomingRate)
+      : null;
+  const outRef =
+    outAnchor != null
+      ? nearestTime(input.outgoingDownbeatsMs, outAnchor)
+      : nearestTime(input.outgoingDownbeatsMs, input.outgoingOverlapStartMs);
+  const inRef =
+    inAnchor != null
+      ? nearestTime(input.incomingDownbeatsMs, inAnchor)
       : nearestTime(input.incomingDownbeatsMs, input.incomingOverlapStartMs);
   const outPhase = (outRef - input.outgoingOverlapStartMs) / outgoingRate;
   const inPhase = (inRef - input.incomingOverlapStartMs) / incomingRate;

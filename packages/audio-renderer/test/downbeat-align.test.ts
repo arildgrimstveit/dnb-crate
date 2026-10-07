@@ -13,6 +13,37 @@ describe("downbeat alignment", () => {
     expect(wrapDelta(90, 100)).toBe(-10);
   });
 
+  it("phrase mode snaps off-grid section origins onto the beat grid", () => {
+    // Regression (fresh-ears mix, join 1): a drop section boundary used as
+    // the phrase origin sat 204 ms off the track's own downbeat grid.
+    // Aligning raw origins baked that error in as a constant sub-beat
+    // offset between the decks. The phrase anchor must snap to the nearest
+    // downbeat so phrase and beat alignment hold simultaneously.
+    const barMs = (4 * 60_000) / 174;
+    const outgoingDownbeats = Array.from({ length: 40 }, (_, i) => i * barMs);
+    const incomingDownbeats = Array.from({ length: 40 }, (_, i) => i * barMs + 300);
+    const outStart = 5 * barMs;
+    const inStart = 2 * barMs + 300; // both overlap starts on their downbeats
+    const aligned = planAlignmentOffsetMs({
+      outgoingDownbeatsMs: outgoingDownbeats,
+      incomingDownbeatsMs: incomingDownbeats,
+      outgoingOverlapStartMs: outStart,
+      incomingOverlapStartMs: inStart,
+      bpm: 174,
+      targetBpm: 174,
+      outgoingPhraseOriginMs: 5 * barMs + 204, // drop boundary off its own grid
+      incomingPhraseOriginMs: inStart,
+    });
+    expect(aligned.mode).toBe("phrase");
+    // After placement (incoming start + offset), the decks' downbeats must
+    // coincide in output time. Old behavior: offset −204 left a 204 ms
+    // constant sub-beat misalignment.
+    const outPhase = outStart - outStart;
+    const inPhaseAfterPlacement = inStart + aligned.offsetMs - inStart;
+    const delta = Math.abs(wrapDelta(inPhaseAfterPlacement - outPhase, barMs));
+    expect(delta).toBeLessThan(20);
+  });
+
   it("returns the phase difference at overlap start", () => {
     const aligned = downbeatAlignmentOffsetMs({
       outgoingDownbeatsMs: [0, 1379, 2758],
