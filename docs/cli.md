@@ -71,7 +71,7 @@ Config comes from `dnb-crate.config.json` (see `.env.example` and the README for
 
 | Command                                                                                                      | What it does                                                    |
 | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| `render:start --plan-id UUID [--wait] [--edge-fade-ms N] [--allow-low-confidence] [--allow-excessive-tempo]` | Queue a full render (24-bit master + 16-bit listen FLAC)        |
+| `render:start --plan-id UUID [--wait] [--edge-fade-ms N] [--allow-low-confidence] [--allow-excessive-tempo] [--allow-overlong-duration]` | Queue a full render (24-bit master + 16-bit listen FLAC); `--allow-overlong-duration` bypasses a duration-only deviation (e.g. after removing entries from an auditioned plan) |
 | `render:preview --plan-id UUID --transition-id UUID [--wait] [--template T]`                                 | Render one join as a short preview                              |
 | `render:status --id UUID` / `render:list`                                                                    | Job status / recent jobs                                        |
 | `render:manifest --id UUID`                                                                                  | Per-track alignment, rates, checksums, loudness                 |

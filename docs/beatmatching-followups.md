@@ -129,3 +129,18 @@ Labeled joins from this session (all on 174 BPM material, all verified by ear):
   phrase_mix within a 0.44–0.65 syncopation band, render:check green, and the
   user reports all joins mostly good — the first full mix with no gallop
   complaints after four iterations (4 → 6 → 2 → 0 problem joins).
+- October 2026 groove-fresh audition (26 tracks, seed 7): all five
+  groove-triggered bass_swap+glide joins passed by ear. Two joins flagged
+  "slightly off, drums don't line up" — both diagnosed by measurement and
+  both tracks quarantined to `Music/unmixable`:
+  - Heatwave → We Can Have It All (Sigma Remix): WCHIA's stored grid ran
+    93 ms early against its own audio (region-verified; tempo also wanders
+    174.3–175.5 across the track). Grid corrected +93 ms, but the variable
+    tempo makes every long window a drift risk → quarantined.
+  - Everything Is Possible → Snow: grids correct; Snow's blend region is
+    triplet-groove (beat-phase histogram peaks at ⅓/⅔ beat, local sync
+    0.70) under a straight dense tail. An 8-bar landing into Snow's
+    straighter bars (sync 0.30–0.60) still wasn't fully clean → quarantined.
+  Both join types are now measurable: grid phase error via per-region
+  phase scan, triplet content via beat-phase histogram — candidates for
+  analyzer diagnostics (see item 6).

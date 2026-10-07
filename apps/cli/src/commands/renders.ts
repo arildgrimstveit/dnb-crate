@@ -19,6 +19,7 @@ export async function run(
         edgeFadeMs: edgeRaw === undefined ? undefined : Number(edgeRaw),
         allowLowConfidence: flag(args, "--allow-low-confidence"),
         allowExcessiveTempo: flag(args, "--allow-excessive-tempo"),
+        allowOverlongDuration: flag(args, "--allow-overlong-duration"),
       });
       if (flag(args, "--wait")) {
         const done = await runtime.service.waitForRenderJob(started.job.id, 45 * 60_000);
