@@ -144,3 +144,7 @@ Labeled joins from this session (all on 174 BPM material, all verified by ear):
   Both join types are now measurable: grid phase error via per-region
   phase scan, triplet content via beat-phase histogram — candidates for
   analyzer diagnostics (see item 6).
+  After quarantine, the plan was surgically rebuilt (24 of 26 entries kept
+  their auditioned transitions; only the two orphaned joins recomputed) and
+  the final mix passed audition: "two new joins hold up. mix is good."
+  The beatmatching plan is fully auditioned.
