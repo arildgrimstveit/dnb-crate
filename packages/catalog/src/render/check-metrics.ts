@@ -51,9 +51,16 @@ export function storedGridResidualMs(
   periodMs: number | null,
   onsetLockBeats: number | null = null,
 ): number | null {
+  void downbeatOffsetMs;
+  void onsetLockBeats;
   const wrapMs = periodMs && periodMs > 0 ? periodMs : 345;
-  const beatPeriodMs = wrapMs > 2000 ? null : wrapMs;
-  const gridResidual = residualFromBeatGrids(
+  // The beat-train correlation is the single authority: callers project the
+  // incoming grid from the renderer's placed start (including the alignment
+  // offset), so a correct render reads 0 regardless of the offset's value.
+  // The former whole-beat-offset shortcut reported a full-beat
+  // downbeatOffsetMs as a residual even though a whole-beat shift is
+  // phase-equivalent on the beat grid.
+  return residualFromBeatGrids(
     outgoingBeats,
     incomingBeats,
     outgoingOverlapStartMs,
@@ -62,16 +69,6 @@ export function storedGridResidualMs(
     incomingRate,
     wrapMs,
   );
-  if (
-    onsetLockBeats == null &&
-    beatPeriodMs != null &&
-    downbeatOffsetMs != null &&
-    Math.abs(downbeatOffsetMs) >= 20 &&
-    Math.abs(Math.abs(downbeatOffsetMs) - beatPeriodMs) < 25
-  ) {
-    return downbeatOffsetMs;
-  }
-  return gridResidual;
 }
 
 export function beatsInWindow(

@@ -663,10 +663,17 @@ export class RenderCoordinator {
         overlap > 0 ? Math.round(outgoing.timelineStartMs + outgoingPlayable - overlap) : null;
       const outOverlapStart =
         outgoing.sourceEndMs - outputToSourceMs(overlap, outgoing.playbackRate);
+      // The renderer places the incoming at its source start PLUS the
+      // downbeat alignment offset (applyAlignmentOffset shifts the incoming
+      // start by downbeatOffsetMs), and the onset-lock slip is already
+      // folded into the planned start. Project the beat grid from the
+      // placed start, or every aligned join with a nonzero offset reads a
+      // phantom lag of wrapDelta(offset, beatPeriod).
+      const inOverlapStart = incoming.sourceStartMs + (outgoing.downbeatOffsetMs ?? 0);
       const storedGrid = storedGridFromEvidence(
         evidence,
         outOverlapStart,
-        incoming.sourceStartMs,
+        inOverlapStart,
         outgoing.playbackRate,
         incoming.playbackRate,
         outgoing.downbeatOffsetMs,

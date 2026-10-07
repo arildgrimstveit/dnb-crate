@@ -12,20 +12,20 @@ import {
 } from "../src/render/check-metrics.ts";
 
 describe("render:check v2 metrics", () => {
-  it("reports a one-beat applied nudge as residual", () => {
-    const beats = Array.from({ length: 32 }, (_, i) => i * 345);
-    const residual = storedGridResidualMs(343, beats, beats, 200_000, 343, 1, 1, 345);
-    expect(residual).toBe(343);
+  it("treats a whole-beat offset as phase-equivalent when the grids align", () => {
+    // The renderer shifts the incoming start by downbeatOffsetMs, so a
+    // 343ms (one-beat) offset with coincident beat phases is aligned;
+    // the beat-train correlation — not an offset tripwire — decides.
+    const outgoing = Array.from({ length: 32 }, (_, i) => 200_000 + i * 345);
+    const incoming = Array.from({ length: 32 }, (_, i) => 343 + i * 345);
+    const residual = storedGridResidualMs(343, outgoing, incoming, 200_000, 343, 1, 1, 345);
+    expect(Math.abs(residual ?? 99)).toBeLessThan(20);
   });
 
   it("judges a deliberate lock slip by cross-correlation, not the period tripwire", () => {
     const outgoing = Array.from({ length: 64 }, (_, i) => 200_000 + i * 345);
     const incoming = Array.from({ length: 64 }, (_, i) => i * 345);
-    // A +4-beat lock slip lands one bar period away: without drum evidence the
-    // tripwire reports it, with onsetLockBeats it judges the grids instead.
-    expect(storedGridResidualMs(1380, outgoing, incoming, 200_000, 0, 1, 1, 1380)).toBe(1380);
     const residual = storedGridResidualMs(1380, outgoing, incoming, 200_000, 0, 1, 1, 1380, 4);
-    expect(residual).not.toBe(1380);
     expect(Math.abs(residual ?? 99)).toBeLessThan(20);
   });
 
@@ -52,11 +52,8 @@ describe("render:check v2 metrics", () => {
       recipeVersion: 1,
       intent: null,
     });
-    const tripped = storedGridFromEvidence(frozen, 200_000, 343, 1, 1, 343, 345);
-    expect(tripped.residualMs).toBe(343);
-    const locked = storedGridFromEvidence(frozen, 200_000, 343, 1, 1, 343, 345, 1);
-    expect(locked.residualMs).not.toBe(343);
-    expect(Math.abs(locked.residualMs ?? 99)).toBeLessThan(20);
+    const checked = storedGridFromEvidence(frozen, 200_000, 343, 1, 1, 343, 345, 1);
+    expect(Math.abs(checked.residualMs ?? 99)).toBeLessThan(20);
   });
 
   it("does not treat a phrase-mode 360ms nudge as a one-beat residual", () => {
