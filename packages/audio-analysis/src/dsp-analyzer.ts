@@ -1360,7 +1360,26 @@ export const dspAnalyzer: AudioAnalyzer = {
       downbeatConfidence = Number(down.confidence.toFixed(3));
       // Grid diagnostics: does the stored grid track the actual audio
       // everywhere, and where does the onset energy sit within the beat?
-      const phaseDiag = gridPhaseDiagnostics(tempoOnset, tempoHopMs, beatTimesMs, bpm, durationMs);
+      // Phase scan runs on the kick+snare BACKBONE, not the broadband
+      // envelope — off-beat hats out-power the kicks in much of DnB and a
+      // broadband scan locks onto the half-beat, flagging ~44% of the
+      // library with a phantom 172ms (exactly half a beat) error.
+      const backboneFrames = Math.min(kickOnset.length, snareOnset.length);
+      const backboneOnset =
+        backboneFrames > 0
+          ? Array.from(
+              { length: backboneFrames },
+              (_, i) => (kickOnset[i] ?? 0) + (snareOnset[i] ?? 0),
+            )
+          : tempoOnset;
+      const phaseDiag = gridPhaseDiagnostics(
+        backboneOnset,
+        tempoOnset,
+        hopMs,
+        beatTimesMs,
+        bpm,
+        durationMs,
+      );
       gridPhaseMaxErrorMs = phaseDiag?.maxErrorMs ?? null;
       beatPhaseHistogram = phaseDiag?.beatPhaseHistogram ?? null;
     }
@@ -1741,15 +1760,17 @@ const GRID_PHASE_SUSPECT_MS = 40;
  *    of grid correctness (Snow class).
  */
 export function gridPhaseDiagnostics(
-  onset: number[],
+  phaseEnvelope: number[],
+  contentEnvelope: number[],
   hopMs: number,
   beatTimesMs: number[],
   bpm: number,
   durationMs: number,
 ): { maxErrorMs: number; beatPhaseHistogram: number[] } | null {
-  if (beatTimesMs.length < 8 || onset.length === 0 || !(bpm > 0)) {
+  if (beatTimesMs.length < 8 || phaseEnvelope.length === 0 || !(bpm > 0)) {
     return null;
   }
+  const onset = phaseEnvelope;
   const periodMs = 60_000 / bpm;
   // --- 1. per-window phase scan ---
   const windowMs = 30_000;
@@ -1796,12 +1817,13 @@ export function gridPhaseDiagnostics(
   if (windowsMeasured === 0) {
     return null;
   }
-  // --- 2. beat-phase histogram ---
+  // --- 2. beat-phase histogram (broadband content: hats/chops included) ---
   const bins = new Array<number>(20).fill(0);
-  const floor = mean(onset) * 2;
+  const content = contentEnvelope.length > 0 ? contentEnvelope : onset;
+  const floor = mean(content) * 2;
   let counted = 0;
-  for (let f = 0; f < onset.length; f += 1) {
-    const value = onset[f] ?? 0;
+  for (let f = 0; f < content.length; f += 1) {
+    const value = content[f] ?? 0;
     if (value < floor) continue;
     const tMs = f * hopMs;
     // nearest grid beat at or before tMs
