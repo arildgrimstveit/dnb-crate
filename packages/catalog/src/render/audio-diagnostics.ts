@@ -212,22 +212,76 @@ export function firstEnergyMs(
   return null;
 }
 
+/** Result of scanning the final mixed waveform alone. */
+export type RenderedMixDiagnostic = {
+  measured: boolean;
+  /** Why no measurement happened (decode failure, window too short). */
+  unmeasuredReason: string | null;
+  /**
+   * Independent beat-alignment verification state. A single decoded
+   * waveform cannot attribute a transient to a deck, so a mixed-only scan
+   * can never verify alignment — it stays `unmeasured` by construction.
+   * The independent deck-probe verifier (diagnoseOverlapAudio over the two
+   * placed decks) is the only path allowed to report a measured pass.
+   */
+  alignment: { status: "unmeasured"; reason: string };
+  /** Measured mix-quality findings from the decoded master window. */
+  quality: { status: "pass" | "review" | "fail"; reasons: string[] };
+  mix: MixAudioDiagnostic | null;
+};
+
+const MIX_ALIGNMENT_UNMEASURED_REASON =
+  "mixed decode cannot attribute transients to decks; no independent deck-probe verification ran";
+
+/**
+ * Diagnose the FINAL mixed waveform around one overlap. This measures mix
+ * quality (stutter, clipping, holes, boundary discontinuities) only. It is
+ * fed the rendered master, not the two decks, so it has no deck-attributed
+ * onset evidence and cannot verify beat alignment; `alignment` is always
+ * unmeasured. Callers must not treat an inconclusive or clean result as
+ * proof of corrected alignment (F2, repository review 2026-10-08).
+ */
 export function diagnoseRenderedMix(input: {
   sampleRate: number;
   mixPcm: Float32Array;
   overlapMs: number;
   intent?: MixIntentOrNull;
-}): OverlapAudioDiagnostic {
-  return diagnoseOverlapAudio({
-    sampleRate: input.sampleRate,
-    outgoingPcm: input.mixPcm,
-    incomingPcm: input.mixPcm,
-    mixPcm: input.mixPcm,
-    overlapMs: input.overlapMs,
-    outgoingBeatsMs: [],
-    incomingBeatsMs: [],
-    intent: input.intent,
-  });
+}): RenderedMixDiagnostic {
+  const mixDiag = diagnoseMix(
+    input.mixPcm,
+    input.mixPcm,
+    input.mixPcm,
+    input.sampleRate,
+    input.overlapMs,
+    input.intent ?? null,
+  );
+  const reasons: string[] = [];
+  let status: "pass" | "review" | "fail" = "pass";
+  if (mixDiag.stutterScore >= 0.65) {
+    status = "fail";
+    reasons.push("prefix skip/stutter");
+  }
+  if (mixDiag.clippedFraction > 0.008) {
+    status = status === "fail" ? "fail" : "review";
+    reasons.push("bass/transient distortion");
+  }
+  if (mixDiag.bassAbsence === "accidental") {
+    status = status === "fail" ? "fail" : "review";
+    reasons.push(`overlap hole ${mixDiag.holeMs ?? 0} ms`);
+  }
+  if (mixDiag.discontinuityStart > 0.55 || mixDiag.discontinuityEnd > 0.55) {
+    if (status === "pass") {
+      status = "review";
+    }
+    reasons.push("boundary discontinuity");
+  }
+  return {
+    measured: true,
+    unmeasuredReason: null,
+    alignment: { status: "unmeasured", reason: MIX_ALIGNMENT_UNMEASURED_REASON },
+    quality: { status, reasons },
+    mix: mixDiag,
+  };
 }
 
 export function diagnoseOverlapAudio(input: {

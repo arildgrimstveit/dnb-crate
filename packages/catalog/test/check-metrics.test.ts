@@ -6,6 +6,7 @@ import {
   fullRenderDurationFailure,
   freezeJoinEvidence,
   joinCamelotDistance,
+  placedIncomingOverlapStartMs,
   plannedLevelStepLu,
   storedGridFromEvidence,
   storedGridResidualMs,
@@ -167,5 +168,130 @@ describe("render:check v2 metrics", () => {
   it("treats any full-render miss over 1000 ms as a duration failure message", () => {
     expect(fullRenderDurationFailure(1_000, 15_000)).toMatch(/tolerance 1000ms/);
     expect(fullRenderDurationFailure(15_000, 15_400)).toBeNull();
+  });
+});
+
+describe("checker projects stored grids from placed manifest coordinates", () => {
+  // F1 (repository review 2026-10-08): the manifest's sourceStartMs and
+  // sourceEndMs are the renderer's PLACED coordinates — the alignment
+  // transform is already baked into them. downbeatOffsetMs is provenance of
+  // how alignment was achieved, never a transform to re-apply. These tests
+  // pin the projection from placed intervals, not the old formula.
+
+  function frozenBeats(outgoingBeatsMs: number[], incomingBeatsMs: number[]) {
+    return freezeJoinEvidence({
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      outgoingAnalysisVersion: "3.12.0",
+      incomingAnalysisVersion: "3.12.0",
+      outgoingBeatsMs,
+      incomingBeatsMs,
+      outgoingSourceStartMs: outgoingBeatsMs[0] ?? 0,
+      outgoingSourceEndMs: (outgoingBeatsMs.at(-1) ?? 0) + 4_000,
+      incomingSourceStartMs: incomingBeatsMs[0] ?? 0,
+      incomingSourceEndMs: (incomingBeatsMs.at(-1) ?? 0) + 4_000,
+      outgoingCamelotKey: "8A",
+      incomingCamelotKey: "8A",
+      outgoingAudioEndMs: null,
+      outgoingTailEnergy: 0.4,
+      incomingHeadEnergy: 0.3,
+      incomingDropMs: null,
+      recipeVersion: null,
+      intent: null,
+    });
+  }
+
+  it("does not re-apply an offset already baked into the incoming start", () => {
+    // Review probe: outgoing beats 10000+n*345, incoming beats 80+n*345,
+    // outgoing overlap begins at 10000, the placed incoming start is 80 and
+    // the manifest records downbeatOffsetMs 80 (baked at render). Projection
+    // from the placed start reads 0; adding the offset again read -80.
+    const outgoing = Array.from({ length: 32 }, (_, i) => 10_000 + i * 345);
+    const incoming = Array.from({ length: 32 }, (_, i) => 80 + i * 345);
+    const inOverlapStart = placedIncomingOverlapStartMs(80, 80);
+    expect(inOverlapStart).toBe(80);
+    const residual = storedGridFromEvidence(
+      frozenBeats(outgoing, incoming),
+      10_000,
+      inOverlapStart,
+      1,
+      1,
+      80,
+      345,
+    );
+    expect(Math.abs(residual.residualMs ?? 99)).toBeLessThan(20);
+  });
+
+  it("does not re-apply an offset that moved the outgoing end instead", () => {
+    // Negative-start fallback: applyAlignmentOffset kept the incoming start
+    // at 80 and moved the outgoing end back by the output-equivalent of the
+    // 80 ms offset, so the placed outgoing overlap starts at 9920. Both
+    // decks' grids read aligned only from the placed intervals.
+    const outgoing = Array.from({ length: 32 }, (_, i) => 9_920 + i * 345);
+    const incoming = Array.from({ length: 32 }, (_, i) => 80 + i * 345);
+    const residual = storedGridFromEvidence(
+      frozenBeats(outgoing, incoming),
+      9_920,
+      placedIncomingOverlapStartMs(80, 80),
+      1,
+      1,
+      80,
+      345,
+    );
+    expect(Math.abs(residual.residualMs ?? 99)).toBeLessThan(20);
+  });
+
+  it("treats a whole-beat-equivalent baked shift as aligned", () => {
+    const outgoing = Array.from({ length: 32 }, (_, i) => 10_000 + i * 345);
+    const incoming = Array.from({ length: 32 }, (_, i) => 345 + i * 345);
+    const residual = storedGridFromEvidence(
+      frozenBeats(outgoing, incoming),
+      10_000,
+      placedIncomingOverlapStartMs(345, 345),
+      1,
+      1,
+      345,
+      345,
+    );
+    expect(Math.abs(residual.residualMs ?? 99)).toBeLessThan(20);
+  });
+
+  it("projects non-unit rates from the placed starts", () => {
+    // 170 BPM outgoing and 178 BPM incoming both playing at 174: rates
+    // 174/170 and 174/178. Each deck's source beat period maps to the same
+    // 344.8 ms output period, so the placed grids coincide in output time.
+    const outPeriod = 60_000 / 170;
+    const inPeriod = 60_000 / 178;
+    const outgoing = Array.from({ length: 32 }, (_, i) => 10_000 + i * outPeriod);
+    const incoming = Array.from({ length: 32 }, (_, i) => 88 + i * inPeriod);
+    const residual = storedGridFromEvidence(
+      frozenBeats(outgoing, incoming),
+      10_000,
+      placedIncomingOverlapStartMs(88, 88),
+      174 / 170,
+      174 / 178,
+      88,
+      60_000 / 174,
+    );
+    expect(Math.abs(residual.residualMs ?? 99)).toBeLessThan(20);
+  });
+
+  it("still reports a genuinely misaligned placed grid", () => {
+    // Control: the placed-coordinate projection must not blanket-zero. The
+    // incoming start is placed at 80 but its beats sit 80 ms late relative to
+    // the outgoing train — a real defect the checker must keep reporting.
+    const outgoing = Array.from({ length: 32 }, (_, i) => 10_000 + i * 345);
+    const incoming = Array.from({ length: 32 }, (_, i) => 160 + i * 345);
+    const residual = storedGridFromEvidence(
+      frozenBeats(outgoing, incoming),
+      10_000,
+      placedIncomingOverlapStartMs(80, 80),
+      1,
+      1,
+      80,
+      345,
+    );
+    expect(residual.residualMs).not.toBeNull();
+    expect(Math.abs(residual.residualMs ?? 0)).toBeGreaterThanOrEqual(60);
   });
 });

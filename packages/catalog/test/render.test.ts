@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -447,6 +447,208 @@ describe("render jobs", () => {
     const again = await catalog.service.checkRender(done.id);
     expect(again.joins[0]?.storedGridResidualMs).toBe(checked.joins[0]?.storedGridResidualMs);
     expect(again.joins[0]?.evidenceSource).toBe("frozen-manifest");
+  });
+
+  it("projects stored grids from the placed start when the offset is baked in", async () => {
+    // F1 (repository review 2026-10-08): the manifest stores PLACED source
+    // coordinates. A planned aligned join persists the baked incoming window
+    // (buildEntries) plus the alignment offset as transition metadata
+    // (chooseTransition parameters) — the renderer skips re-application for
+    // those recipe-version-1 transitions. Alpha's downbeat grid sits ~400 ms
+    // late against bravo's at the join, so the persisted bravo window starts
+    // at 400 with downbeatOffsetMs 400 recorded. The checker must read ~0
+    // residual: re-applying the recorded offset double-counts it.
+    const root = path.join(os.tmpdir(), `dnb-place-${crypto.randomUUID()}`);
+    const library = path.join(root, "library");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      useFakeFfmpeg: true,
+    });
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(library, "alpha.wav"), {
+      title: "Alpha",
+      artist: "A",
+      durationMs: 8000,
+    });
+    // The fake renderer always measures a 15 s master; bravo is 10 s so the
+    // trimmed plan (7 s + 9 s - 1 s overlap) lands inside the 1 s tolerance.
+    await writeSineWav(path.join(library, "bravo.wav"), {
+      title: "Bravo",
+      artist: "B",
+      durationMs: 10_000,
+    });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
+    const alpha = tracks.find((track) => track.title === "Alpha")!;
+    const bravo = tracks.find((track) => track.title === "Bravo")!;
+    const plan = saveTwoTrackPlan(catalog, alpha.id, bravo.id);
+    const now = new Date().toISOString();
+    const upsertGrid = (trackId: string, beatTimesMs: number[], downbeatTimesMs: number[]) => {
+      catalog.analyses.upsert({
+        trackId,
+        analyzerName: DSP_ANALYZER_NAME,
+        analyzerVersion: DSP_ANALYZER_VERSION,
+        bpm: 174,
+        bpmConfidence: 0.9,
+        bpmRaw: 174,
+        beatTimesMs,
+        downbeatTimesMs,
+        gridRejected: false,
+        gridRejectionReason: null,
+        musicalKey: "Fm",
+        keyConfidence: 0.7,
+        keyMode: "minor",
+        camelotKey: "4A",
+        tempoStability: 0.8,
+        downbeatConfidence: 0.9,
+        integratedLufs: null,
+        truePeakDb: null,
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        waveformSummary: null,
+        beatAnchorMs: null,
+        descriptors: null,
+        engineRuntimeMs: 1,
+        analyzedAt: now,
+        suggestedCues: [],
+        sections: [],
+      });
+    };
+    // Consistent 174-ish grids (bar = 4 × 345 ms), alpha anchored 80 ms late.
+    upsertGrid(
+      alpha.id,
+      Array.from({ length: 21 }, (_, i) => 80 + i * 345),
+      Array.from({ length: 6 }, (_, i) => 80 + i * 4 * 345),
+    );
+    upsertGrid(
+      bravo.id,
+      Array.from({ length: 27 }, (_, i) => i * 345),
+      Array.from({ length: 7 }, (_, i) => i * 4 * 345),
+    );
+    // Persist the join exactly as the planner would: alpha's overlap starts
+    // at 6000 (window end 7000, overlap 1000), bravo's window baked +400 by
+    // bakeWindowAlignment, offset recorded in the transition parameters.
+    catalog.service.updateSetPlan({
+      setPlanId: plan.id,
+      setTrim: { entryId: plan.entries[0]!.id, sourceStartMs: 0, sourceEndMs: 7_000 },
+    });
+    catalog.service.updateSetPlan({
+      setPlanId: plan.id,
+      setTrim: { entryId: plan.entries[1]!.id, sourceStartMs: 400, sourceEndMs: 9_400 },
+    });
+    catalog.service.updateSetPlan({
+      setPlanId: plan.id,
+      setTransition: {
+        entryId: plan.entries[0]!.id,
+        type: "phrase_mix",
+        durationMs: 1000,
+        parameters: {
+          barCount: 16,
+          targetBpm: 174,
+          downbeatOffsetMs: 400,
+          mixOutMs: 6_000,
+          mixInMs: 400,
+        },
+      },
+    });
+    const started = await catalog.service.startSetRender({
+      setPlanId: plan.id,
+      allowLowConfidence: true,
+    });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
+    const manifest = catalog.service.getRenderManifest(done.id);
+    // Join alignment metadata lives on the outgoing manifest track.
+    expect(manifest.tracks[0]?.downbeatOffsetMs).toBe(400);
+    // The placed incoming start carries the baked offset.
+    expect(manifest.tracks[1]?.sourceStartMs).toBe(400);
+    const checked = await catalog.service.checkRender(done.id);
+    expect(checked.joins[0]?.evidenceSource).toBe("frozen-manifest");
+    expect(checked.joins[0]?.storedGridResidualMs).not.toBeNull();
+    expect(Math.abs(checked.joins[0]?.storedGridResidualMs ?? 99)).toBeLessThan(20);
+    expect(checked.ok).toBe(true);
+  });
+
+  it("fails a misaligned stored grid instead of clearing it with an inconclusive audio scan", async () => {
+    // F2 step 1: bravo's beats sit 90 ms off its own downbeats, so the
+    // downbeat alignment places the decks "aligned" while the beat trains
+    // disagree by ~90 ms. The mixed-PCM scan cannot attribute decks and must
+    // NOT act as proof of corrected alignment — the stored-grid failure and
+    // ok=false stand, with the audio honestly reported as unmeasured.
+    const { catalog, plan, alpha, bravo } = await seededLibrary();
+    const now = new Date().toISOString();
+    const upsertGrid = (trackId: string, beatTimesMs: number[], downbeatTimesMs: number[]) => {
+      catalog.analyses.upsert({
+        trackId,
+        analyzerName: DSP_ANALYZER_NAME,
+        analyzerVersion: DSP_ANALYZER_VERSION,
+        bpm: 174,
+        bpmConfidence: 0.9,
+        bpmRaw: 174,
+        beatTimesMs,
+        downbeatTimesMs,
+        gridRejected: false,
+        gridRejectionReason: null,
+        musicalKey: "Fm",
+        keyConfidence: 0.7,
+        keyMode: "minor",
+        camelotKey: "4A",
+        tempoStability: 0.8,
+        downbeatConfidence: 0.9,
+        integratedLufs: null,
+        truePeakDb: null,
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        waveformSummary: null,
+        beatAnchorMs: null,
+        descriptors: null,
+        engineRuntimeMs: 1,
+        analyzedAt: now,
+        suggestedCues: [],
+        sections: [],
+      });
+    };
+    upsertGrid(
+      alpha.id,
+      Array.from({ length: 21 }, (_, i) => i * 345),
+      Array.from({ length: 6 }, (_, i) => i * 4 * 345),
+    );
+    // Beats 90 ms late relative to bravo's downbeat grid: aligning downbeats
+    // leaves the beat trains ~90 ms apart — a wrong-grid defect.
+    upsertGrid(
+      bravo.id,
+      Array.from({ length: 22 }, (_, i) => 90 + i * 345),
+      Array.from({ length: 6 }, (_, i) => i * 4 * 345),
+    );
+    catalog.service.updateSetPlan({
+      setPlanId: plan.id,
+      setTrim: { entryId: plan.entries[0]!.id, sourceStartMs: 0, sourceEndMs: 7_000 },
+      setTransition: {
+        entryId: plan.entries[0]!.id,
+        type: "phrase_mix",
+        durationMs: 1000,
+        parameters: { barCount: 16, targetBpm: 174 },
+      },
+    });
+    const started = await catalog.service.startSetRender({
+      setPlanId: plan.id,
+      allowLowConfidence: true,
+    });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
+    const checked = await catalog.service.checkRender(done.id);
+    const join = checked.joins[0]!;
+    expect(join.evidenceSource).toBe("frozen-manifest");
+    expect(Math.abs(join.storedGridResidualMs ?? 0)).toBeGreaterThan(40);
+    expect(join.audioStatus).toBe("unmeasured");
+    expect(join.audioUnmeasuredReason).not.toBeNull();
+    expect(checked.failures.some((text) => /stored-grid residual/.test(text))).toBe(true);
+    expect(checked.ok).toBe(false);
+    // Diagnostic scratch files must not survive the check.
+    await expect(access(`${checked.outputPath}.phase4-${join.order}.pcm`)).rejects.toThrow();
   });
 
   it("renders a queued preview from the frozen plan after trims change", async () => {

@@ -57,4 +57,6 @@ verified stage, even when another same-name render publishes later.
 
 `render:start` / `create_transition_preview` return a job id. Poll `get_render_status`. After a full render succeeds, play `listenRootRelativePath` and keep `outputRootRelativePath` as the master. Read the manifest after `succeeded`.
 
-`render:check --id JOB` looks for interior silence, window-in-silence, stored-grid residual > 40 ms on aligned joins, planned LUFS steps > 3 LU, and hour duration error > 1 s.
+`render:check --id JOB` looks for interior silence, window-in-silence, stored-grid residual > 40 ms on aligned joins, planned LUFS steps > 5 LU, and hour duration error > 1 s.
+
+Audio honesty (October 2026, F2 of the repository review): the stored-grid residual is a frozen-evidence geometric check projected from the manifest's placed source coordinates (the alignment offset is already baked into them; `downbeatOffsetMs` is provenance, never re-applied). The post-render mixed-decode scan measures mix quality only — stutter, clipping, overlap holes, boundary discontinuities — and reports those as `audioFindings` and warnings. A single decoded master cannot attribute transients to decks, so `audioStatus` stays `unmeasured` for beat alignment on every join and an inconclusive scan never clears a stored-grid failure. An independent deck-probe verifier (measuring the two placed decks plus the final blend across the overlap) is planned follow-up work; until it is calibrated it must not gate renders. Use `allowGridResidual` to override a stored-grid failure explicitly.

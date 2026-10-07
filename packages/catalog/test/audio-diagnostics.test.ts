@@ -4,6 +4,7 @@ import {
   clickTrack,
   clipPcm,
   diagnoseOverlapAudio,
+  diagnoseRenderedMix,
   expectedBeatsMs,
   fadePcm,
   insertSilence,
@@ -216,3 +217,71 @@ describe("independent overlap audio diagnostics", () => {
     expect(result.reasons.some((reason) => /stutter/.test(reason))).toBe(true);
   });
 });
+
+describe("rendered-mix scan honesty (F2 step 1)", () => {
+  it("never claims measured alignment from the mixed waveform alone", () => {
+    // A single decoded master cannot attribute a transient to a deck, so
+    // alignment must surface as explicitly unmeasured with a reason —
+    // never as a pass that could clear a stored-grid failure.
+    const decks = alignedDecks();
+    const result = diagnoseRenderedMix({
+      sampleRate: SR,
+      mixPcm: mixPcm(decks.outgoingPcm, decks.incomingPcm),
+      overlapMs: OVERLAP,
+    });
+    expect(result.measured).toBe(true);
+    expect(result.alignment.status).toBe("unmeasured");
+    expect(result.alignment.reason).toMatch(/cannot attribute/i);
+    expect(result.quality.status).toBe("pass");
+    expect(result.quality.reasons).toEqual([]);
+  });
+
+  it("still measures mix-quality defects from the master", () => {
+    const sustained = sustainedMix();
+    const stuttered = diagnoseRenderedMix({
+      sampleRate: SR,
+      mixPcm: insertSilence(sustained, SR, 400, 80),
+      overlapMs: OVERLAP,
+    });
+    expect(stuttered.alignment.status).toBe("unmeasured");
+    expect(stuttered.quality.status).toBe("fail");
+    expect(stuttered.quality.reasons.some((reason) => /stutter/.test(reason))).toBe(true);
+
+    const clipped = diagnoseRenderedMix({
+      sampleRate: SR,
+      mixPcm: clipPcm(sustained, 0.15),
+      overlapMs: OVERLAP,
+    });
+    expect(clipped.quality.status === "review" || clipped.quality.status === "fail").toBe(true);
+    expect(clipped.quality.reasons.some((reason) => /distortion/.test(reason))).toBe(true);
+  });
+
+  it("reports an accidental overlap hole but accepts a recorded breather", () => {
+    const holed = insertSilence(sustainedMix(), SR, 3_000, 800);
+    const accidental = diagnoseRenderedMix({
+      sampleRate: SR,
+      mixPcm: holed,
+      overlapMs: OVERLAP,
+    });
+    expect(accidental.quality.reasons.some((reason) => /overlap hole 800 ms/.test(reason))).toBe(
+      true,
+    );
+    const breather = diagnoseRenderedMix({
+      sampleRate: SR,
+      mixPcm: holed,
+      overlapMs: OVERLAP,
+      intent: "breather",
+    });
+    expect(breather.quality.reasons.some((reason) => /hole/.test(reason))).toBe(false);
+  });
+});
+
+/** Sustained tonal mix stand-in: continuous energy, no transient gaps. */
+function sustainedMix(): Float32Array {
+  const pcm = new Float32Array(Math.round((OVERLAP / 1000) * SR));
+  for (let i = 0; i < pcm.length; i += 1) {
+    pcm[i] =
+      0.2 * Math.sin((2 * Math.PI * 80 * i) / SR) + 0.1 * Math.sin((2 * Math.PI * 164 * i) / SR);
+  }
+  return pcm;
+}

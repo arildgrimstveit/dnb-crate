@@ -86,6 +86,7 @@ import {
   measureLevelStepLu,
   paramNumber,
   paramString,
+  placedIncomingOverlapStartMs,
   plannedLevelStepLu,
   storedGridFromEvidence,
 } from "./check-metrics.ts";
@@ -129,7 +130,22 @@ export type RenderCheckJoin = {
   storedGridResidualMs: number | null;
   residualKind: "stored-grid-consistency";
   evidenceSource: "frozen-manifest" | "missing";
-  audioStatus: "unmeasured" | "pass" | "review" | "fail" | "advisory";
+  /**
+   * Independent beat-alignment verification of the rendered audio. The
+   * mixed-decode scan can never set this to "pass": without deck-attributed
+   * probes it has no alignment evidence, so inconclusive results surface as
+   * "unmeasured" with a reason instead of clearing a stored-grid failure.
+   * "pass"/"review"/"fail" are reserved for the calibrated independent
+   * verifier.
+   */
+  audioStatus: "unmeasured" | "pass" | "review" | "fail";
+  /** Why independent alignment verification is unavailable for this join. */
+  audioUnmeasuredReason: string | null;
+  /** Measured mix-quality findings (stutter, clipping, holes, clicks). */
+  audioFindings: string[];
+  /** Level step from the planned (frozen) LUFS and applied gains. */
+  plannedLevelStepLu: number | null;
+  /** Measured level step across the overlap from the rendered master. */
   levelStepLu: number | null;
   lowOverlapSec: number | null;
   outgoingRate: number;
@@ -606,14 +622,19 @@ export class RenderCoordinator {
       ],
     });
     const spans = parseSilenceSpans(`${silenceRun.stderr}\n${silenceRun.stdout}`);
+    const silenceMeasured = silenceRun.exitCode === 0;
     const durationMs = manifest.outputDurationMs;
-    const interiorSilence = spans
-      .filter((span) => span.startMs > 500 && span.endMs !== null && span.endMs < durationMs - 500)
-      .map((span) => ({
-        startMs: span.startMs,
-        endMs: span.endMs as number,
-        durationMs: (span.endMs as number) - span.startMs,
-      }));
+    const interiorSilence = silenceMeasured
+      ? spans
+          .filter(
+            (span) => span.startMs > 500 && span.endMs !== null && span.endMs < durationMs - 500,
+          )
+          .map((span) => ({
+            startMs: span.startMs,
+            endMs: span.endMs as number,
+            durationMs: (span.endMs as number) - span.startMs,
+          }))
+      : [];
     const last = manifest.tracks.at(-1);
     const plannedDurationMs = last
       ? plannedMixDurationMs(
@@ -663,13 +684,17 @@ export class RenderCoordinator {
         overlap > 0 ? Math.round(outgoing.timelineStartMs + outgoingPlayable - overlap) : null;
       const outOverlapStart =
         outgoing.sourceEndMs - outputToSourceMs(overlap, outgoing.playbackRate);
-      // The renderer places the incoming at its source start PLUS the
-      // downbeat alignment offset (applyAlignmentOffset shifts the incoming
-      // start by downbeatOffsetMs), and the onset-lock slip is already
-      // folded into the planned start. Project the beat grid from the
-      // placed start, or every aligned join with a nonzero offset reads a
-      // phantom lag of wrapDelta(offset, beatPeriod).
-      const inOverlapStart = incoming.sourceStartMs + (outgoing.downbeatOffsetMs ?? 0);
+      // Manifest coordinates are PLACED coordinates: the renderer bakes the
+      // downbeat alignment into the stored windows before the manifest is
+      // written (incoming start when feasible, outgoing end otherwise). The
+      // recorded downbeatOffsetMs is provenance of that transform — applying
+      // it again double-counts it and reads a phantom lag of
+      // wrapDelta(offset, beatPeriod) on aligned joins with nonzero offsets.
+      // See placedIncomingOverlapStartMs for the full contract.
+      const inOverlapStart = placedIncomingOverlapStartMs(
+        incoming.sourceStartMs,
+        outgoing.downbeatOffsetMs,
+      );
       const storedGrid = storedGridFromEvidence(
         evidence,
         outOverlapStart,
@@ -723,6 +748,15 @@ export class RenderCoordinator {
         residualKind: storedGrid.kind,
         evidenceSource: storedGrid.source,
         audioStatus: "unmeasured",
+        audioUnmeasuredReason:
+          "independent deck-probe verification not implemented; the mixed-decode scan measures mix quality only",
+        audioFindings: [],
+        plannedLevelStepLu: plannedLevelStepLu(
+          outgoing.outgoingLufs ?? null,
+          outgoing.incomingLufs ?? null,
+          outgoing.gainDb,
+          incoming.gainDb,
+        ),
         levelStepLu,
         lowOverlapSec,
         outgoingRate: outgoing.playbackRate,
@@ -735,11 +769,13 @@ export class RenderCoordinator {
         overlapAtMs,
       });
     }
-    // Phase 4: for joins with high stored-grid residuals, verify against the
-    // actual rendered audio. Decode a window from the master centered on the
-    // overlap midpoint and measure onset coherence. If the audio is coherent,
-    // the onset-lock corrected the join and the stored-grid residual is a
-    // false negative. If the audio is also misaligned, the join is genuinely bad.
+    // Phase 4: for joins with high stored-grid residuals, decode a window
+    // from the master around the overlap midpoint and measure mix quality.
+    // This is NOT independent beat verification: a single mixed waveform
+    // cannot attribute a transient to a deck, so alignment stays
+    // "unmeasured" and an inconclusive scan can never clear the
+    // stored-grid failure below. Measured quality findings (stutter,
+    // clipping, holes, discontinuities) are reported alongside it.
     if (!allowGridResidual) {
       for (const join of joins) {
         if (
@@ -750,12 +786,19 @@ export class RenderCoordinator {
           continue;
         }
         if (join.overlapAtMs == null || join.overlapAtMs <= 0) {
+          join.audioUnmeasuredReason = "audio scan skipped: overlap position unavailable";
           continue;
         }
+        const joinOverlapMs = manifest.tracks[join.order]?.overlapToNextMs ?? 0;
+        const windowMs = 8_000;
+        // Center the window on the overlap midpoint so long overlaps are not
+        // read from their opening seconds only.
+        const midpointMs = join.overlapAtMs + joinOverlapMs / 2;
+        const startSec =
+          Math.max(0, Math.min(Math.max(0, durationMs - windowMs), midpointMs - windowMs / 2)) /
+          1000;
+        const tempPcm = `${outputPath}.phase4-${join.order}.pcm`;
         try {
-          const windowMs = 8_000;
-          const startSec = Math.max(0, (join.overlapAtMs - windowMs / 2) / 1000);
-          const tempPcm = `${outputPath}.phase4-${join.order}.pcm`;
           const pcmRun = await runner.run({
             executable: binaries.ffmpegPath,
             args: [
@@ -777,31 +820,39 @@ export class RenderCoordinator {
               tempPcm,
             ],
           });
-          if (pcmRun.exitCode !== 0) continue;
+          if (pcmRun.exitCode !== 0) {
+            join.audioUnmeasuredReason = `audio decode failed (exit ${pcmRun.exitCode})`;
+            continue;
+          }
           const pcmBuffer = await readFile(tempPcm);
-          await unlink(tempPcm).catch(() => undefined);
           const samples = new Float32Array(pcmBuffer.length / 4);
           for (let i = 0; i < samples.length; i += 1) {
             samples[i] = pcmBuffer.readFloatLE(i * 4);
           }
-          if (samples.length < 22050) continue; // < 1 second
+          if (samples.length < 22_050) {
+            join.audioUnmeasuredReason = "decoded audio window below 1 s";
+            continue;
+          }
           const diag = diagnoseRenderedMix({
             sampleRate: 22_050,
             mixPcm: samples,
-            overlapMs: windowMs,
+            overlapMs: Math.max(windowMs, joinOverlapMs),
           });
-          if (diag.status === "pass" || diag.status === "advisory") {
-            join.audioStatus = diag.status === "pass" ? "pass" : "advisory";
-          } else if (diag.status === "review") {
-            join.audioStatus = "review";
-          } else if (diag.status === "fail") {
-            join.audioStatus = "fail";
-          }
-        } catch {
-          // Audio verification is best-effort; the stored-grid residual still applies.
+          join.audioUnmeasuredReason = diag.alignment.reason;
+          join.audioFindings = diag.quality.reasons;
+        } catch (error) {
+          join.audioUnmeasuredReason = `audio scan failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`;
+        } finally {
+          await unlink(tempPcm).catch(() => undefined);
         }
       }
     }
+    // The stored-grid residual stands unless the user overrides it. An
+    // inconclusive audio scan is absence of evidence and must not act as
+    // proof of corrected alignment; a future calibrated independent verifier
+    // may clear a geometric failure only on a measured pass.
     const residualFail =
       !allowGridResidual &&
       joins.some(
@@ -809,17 +860,10 @@ export class RenderCoordinator {
           (join.template === "phrase_mix" || join.template === "bass_swap") &&
           join.evidenceSource === "frozen-manifest" &&
           join.storedGridResidualMs != null &&
-          Math.abs(join.storedGridResidualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS &&
-          join.audioStatus !== "pass" &&
-          join.audioStatus !== "advisory",
+          Math.abs(join.storedGridResidualMs) > RENDER_CHECK_RESIDUAL_FAIL_MS,
       );
     const levelFail = joins.some((join) => {
-      const matched = plannedLevelStepLu(
-        join.outgoingLufs,
-        join.incomingLufs,
-        join.outgoingGainDb,
-        join.incomingGainDb,
-      );
+      const matched = join.plannedLevelStepLu;
       if (matched != null) {
         return Math.abs(matched) > RENDER_CHECK_LEVEL_STEP_FAIL_LU;
       }
@@ -831,19 +875,28 @@ export class RenderCoordinator {
         .filter((join) => join.windowInSilence)
         .map((join) => `join ${join.order} window in silence`),
       ...(residualFail ? ["stored-grid residual above 40 ms"] : []),
-      ...(levelFail ? ["planned LUFS step above 3 LU"] : []),
+      ...(levelFail ? [`planned LUFS step above ${RENDER_CHECK_LEVEL_STEP_FAIL_LU} LU`] : []),
       ...(duration.status === "fail" ? [`output/plan duration error ${duration.errorMs} ms`] : []),
     ];
     const warningList = [
       ...(duration.status === "warning"
         ? [`output/plan duration error ${duration.errorMs} ms (preview)`]
         : []),
+      ...(!silenceMeasured
+        ? [`interior silence unmeasured (ffmpeg exit ${silenceRun.exitCode})`]
+        : []),
       ...joins
         .filter((join) => join.evidenceSource === "missing")
         .map((join) => `join ${join.order} stored-grid unmeasured (no frozen evidence)`),
       ...joins
-        .filter((join) => join.audioStatus === "unmeasured")
-        .map((join) => `join ${join.order} independent audio unmeasured`),
+        .filter((join) => join.audioUnmeasuredReason != null)
+        .map(
+          (join) =>
+            `join ${join.order} independent audio unmeasured: ${join.audioUnmeasuredReason}`,
+        ),
+      ...joins
+        .filter((join) => join.audioFindings.length > 0)
+        .map((join) => `join ${join.order} audio quality: ${join.audioFindings.join("; ")}`),
     ];
     return {
       renderJobId,

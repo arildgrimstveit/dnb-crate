@@ -71,6 +71,35 @@ export function storedGridResidualMs(
   );
 }
 
+/**
+ * Manifest coordinate contract (F1, repository review 2026-10-08):
+ * `sourceStartMs`/`sourceEndMs` on every manifest track are the renderer's
+ * **placed** source coordinates. The downbeat alignment transform is already
+ * baked into them — into the incoming start when the shift was feasible
+ * (`bakeWindowAlignment` at planning time, `applyAlignmentOffset` at render
+ * time), or into the outgoing end when the negative-start fallback moved the
+ * outgoing side instead. Every renderer that writes this manifest schema
+ * mutates the stored window before the manifest is produced, so the placed
+ * intervals are authoritative for both branches.
+ *
+ * `downbeatOffsetMs`, `alignmentPeriodMs`, `alignmentMode` and
+ * `onsetLockBeats` record HOW alignment was achieved. They are provenance,
+ * never transforms to re-apply: adding the recorded offset to a placed
+ * incoming start double-applies it and reads a phantom residual of
+ * `wrapDelta(offset, beatPeriod)` on every aligned join with a nonzero
+ * offset.
+ */
+export function placedIncomingOverlapStartMs(
+  manifestIncomingStartMs: number,
+  recordedDownbeatOffsetMs: number | null,
+): number {
+  // Deliberately ignores the recorded offset: see the contract above. The
+  // parameter stays so every caller must acknowledge the recorded value is
+  // provenance, and so tests can pin that it is not applied here.
+  void recordedDownbeatOffsetMs;
+  return manifestIncomingStartMs;
+}
+
 export function beatsInWindow(
   beats: number[],
   startMs: number,
