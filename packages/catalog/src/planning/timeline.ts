@@ -7,7 +7,6 @@ import {
   LEVEL_MATCH_GAIN_MAX_DB,
   LEVEL_MATCH_GAIN_MIN_DB,
   MAX_TEMPO_DEVIATION,
-  PLANNER_GROOVE_LOCAL_WINDOW_BARS,
   PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP,
   SHORT_CROSSFADE_MS,
   MIN_ANALYSIS_CONFIDENCE,
@@ -41,7 +40,12 @@ import {
 } from "@dnb-crate/domain";
 
 import { constrainMixOut, pickMixIn, pickMixOut, sectionEnergyAt } from "./cues.ts";
-import { grooveCompatibility, structuralGrooveConflict } from "./shared.ts";
+import {
+  grooveCompatibility,
+  localBeatProfile,
+  beatIndexAtOrAfter,
+  structuralGrooveConflict,
+} from "./shared.ts";
 import {
   applySequentialDefaults,
   recallApprovedHandoff,
@@ -223,7 +227,11 @@ function gridBpm(track: TimelineTrack): number | null {
   return sourceBpmForRate(track.analysis?.gridOk ? track.analysis.bpm : null, tempoBpm(track));
 }
 
-function crossfade(reason: string, durationMs = DEFAULT_TRANSITION_OVERLAP_MS): ChosenTransition {
+function crossfade(
+  reason: string,
+  durationMs = DEFAULT_TRANSITION_OVERLAP_MS,
+  parameters: Record<string, number | string | boolean> = {},
+): ChosenTransition {
   return {
     transition: {
       id: crypto.randomUUID(),
@@ -231,7 +239,7 @@ function crossfade(reason: string, durationMs = DEFAULT_TRANSITION_OVERLAP_MS): 
       durationMs,
       outgoingCuePointId: null,
       incomingCuePointId: null,
-      parameters: { reason },
+      parameters: { reason, ...parameters },
     },
     outgoingRate: 1,
     incomingRate: 1,
@@ -369,35 +377,85 @@ export function chooseTransition(
   // different template instead of just penalizing the pair.
   const outgoingSyncopation = outgoing.analysis?.descriptors?.grooveSyncopation ?? null;
   const incomingSyncopation = incoming.analysis?.descriptors?.grooveSyncopation ?? null;
-  // Structurally incompatible grooves, measured where they'd actually meet:
-  // the outgoing's last bars before mix-out against the incoming's first
-  // bars after mix-in. Whole-track averages demonstrably cannot separate
-  // praised joins from bad ones, and a drum-sparse side cannot gallop
-  // against anything — the gate fires only on local, measurable conflict.
-  const outgoingBarMs = (4 * 60_000) / (outgoing.analysis?.bpm ?? target ?? 174);
-  const structuralConflict = structuralGrooveConflict(
+  // Structurally incompatible grooves, measured where the two decks actually
+  // meet: the outgoing's bars from its mix-out (the START of its overlap —
+  // mixOutMs is where the blend begins, the source end adds the overlap on
+  // top) against the incoming's bars from its aligned mix-in, each over the
+  // join's actual bar count (F3, repository review 2026-10-08). The material
+  // before mix-out is not superimposed on anything and must not gate the
+  // join; whole-track averages demonstrably cannot separate praised joins
+  // from bad ones, and a drum-sparse side cannot gallop against anything.
+  const structural = structuralGrooveConflict(
     {
       syncopation: outgoing.analysis?.descriptors?.bars?.syncopation,
       bpm: outgoing.analysis?.bpm,
       downbeat0Ms: outgoing.analysis?.downbeatTimesMs?.[0] ?? null,
-      windowStartMs: resolvedWindow.mixOutMs - PLANNER_GROOVE_LOCAL_WINDOW_BARS * outgoingBarMs,
+      windowStartMs: resolvedWindow.mixOutMs,
+      windowBars: resolvedWindow.barCount,
     },
     {
       syncopation: incoming.analysis?.descriptors?.bars?.syncopation,
       bpm: incoming.analysis?.bpm,
       downbeat0Ms: incoming.analysis?.downbeatTimesMs?.[0] ?? null,
       windowStartMs: resolvedWindow.mixInMs,
+      windowBars: resolvedWindow.barCount,
     },
     PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP,
   );
-  if (structuralConflict) {
-    return crossfade("groove-syncopation-conflict");
+  if (structural.conflict && structural.gap != null) {
+    return crossfade("groove-syncopation-conflict", DEFAULT_TRANSITION_OVERLAP_MS, {
+      grooveGap: Number(structural.gap.toFixed(3)),
+      grooveOutSync: Number((structural.outgoing?.mean ?? 0).toFixed(3)),
+      grooveInSync: Number((structural.incoming?.mean ?? 0).toFixed(3)),
+      grooveOutBars: structural.outgoing?.measuredBars ?? 0,
+      grooveInBars: structural.incoming?.measuredBars ?? 0,
+      grooveOutWindowMs: Math.round(resolvedWindow.mixOutMs),
+      grooveInWindowMs: Math.round(resolvedWindow.mixInMs),
+    });
   }
-  const groove = grooveCompatibility(outgoing.analysis?.bars, incoming.analysis?.bars, 64, {
-    outgoingSyncopation,
-    incomingSyncopation,
-  });
+  // Groove-triggered bass_swap scores the same overlap-local material the
+  // structural gate measures — the outgoing's beats from its mix-out and the
+  // incoming's from its mix-in, sized to the join's bar count (F3 locality:
+  // file tail/head profiles can describe material the join never plays).
+  // Profiles are grid-indexed, so without beat times there is no way to
+  // locate the overlap in them; abstain rather than scoring the wrong bars.
+  const outProfile = outgoing.analysis?.bars;
+  const inProfile = incoming.analysis?.bars;
+  const outStartBeat =
+    outgoing.analysis?.beatTimesMs && outProfile
+      ? beatIndexAtOrAfter(outgoing.analysis.beatTimesMs, resolvedWindow.mixOutMs)
+      : null;
+  const inStartBeat =
+    incoming.analysis?.beatTimesMs && inProfile
+      ? beatIndexAtOrAfter(incoming.analysis.beatTimesMs, resolvedWindow.mixInMs)
+      : null;
+  const groove =
+    outProfile && inProfile && outStartBeat != null && inStartBeat != null
+      ? grooveCompatibility(
+          localBeatProfile(outProfile, outStartBeat),
+          localBeatProfile(inProfile, inStartBeat),
+          resolvedWindow.barCount * 4,
+          {
+            outgoingSyncopation,
+            incomingSyncopation,
+          },
+          { positioned: true },
+        )
+      : null;
   const grooveTriggeredSwap = groove != null && groove < 0.0;
+  // Explicit abstention: per-bar series exist but a side's overlap window is
+  // drum-sparse (fewer than two measured bars), so the structural gate could
+  // not compare. Distinguish this from "no per-bar evidence at all".
+  const structuralAbstain =
+    structural.gap == null &&
+    ((outgoing.analysis?.descriptors?.bars?.syncopation?.length ?? 0) > 0 ||
+      (incoming.analysis?.descriptors?.bars?.syncopation?.length ?? 0) > 0)
+      ? structural.outgoing == null && structural.incoming == null
+        ? "both-sparse"
+        : structural.outgoing == null
+          ? "outgoing-sparse"
+          : "incoming-sparse"
+      : null;
   const aligned = grooveTriggeredSwap
     ? { type: "bass_swap" as const, reason: "groove-kick-conflict" }
     : { type: "phrase_mix" as const, reason: "continuity-window" };
@@ -457,6 +515,7 @@ export function chooseTransition(
           ? { incomingDropMs: resolvedWindow.incomingDropMs }
           : {}),
         ...(keyClash ? { keyClash: true, keyClashWarning: "KEY_CLASH" } : {}),
+        ...(structuralAbstain ? { grooveAbstain: structuralAbstain } : {}),
         ...(policyHandoff.rateRegionsVersion === 2 ? { rateRegionsVersion: 2 } : {}),
         ...(selectionReason ? { selectionReason } : {}),
         ...(resolvedWindow.continuity

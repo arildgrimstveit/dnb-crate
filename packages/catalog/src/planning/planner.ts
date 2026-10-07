@@ -315,6 +315,10 @@ export function draftSetPlan(
     // "galloping" perception when two incompatible grooves are blended by
     // phrase_mix — a signal no aggregate descriptor can see (beatmatching
     // followups item 1: verified on Freefall→Go vs Just a Thought→Freefall).
+    // Score-time approximation: windows are not planned yet, so this reads
+    // file-tail/file-head slices. chooseTransition re-scores the same pair
+    // on the actual overlap-local material when the window is known (F3);
+    // keep that split honest rather than pretending these are the same bars.
     const groove = source
       ? grooveCompatibility(srcA?.bars, candA?.bars, 64, {
           outgoingSyncopation: srcA?.descriptors?.grooveSyncopation ?? null,

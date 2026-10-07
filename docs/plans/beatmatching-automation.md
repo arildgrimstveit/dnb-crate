@@ -63,11 +63,16 @@ Shipped with it, calibrated on that pair:
    the X-Ray→Somewhere bad pair (0.40). Whole-track syncopation cannot
    separate praised from bad — the difference is _where the overlap lands_.
    DSP 3.10.0 added per-bar syncopation (`bars.syncopation`, null = no
-   measurable backbone); the structural gate now fires only on the
-   **overlap-local** gap (K=16 bars per side), threshold 0.58 sitting in the
-   empty calibration band (praised max 0.447 vs bad 0.706). Drum-sparse
-   windows or missing series leave the gate silent — no gate beats a wrong
-   gate. The whole-track syncopation-gap **penalty** stays in planner
+   measurable backbone); the structural gate fires only on the
+   **overlap-local** gap — each side measured over the join's actual bar
+   count starting at its mix-out/mix-in (corrected October 2026, repository
+   review F3: the earlier fixed K=16 window sampled the outgoing's bars
+   _before_ its overlap) — with threshold 0.58 sitting in the
+   empty calibration band (praised max 0.447 vs bad 0.706, both measured
+   with the pre-correction window; remeasure before tuning). Drum-sparse
+   windows abstain explicitly (`grooveAbstain`) and missing series leave
+   the gate silent — no gate beats a wrong gate. The whole-track
+   syncopation-gap **penalty** stays in planner
    scoring as soft steering.
 2. ~~Tests~~ — synthetic separation + per-bar locality tests shipped
    (`dsp-analyzer.test.ts`, `groove.test.ts`). The planned "swung" fixture
@@ -101,11 +106,18 @@ the old code handled well must not change.
 
 ## Phase 4 — post-render audio verification (M–L)
 
-**Status: shipped.** `checkRender` runs `diagnoseRenderedMix` /
-`diagnoseOverlapAudio` (decode overlap regions, band-split transients,
-onset-coincidence measurement) and reports per-join `audioStatus`
-(pass / advisory / review / fail; sparse builds report unmeasured, never
-fail). The October 2026 groove-sync full mix checked green end to end.
+**Status: partially shipped; reopened October 2026 (repository review F2).**
+`checkRender` decodes a window of the rendered master around each suspicious
+join and measures mix quality (stutter, clipping, overlap holes, boundary
+discontinuities) as `audioFindings`. A mixed waveform cannot attribute
+transients to decks, so beat alignment stays honestly `unmeasured` per join and
+an inconclusive scan never clears a stored-grid failure (the earlier
+`advisory`-clears-failure behavior was removed). The documented
+onset-coincidence verifier over the two placed decks and the final blend is
+still to be built and calibrated against labeled good/bad joins; until then no
+audio signal gates a render. The October 2026 groove-sync full mix checked
+green end to end and auditioned well — that is listening evidence, not
+independent alignment verification.
 
 ## Phase 5 — small items (S, any order)
 

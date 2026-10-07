@@ -78,13 +78,22 @@ export function grooveCompatibility(
     outgoingSyncopation?: number | null;
     incomingSyncopation?: number | null;
   },
+  options?: {
+    /**
+     * The bars objects are already positioned on the join's overlap windows
+     * (see localBeatProfile): read both sides from the START of the provided
+     * arrays instead of the outgoing file tail. File-tail/head slicing is the
+     * score-time approximation for when windows are not known yet.
+     */
+    positioned?: boolean;
+  },
 ): number | null {
   const outKick = outgoingBars?.beatKick;
   const inKick = incomingBars?.beatKick;
   if (!outKick || !inKick || outKick.length < beatCount || inKick.length < beatCount) {
     return null;
   }
-  const outTail = outKick.slice(-beatCount);
+  const outTail = options?.positioned ? outKick.slice(0, beatCount) : outKick.slice(-beatCount);
   const inHead = inKick.slice(0, beatCount);
   const kick = cosineSim(outTail, inHead);
   const outSnare = outgoingBars?.beatSnare;
@@ -94,7 +103,12 @@ export function grooveCompatibility(
     inSnare != null &&
     outSnare.length >= beatCount &&
     inSnare.length >= beatCount;
-  const snare = hasSnare ? cosineSim(outSnare.slice(-beatCount), inSnare.slice(0, beatCount)) : 0;
+  const snare = hasSnare
+    ? cosineSim(
+        options?.positioned ? outSnare.slice(0, beatCount) : outSnare.slice(-beatCount),
+        inSnare.slice(0, beatCount),
+      )
+    : 0;
   const outOnset = outgoingBars?.beatOnset;
   const inOnset = incomingBars?.beatOnset;
   const hasOnset =
@@ -102,9 +116,19 @@ export function grooveCompatibility(
     inOnset != null &&
     outOnset.length >= beatCount &&
     inOnset.length >= beatCount;
-  const onset = hasOnset ? cosineSim(outOnset.slice(-beatCount), inOnset.slice(0, beatCount)) : 0;
+  const onset = hasOnset
+    ? cosineSim(
+        options?.positioned ? outOnset.slice(0, beatCount) : outOnset.slice(-beatCount),
+        inOnset.slice(0, beatCount),
+      )
+    : 0;
   const kickVsSnare = hasSnare ? cosineSim(outTail, inSnare.slice(0, beatCount)) : 0;
-  const snareVsKick = hasSnare ? cosineSim(outSnare.slice(-beatCount), inHead) : 0;
+  const snareVsKick = hasSnare
+    ? cosineSim(
+        options?.positioned ? outSnare.slice(0, beatCount) : outSnare.slice(-beatCount),
+        inHead,
+      )
+    : 0;
   // Kick dominates: in DnB the kick pattern is the rhythmic anchor. If kicks
   // don't lock, the gallop is immediate regardless of snare agreement.
   // Snare confirms but can't rescue a kick conflict. Calibrated on X-Ray
@@ -163,6 +187,16 @@ export function sparseOverlapPenalty(
   return 0;
 }
 
+/** Measurement of one side's overlap-local syncopation window. */
+export type LocalGrooveMeasurement = {
+  /** Mean backbone syncopation across the measured bars. */
+  mean: number;
+  /** Bars in the window that actually carried a measurement. */
+  measuredBars: number;
+  /** First grid bar index the window sampled. */
+  startBar: number;
+};
+
 /** One side of an overlap-local groove window. */
 export type LocalGrooveSide = {
   /** Per-bar backbone syncopation series (bars.syncopation). */
@@ -170,12 +204,21 @@ export type LocalGrooveSide = {
   bpm?: number | null;
   /** First downbeat time, the bar-series origin. */
   downbeat0Ms?: number | null;
-  /** Start of the window in source time: mix-out minus the window length
-   * for the outgoing side, mix-in for the incoming side. */
+  /**
+   * Start of the window in source time. This is where the two decks actually
+   * meet: the outgoing side passes its mix-out (the START of its overlap),
+   * the incoming side its mix-in. Both are the final aligned positions.
+   */
   windowStartMs: number;
+  /**
+   * Bars of overlap to measure — the join's actual bar count (8/16/32), not
+   * a fixed span. With rate = target/source, an N-bar overlap at target
+   * tempo consumes exactly N of each side's own source bars.
+   */
+  windowBars?: number;
 };
 
-function localSyncopation(side: LocalGrooveSide): number | null {
+function localSyncopation(side: LocalGrooveSide): LocalGrooveMeasurement | null {
   const series = side.syncopation;
   const bpm = side.bpm;
   if (!Array.isArray(series) || series.length === 0 || !bpm || !(bpm > 0)) {
@@ -183,37 +226,87 @@ function localSyncopation(side: LocalGrooveSide): number | null {
   }
   const barMs = (4 * 60_000) / bpm;
   const origin = side.downbeat0Ms ?? 0;
+  const windowBars = Math.max(1, Math.round(side.windowBars ?? PLANNER_GROOVE_LOCAL_WINDOW_BARS));
   const fromBar = Math.round((side.windowStartMs - origin) / barMs);
-  const slice = series.slice(
-    Math.max(0, fromBar),
-    Math.max(0, fromBar) + PLANNER_GROOVE_LOCAL_WINDOW_BARS,
-  );
+  const startBar = Math.max(0, fromBar);
+  const slice = series.slice(startBar, startBar + windowBars);
   const measured = slice.filter((v): v is number => v != null);
   // A drum-sparse window has no groove to conflict with; below two measured
-  // bars the estimate is noise.
+  // bars the estimate is noise. Sparse windows abstain explicitly instead of
+  // scoring material the join never plays.
   if (measured.length < 2) {
     return null;
   }
-  return measured.reduce((sum, v) => sum + v, 0) / measured.length;
+  return {
+    mean: measured.reduce((sum, v) => sum + v, 0) / measured.length,
+    measuredBars: measured.length,
+    startBar,
+  };
 }
+
+export type StructuralGrooveResult = {
+  conflict: boolean;
+  /** |mean gap| between the two windows; null when either side abstained. */
+  gap: number | null;
+  outgoing: LocalGrooveMeasurement | null;
+  incoming: LocalGrooveMeasurement | null;
+};
 
 /**
  * Overlap-local structural groove conflict: |syncopation gap| between the
- * outgoing's last bars before mix-out and the incoming's first bars after
- * mix-in, measured from the per-bar series. True only when BOTH sides are
- * locally measurable — a drum-sparse side cannot gallop against anything,
- * and whole-track averages demonstrably cannot separate praised joins
+ * outgoing's bars DURING the overlap (from its mix-out, the overlap start)
+ * and the incoming's bars from its mix-in, measured from the per-bar series
+ * over the join's actual bar count. The material before the outgoing's
+ * mix-out is not heard in the blend and must not gate the join (F3,
+ * repository review 2026-10-08). True only when BOTH sides are locally
+ * measurable — a drum-sparse side cannot gallop against anything, and
+ * whole-track averages demonstrably cannot separate praised joins
  * (LAMG→Barren 0.365 praised) from bad ones (X-Ray→Somewhere 0.400 gallops).
+ *
+ * The labeled-pair numbers cited next to the threshold were measured with
+ * the pre-fix pre-overlap window; remeasure them on the overlap-local
+ * window before tuning the threshold further.
  */
 export function structuralGrooveConflict(
   outgoing: LocalGrooveSide,
   incoming: LocalGrooveSide,
   threshold: number,
-): boolean {
+): StructuralGrooveResult {
   const outSync = localSyncopation(outgoing);
   const inSync = localSyncopation(incoming);
   if (outSync == null || inSync == null) {
-    return false;
+    return { conflict: false, gap: null, outgoing: outSync, incoming: inSync };
   }
-  return Math.abs(outSync - inSync) > threshold;
+  const gap = Math.abs(outSync.mean - inSync.mean);
+  return { conflict: gap > threshold, gap, outgoing: outSync, incoming: inSync };
+}
+
+/**
+ * Slice a per-beat profile from a start beat so groove scoring reads the
+ * join's actual overlap material instead of the file head/tail. Only the
+ * per-beat arrays are sliced; per-bar series belong to bar-indexed callers.
+ */
+export function localBeatProfile<
+  T extends { beatKick?: number[]; beatSnare?: number[]; beatOnset?: number[] },
+>(bars: T, startBeat: number): T {
+  return {
+    ...bars,
+    ...(bars.beatKick != null ? { beatKick: bars.beatKick.slice(startBeat) } : {}),
+    ...(bars.beatSnare != null ? { beatSnare: bars.beatSnare.slice(startBeat) } : {}),
+    ...(bars.beatOnset != null ? { beatOnset: bars.beatOnset.slice(startBeat) } : {}),
+  };
+}
+
+/**
+ * Index of the first beat at or after `positionMs`. Returns the array length
+ * when the position is past the last beat, so callers abstain on empty
+ * windows instead of reading the file tail.
+ */
+export function beatIndexAtOrAfter(beatTimesMs: number[], positionMs: number): number {
+  for (let i = 0; i < beatTimesMs.length; i += 1) {
+    if ((beatTimesMs[i] ?? Number.POSITIVE_INFINITY) >= positionMs) {
+      return i;
+    }
+  }
+  return beatTimesMs.length;
 }

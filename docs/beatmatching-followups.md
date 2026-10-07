@@ -57,25 +57,41 @@ library IQR width of ~0.11). `backbeatConcentration` ships alongside it.
 
 Planner consumption: a syncopation-gap penalty in `grooveCompatibility` (tolerance
 0.12, slope 3, whole-track — soft steering) and a structural-conflict fallback in
-`chooseTransition` gated on the **overlap-local** per-bar gap (K=16, threshold
-0.58, drum-sparse windows silent) → crossfade (reason
-`groove-syncopation-conflict`) because no grid-aligned template can blend
-structurally incompatible backbones — bass_swap still crossfades mids/highs and
+`chooseTransition` gated on the **overlap-local** per-bar gap (each side measured
+over the join's actual bar count from its mix-out/mix-in — corrected October 2026
+per repository review F3; the previous K=16 window sampled the outgoing's bars
+_before_ its overlap, material the blend never plays) with threshold 0.58 and
+drum-sparse windows abstaining explicitly (`grooveAbstain` parameter) → crossfade
+(reason `groove-syncopation-conflict`, evidence in `grooveGap`/`grooveOutBars`/
+`grooveInBars`) because no grid-aligned template can blend structurally
+incompatible backbones — bass_swap still crossfades mids/highs and
 gallops (verified by audition). Approved recipes recall first and keep precedence.
 See §Calibration dataset for why the gate is local-only: user-praised joins at
-whole-track gaps up to 0.425 falsify any whole-track threshold.
+whole-track gaps up to 0.425 falsify any whole-track threshold. The 0.58 threshold
+and the labeled-pair numbers above were measured with the pre-correction window;
+remeasure the labeled pairs on the overlap-local window before tuning further.
 
 Distinct failure mode confirmed by the same metric: Sakura → I Don't Wanna Wake Up
 (0.753 vs 0.671, gap 0.08 — correctly NOT structural) gallops from misalignment,
 not pattern conflict. Structural conflict and alignment error are now separable
 before rendering.
 
-## 4. Post-render audio verification — RESOLVED October 2026
+## 4. Post-render audio verification — PARTIALLY IMPLEMENTED, reopened October 2026
 
-`render:check` now measures onset coincidence on rendered overlaps
-(`diagnoseRenderedMix`: decode overlap regions, band-split transients,
-coincidence-vs-shift) and reports per-join `audioStatus`. Sparse builds report
-unmeasured, never fail.
+The repository review (8 October 2026, F2) reopened this phase: the shipped
+`render:check` audio path decodes the mixed master only. That scan measures mix
+quality (stutter, clipping, holes, clicks) and reports it as `audioFindings`,
+but it has no deck-attributed onset evidence, so it cannot verify kick/snare
+coincidence versus shift — `audioStatus` honestly reports `unmeasured` for
+alignment, and an inconclusive scan no longer clears a stored-grid failure
+(the previous `advisory` state could). Historical green checks were real
+listening evidence but not independent alignment verification.
+
+Remaining for full resolution: the independent verifier over the two placed,
+stretched deck probes and the final blend — coverage across overlap
+start/middle/end, per-region confidence, ambiguity reporting, and calibration
+against labeled good/bad joins (including whole-beat phase-equivalent shifts,
+offbeat hats, and drifting grids) before any audio signal gates a render.
 
 ## 5. Recipe persistence for hand-tuned joins
 
