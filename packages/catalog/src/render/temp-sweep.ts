@@ -1,4 +1,5 @@
-import { readdir, stat, unlink } from "node:fs/promises";
+import { readdir, rm, stat, unlink } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 /** Render working files that a hard-killed process (SIGKILL, power loss) can
@@ -15,6 +16,12 @@ const TEMP_PATTERNS: RegExp[] = [
   /\.rb\d+\.slice\.wav$/i,
   /\.rb\d+\.wav$/i,
 ];
+
+/** Scratch directories this codebase creates in the OS temp dir (analysis
+ * decode, render fixtures, engine probes). Anything with our prefix that has
+ * been idle past the sweep age is fair game; foreign directories are never
+ * touched. */
+const TMP_DIR_PREFIXES: RegExp[] = [/^dnb-/];
 
 /** Only files untouched for this long are swept, so a still-running or very
  * recently killed render's working files are never deleted from under it. */
@@ -61,6 +68,28 @@ export async function sweepStaleRenderTemps(
         );
       }
     }
+  }
+  // Safety net for scratch dirs leaked into the OS temp dir (analysis
+  // decode folders, test fixtures, engine probes). Only our own prefixes,
+  // only past the age threshold.
+  try {
+    const tmpEntries = await readdir(os.tmpdir(), { withFileTypes: true });
+    for (const entry of tmpEntries) {
+      if (!entry.isDirectory() || !TMP_DIR_PREFIXES.some((p) => p.test(entry.name))) {
+        continue;
+      }
+      const full = path.join(os.tmpdir(), entry.name);
+      try {
+        const info = await stat(full);
+        if (now() - info.mtimeMs < TEMP_SWEEP_MIN_AGE_MS) continue;
+        await rm(full, { recursive: true, force: true });
+        removed.push(full);
+      } catch (error) {
+        options.logger?.warn({ err: error, dir: entry.name }, "Temp sweep skipped a directory");
+      }
+    }
+  } catch {
+    // Temp dir unreadable: nothing to sweep.
   }
   return removed;
 }
