@@ -239,6 +239,8 @@ export {
   listAnalysisJobsDataSchema,
   listAnalysisJobsInputSchema,
   planTransitionDataSchema,
+  inspectTransitionInputSchema,
+  inspectTransitionDataSchema,
   planTransitionInputSchema,
   setBeatAnchorInputSchema,
   startTrackAnalysisInputSchema,

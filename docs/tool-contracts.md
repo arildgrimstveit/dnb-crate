@@ -109,6 +109,11 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 - Output: `{ proposals: TransitionProposal[] }` ranked; analyzer-derived cues are reasons, not blockers; incoming `drop` only when `preferredType=bass_swap` and `allowDropIn`
 - Structural eligibility is shared with the set planner: when the overlap-local groove gate conflicts on the resolved window, aligned proposals are returned infeasible with the `groove-syncopation-conflict` blocker and crossfade is the feasible aligned alternative. `allowLowConfidence` / `allowExcessiveTempo` remain explicit overrides for grid/tempo feasibility only — they do not bypass structural conflict.
 
+## `inspect_transition`
+
+- Input: `{ setPlanId, transitionId }`
+- Output: one structured evidence view for a saved join — stored treatment (type, duration, bars, target BPM, selection reason, F7 pair stamp, applied recipe), placed source windows for both sides (start/end, playback rate, the outgoing's overlap start in source coordinates), alignment provenance (offset, period, mode, onset-lock beats), the groove-gate numbers recorded at selection (gap, per-side means and measured bars, window positions, abstention reason), what the planner would choose for the pair today, and per-template alternatives with F6-eligibility blockers. Read-only diagnostic surface; the CLI equivalent is `transition:inspect --plan UUID --transition UUID`.
+
 ## `validate_transition`
 
 - Input: type plus optional duration/rates/overrides

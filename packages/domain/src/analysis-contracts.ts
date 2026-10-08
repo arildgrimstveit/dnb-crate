@@ -113,6 +113,72 @@ export const validateTransitionInputSchema = z.object({
     .describe(`Default ${MAX_TEMPO_DEVIATION}`),
 });
 
+export const inspectTransitionInputSchema = z.object({
+  setPlanId: trackIdSchema,
+  transitionId: trackIdSchema,
+});
+
+export const inspectTransitionDataSchema = z.object({
+  setPlanId: z.string(),
+  transitionId: z.string(),
+  order: z.number().int(),
+  stored: z.object({
+    type: z.string(),
+    durationMs: z.number(),
+    barCount: z.number().nullable(),
+    targetBpm: z.number().nullable(),
+    selectionReason: z.string().nullable(),
+    pairStampTrackId: z.string().nullable(),
+    appliedRecipeId: z.string().nullable(),
+  }),
+  outgoing: z.object({
+    trackId: z.string(),
+    title: z.string(),
+    sourceStartMs: z.number(),
+    sourceEndMs: z.number(),
+    playbackRate: z.number(),
+    overlapStartSourceMs: z.number(),
+  }),
+  incoming: z.object({
+    trackId: z.string(),
+    title: z.string(),
+    sourceStartMs: z.number(),
+    sourceEndMs: z.number(),
+    playbackRate: z.number(),
+  }),
+  alignment: z.object({
+    offsetMs: z.number().nullable(),
+    periodMs: z.number().nullable(),
+    mode: z.string().nullable(),
+    onsetLockBeats: z.number().nullable(),
+  }),
+  groove: z.object({
+    gap: z.number().nullable(),
+    outgoingMean: z.number().nullable(),
+    incomingMean: z.number().nullable(),
+    outgoingBars: z.number().nullable(),
+    incomingBars: z.number().nullable(),
+    outgoingWindowMs: z.number().nullable(),
+    incomingWindowMs: z.number().nullable(),
+    abstain: z.string().nullable(),
+  }),
+  freshView: z
+    .object({
+      type: z.string(),
+      reason: z.string().nullable(),
+      rateInfeasible: z.boolean(),
+    })
+    .nullable(),
+  alternatives: z.array(
+    z.object({
+      type: z.string(),
+      feasible: z.boolean(),
+      blockers: z.array(z.string()),
+      score: z.number(),
+    }),
+  ),
+});
+
 export const analysisJobSchema = z.object({
   keyStages: z
     .array(

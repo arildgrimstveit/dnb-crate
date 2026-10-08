@@ -499,6 +499,164 @@ export class CatalogService {
     );
   }
 
+  /** Join inspector (batch 9 first slice): one structured evidence view for
+   * a saved join — the stored treatment, its placed windows, the alignment
+   * provenance, the groove-gate numbers that selected it, and what the
+   * planner would choose today (with per-template blockers), so a bad join
+   * can be diagnosed without reconstructing source positions by hand. */
+  inspectTransition(input: { setPlanId: string; transitionId: string }): {
+    setPlanId: string;
+    transitionId: string;
+    order: number;
+    stored: {
+      type: string;
+      durationMs: number;
+      barCount: number | null;
+      targetBpm: number | null;
+      selectionReason: string | null;
+      pairStampTrackId: string | null;
+      appliedRecipeId: string | null;
+    };
+    outgoing: {
+      trackId: string;
+      title: string;
+      sourceStartMs: number;
+      sourceEndMs: number;
+      playbackRate: number;
+      overlapStartSourceMs: number;
+    };
+    incoming: {
+      trackId: string;
+      title: string;
+      sourceStartMs: number;
+      sourceEndMs: number;
+      playbackRate: number;
+    };
+    alignment: {
+      offsetMs: number | null;
+      periodMs: number | null;
+      mode: string | null;
+      onsetLockBeats: number | null;
+    };
+    groove: {
+      gap: number | null;
+      outgoingMean: number | null;
+      incomingMean: number | null;
+      outgoingBars: number | null;
+      incomingBars: number | null;
+      outgoingWindowMs: number | null;
+      incomingWindowMs: number | null;
+      abstain: string | null;
+    };
+    freshView: {
+      type: string;
+      reason: string | null;
+      rateInfeasible: boolean;
+    } | null;
+    alternatives: Array<{
+      type: string;
+      feasible: boolean;
+      blockers: string[];
+      score: number;
+    }>;
+  } {
+    const stored = this.requirePlan(input.setPlanId);
+    const entries = [...stored.plan.entries].sort((a, b) => a.order - b.order);
+    const index = entries.findIndex((item) => item.transitionToNext?.id === input.transitionId);
+    if (index < 0 || index >= entries.length - 1) {
+      throw new DomainError(
+        "INVALID_SET_PLAN",
+        `No transition ${input.transitionId} on plan ${input.setPlanId}`,
+      );
+    }
+    const outgoingEntry = entries[index]!;
+    const incomingEntry = entries[index + 1]!;
+    const transition = outgoingEntry.transitionToNext!;
+    const outgoingTrack = this.requireTrack(outgoingEntry.trackId);
+    const incomingTrack = this.requireTrack(incomingEntry.trackId);
+    const overlapMs = transition.durationMs;
+    const outRate = outgoingEntry.playbackRate > 0 ? outgoingEntry.playbackRate : 1;
+
+    // What the planner would choose for this pair today, plus per-template
+    // eligibility (F6 parity) as the alternatives view.
+    const planned = planTransition(
+      this.bundle(outgoingEntry.trackId),
+      this.bundle(incomingEntry.trackId),
+      {
+        outgoingTrackId: outgoingEntry.trackId,
+        incomingTrackId: incomingEntry.trackId,
+        preferredType: "any",
+        targetBpm:
+          typeof transition.parameters.targetBpm === "number"
+            ? transition.parameters.targetBpm
+            : undefined,
+      },
+    );
+    const best = planned.proposals[0] ?? null;
+    const params = transition.parameters;
+    const number = (key: string): number | null =>
+      typeof params[key] === "number" ? (params[key]) : null;
+    const pairStamp = typeof params.incomingTrackId === "string" ? params.incomingTrackId : null;
+    return {
+      setPlanId: input.setPlanId,
+      transitionId: input.transitionId,
+      order: index,
+      stored: {
+        type: transition.type,
+        durationMs: transition.durationMs,
+        barCount: number("barCount"),
+        targetBpm: number("targetBpm"),
+        selectionReason: typeof params.selectionReason === "string" ? params.selectionReason : null,
+        pairStampTrackId: pairStamp,
+        appliedRecipeId: typeof params.appliedRecipeId === "string" ? params.appliedRecipeId : null,
+      },
+      outgoing: {
+        trackId: outgoingEntry.trackId,
+        title: outgoingTrack.title,
+        sourceStartMs: outgoingEntry.sourceStartMs,
+        sourceEndMs: outgoingEntry.sourceEndMs,
+        playbackRate: outgoingEntry.playbackRate,
+        overlapStartSourceMs: outgoingEntry.sourceEndMs - overlapMs * outRate,
+      },
+      incoming: {
+        trackId: incomingEntry.trackId,
+        title: incomingTrack.title,
+        sourceStartMs: incomingEntry.sourceStartMs,
+        sourceEndMs: incomingEntry.sourceEndMs,
+        playbackRate: incomingEntry.playbackRate,
+      },
+      alignment: {
+        offsetMs: number("downbeatOffsetMs"),
+        periodMs: number("alignmentPeriodMs"),
+        mode: typeof params.alignmentMode === "string" ? params.alignmentMode : null,
+        onsetLockBeats: number("onsetLockBeats"),
+      },
+      groove: {
+        gap: number("grooveGap"),
+        outgoingMean: number("grooveOutSync"),
+        incomingMean: number("grooveInSync"),
+        outgoingBars: number("grooveOutBars"),
+        incomingBars: number("grooveInBars"),
+        outgoingWindowMs: number("grooveOutWindowMs"),
+        incomingWindowMs: number("grooveInWindowMs"),
+        abstain: typeof params.grooveAbstain === "string" ? params.grooveAbstain : null,
+      },
+      freshView: best
+        ? {
+            type: best.type,
+            reason: typeof best.reasons[0] === "string" ? best.reasons[0] : null,
+            rateInfeasible: planned.targetBpm == null,
+          }
+        : null,
+      alternatives: planned.proposals.map((proposal) => ({
+        type: proposal.type,
+        feasible: proposal.feasible,
+        blockers: proposal.blockers,
+        score: proposal.score,
+      })),
+    };
+  }
+
   validateTransition(input: {
     outgoingTrackId: string;
     incomingTrackId: string;

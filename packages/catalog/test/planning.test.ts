@@ -2994,3 +2994,64 @@ describe("resolved planning history is explicit and recorded (F8)", () => {
     void first;
   });
 });
+
+describe("join inspector (batch 9)", () => {
+  it("returns stored windows, alignment provenance, groove numbers and alternatives", () => {
+    const catalog = runtime();
+    for (let i = 0; i < 12; i += 1) {
+      seedTrack(catalog, {
+        title: `Inspect ${i}`,
+        artist: `Inspector ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    const created = createPlan(catalog, {
+      name: "Inspect fixture",
+      targetDurationMs: 400_000,
+      seed: 5,
+      explorationWeight: 0,
+    });
+    expect(created.plan.entries.length).toBeGreaterThanOrEqual(3);
+    const outgoing = created.plan.entries[0]!;
+    const incoming = created.plan.entries[1]!;
+    const transition = outgoing.transitionToNext!;
+
+    const inspected = catalog.service.inspectTransition({
+      setPlanId: created.plan.id,
+      transitionId: transition.id,
+    });
+    expect(inspected.order).toBe(0);
+    expect(inspected.outgoing.trackId).toBe(outgoing.trackId);
+    expect(inspected.incoming.trackId).toBe(incoming.trackId);
+    // Pair stamp from F7 identifies the exact ordered pair.
+    expect(inspected.stored.pairStampTrackId).toBe(incoming.trackId);
+    // Placed windows match the plan entries.
+    expect(inspected.outgoing.sourceStartMs).toBe(outgoing.sourceStartMs);
+    expect(inspected.outgoing.sourceEndMs).toBe(outgoing.sourceEndMs);
+    expect(inspected.incoming.sourceStartMs).toBe(incoming.sourceStartMs);
+    // The overlap start derives from the placed end minus the overlap.
+    expect(inspected.outgoing.overlapStartSourceMs).toBe(
+      outgoing.sourceEndMs - transition.durationMs * outgoing.playbackRate,
+    );
+    // Alignment provenance is surfaced when the planner recorded it.
+    expect(inspected.alignment.offsetMs).not.toBeNaN();
+    // The alternatives view is the F6 parity set with per-template blockers.
+    expect(inspected.alternatives.length).toBeGreaterThan(0);
+    for (const proposal of inspected.alternatives) {
+      expect(Array.isArray(proposal.blockers)).toBe(true);
+      expect(typeof proposal.feasible).toBe("boolean");
+    }
+    expect(["crossfade", "phrase_mix", "bass_swap"]).toContain(inspected.freshView?.type);
+
+    // Unknown transition id fails closed.
+    expect(() =>
+      catalog.service.inspectTransition({
+        setPlanId: created.plan.id,
+        transitionId: crypto.randomUUID(),
+      }),
+    ).toThrow(/No transition/);
+  });
+});

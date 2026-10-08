@@ -7,6 +7,8 @@ import {
   getPlanningReadinessInputSchema,
   getTransitionPreferencesDataSchema,
   getTransitionPreferencesInputSchema,
+  inspectTransitionDataSchema,
+  inspectTransitionInputSchema,
   listTransitionFeedbackDataSchema,
   listTransitionFeedbackInputSchema,
   planTransitionDataSchema,
@@ -36,6 +38,25 @@ export function registerPlanningTools(server: McpServer, service: CatalogService
     (input) => {
       try {
         return toolSuccess(service.planTransition(input));
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "inspect_transition",
+    {
+      title: "Inspect transition",
+      description:
+        "One structured evidence view for a saved join: the stored treatment and its placed source windows, alignment provenance (offset/period/mode/onset-lock), the groove-gate numbers that selected it (gap, per-side means, measured bars, window positions, abstentions), what the planner would choose today, and per-template alternatives with blockers. Read-only; use to diagnose a bad join without reconstructing source positions by hand.",
+      inputSchema: inspectTransitionInputSchema,
+      outputSchema: toolResultSchema(inspectTransitionDataSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    },
+    (input) => {
+      try {
+        return toolSuccess(service.inspectTransition(input));
       } catch (error) {
         return toolFailure(error);
       }

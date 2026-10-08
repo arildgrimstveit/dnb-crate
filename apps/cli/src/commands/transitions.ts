@@ -34,6 +34,21 @@ export function run(command: string, args: string[], runtime: CatalogRuntime): b
       });
       return true;
     }
+    case "transition:inspect": {
+      const planId = option(args, "--plan");
+      const transitionId = option(args, "--transition");
+      if (!planId || !transitionId) {
+        throw new Error("transition:inspect requires --plan and --transition");
+      }
+      printJson({
+        ok: true,
+        data: runtime.service.inspectTransition({
+          setPlanId: planId,
+          transitionId,
+        }),
+      });
+      return true;
+    }
     case "transition:validate": {
       const from = option(args, "--from");
       const to = option(args, "--to");
