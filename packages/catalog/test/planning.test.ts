@@ -216,16 +216,23 @@ describe("set planning", () => {
 
   it("auto-references recent plans and rotates prolific artists out", () => {
     const catalog = runtime();
-    // One prolific artist plus a field of single-track artists.
+    // One prolific artist plus a field of single-track artists. Twenty
+    // soloists guarantee the second plan's slots can be filled with fresh
+    // tracks even after the first plan consumed some, so the assertion
+    // measures the rotation penalty rather than supply; the pinned opener
+    // guarantees plan 1 actually contains Prolific history to rotate out.
+    const prolificIds: string[] = [];
     for (let i = 0; i < 6; i += 1)
-      seedTrack(catalog, {
-        title: `Prolific ${i}`,
-        artist: "Prolific",
-        bpm: 174,
-        camelot: "8A",
-        energy: 5,
-      });
-    for (let i = 0; i < 14; i += 1)
+      prolificIds.push(
+        seedTrack(catalog, {
+          title: `Prolific ${i}`,
+          artist: "Prolific",
+          bpm: 174,
+          camelot: "8A",
+          energy: 5,
+        }),
+      );
+    for (let i = 0; i < 20; i += 1)
       seedTrack(catalog, {
         title: `Solo ${i}`,
         artist: `Soloist ${i}`,
@@ -233,17 +240,23 @@ describe("set planning", () => {
         camelot: "8A",
         energy: 5,
       });
-    const brief = { name: "Freshness", targetDurationMs: 1_050_000, seed: 3, explorationWeight: 0 };
-    const first = createPlan(catalog, brief);
+    const brief = { targetDurationMs: 1_050_000, seed: 3, explorationWeight: 0 };
+    const first = createPlan(catalog, {
+      ...brief,
+      name: "Freshness",
+      startTrackId: prolificIds[0],
+    });
     expect(first.plan.entries.length).toBeGreaterThanOrEqual(8);
+    expect(
+      first.plan.entries.filter((entry) => prolificIds.includes(entry.trackId)).length,
+    ).toBeGreaterThan(0);
     // Second plan: no explicit variety — the service auto-references the
     // recent plan, so Prolific tracks carry both track- and artist-level
     // penalties while unused soloists stay fresh.
     const second = createPlan(catalog, { ...brief, name: "Freshness 2" });
-    const prolificInSecond = second.plan.entries.filter((entry) => {
-      const track = catalog.repository.findById(entry.trackId);
-      return track?.artist === "Prolific";
-    });
+    const prolificInSecond = second.plan.entries.filter((entry) =>
+      prolificIds.includes(entry.trackId),
+    );
     expect(prolificInSecond.length).toBe(0);
   });
   it("builds a deterministic plan that honors start, end, and seed", () => {
