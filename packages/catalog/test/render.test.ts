@@ -181,6 +181,95 @@ describe("render jobs", () => {
     ).toBe(true);
   });
 
+  it("rejects a queued render when an interior edit changes the bytes (F4a)", async () => {
+    // Same-size interior edit: the head/tail fingerprint is unchanged, so a
+    // rescan keeps the live row matching — only the frozen full-content
+    // hash can reject the stale queued job.
+    const { catalog, plan, aPath } = await seededLibrary();
+    const first = await catalog.service.startSetRender({ setPlanId: plan.id });
+    const done1 = await catalog.service.waitForRenderJob(first.job.id, 15_000);
+    expect(done1.status).toBe("succeeded");
+    const frozenRequest = catalog.renderJobs.findById(first.job.id)!.params.request!;
+    const evidenceRows = Object.values(frozenRequest.evidence);
+    expect(
+      evidenceRows.some(
+        (row) => row && typeof row === "object" && "sourceContentSha256" in row,
+      ),
+    ).toBe(true);
+
+    const bytes = await readFile(aPath);
+    expect(bytes.length).toBeGreaterThan(256 * 1024);
+    const edited = Buffer.from(bytes);
+    const mid = Math.floor(edited.length / 2);
+    edited[mid] = (edited[mid] ?? 0) ^ 0xff;
+    await writeFile(aPath, edited);
+    await catalog.service.scanLibrary();
+
+    const staleId = crypto.randomUUID();
+    catalog.renderJobs.insertQueued({
+      id: staleId,
+      kind: "full",
+      setPlanId: plan.id,
+      params: { request: frozenRequest },
+    });
+    const stale = await catalog.service.waitForRenderJob(staleId, 15_000);
+    expect(stale.status).toBe("failed");
+    expect(stale.errorCode).toBe("AUDIO_FILE_UNAVAILABLE");
+    expect(stale.errorMessage).toMatch(/queued/);
+  });
+
+  it("still renders a queued job after identical bytes move (F4a)", async () => {
+    const { catalog, plan, aPath } = await seededLibrary();
+    const first = await catalog.service.startSetRender({ setPlanId: plan.id });
+    await catalog.service.waitForRenderJob(first.job.id, 15_000);
+    const frozenRequest = catalog.renderJobs.findById(first.job.id)!.params.request!;
+    const { rename } = await import("node:fs/promises");
+    await rename(aPath, aPath.replace("alpha.wav", "alpha-moved.wav"));
+    await catalog.service.scanLibrary();
+
+    const movedId = crypto.randomUUID();
+    catalog.renderJobs.insertQueued({
+      id: movedId,
+      kind: "full",
+      setPlanId: plan.id,
+      params: { request: frozenRequest },
+    });
+    const moved = await catalog.service.waitForRenderJob(movedId, 15_000);
+    expect(moved.status).toBe("succeeded");
+  });
+
+  it("keeps the legacy live-row policy for requests without a frozen hash (F4a)", async () => {
+    const { catalog, plan, aPath } = await seededLibrary();
+    const first = await catalog.service.startSetRender({ setPlanId: plan.id });
+    await catalog.service.waitForRenderJob(first.job.id, 15_000);
+    const legacyRequest = structuredClone(
+      catalog.renderJobs.findById(first.job.id)!.params.request!,
+    );
+    for (const row of Object.values(legacyRequest.evidence)) {
+      if (row && typeof row === "object" && "present" in row) {
+        delete row.sourceContentSha256;
+      }
+    }
+    // Same-size interior edit keeps the cheap fingerprint — the legacy
+    // policy cannot see it and the job still renders (documented legacy
+    // behavior; requests frozen after F4a carry the strong identity).
+    const bytes = await readFile(aPath);
+    const edited = Buffer.from(bytes);
+    const mid = Math.floor(edited.length / 2);
+    edited[mid] = (edited[mid] ?? 0) ^ 0xff;
+    await writeFile(aPath, edited);
+
+    const legacyId = crypto.randomUUID();
+    catalog.renderJobs.insertQueued({
+      id: legacyId,
+      kind: "full",
+      setPlanId: plan.id,
+      params: { request: legacyRequest },
+    });
+    const legacy = await catalog.service.waitForRenderJob(legacyId, 15_000);
+    expect(legacy.status).toBe("succeeded");
+  });
+
   it("returns a cached preview for an identical second request", async () => {
     const { catalog, plan } = await seededLibrary();
     const transitionId = plan.entries[0]!.transitionToNext!.id;

@@ -36,7 +36,18 @@ export type FrozenTrackEvidence = FrozenEvidenceRef & {
   keyConfidence: number | null;
   camelotKey: string | null;
   audioEndMs: number | null;
+  /** Cheap move-detection fingerprint (size + first/last 64 KiB) at freeze time. */
   fileFingerprint: string | null;
+  /**
+   * Strong render-input identity: SHA-256 over the full source bytes at
+   * freeze time (F4a, repository review 2026-10-08). Execution verifies
+   * against this hash, so a same-size interior edit — invisible to the
+   * head/tail fingerprint — still rejects a queued job. Moving or re-saving
+   * identical bytes keeps the hash and stays supported. Null on legacy
+   * requests frozen before this field existed, or when hashing failed at
+   * freeze time (then `fileFingerprint` governs execution).
+   */
+  sourceContentSha256?: string | null;
   descriptors: SonicDescriptors | null;
 };
 

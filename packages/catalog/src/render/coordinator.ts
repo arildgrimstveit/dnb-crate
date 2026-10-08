@@ -261,20 +261,33 @@ function freezeRenderSettings(settings: RenderSettings): FrozenRenderSettings {
   };
 }
 
-function freezeRenderRequest(
+async function freezeRenderRequest(
   plan: SetPlanV1,
   analyses: AnalysisRepository,
-  tracks: { findById(id: string): { fileFingerprint: string | null } | null },
+  tracks: {
+    findById(id: string): { fileFingerprint: string | null; filePath: string | null } | null;
+  },
   settings: RenderSettings,
-): FrozenRenderRequest {
+  sourceHashForTrack: (trackId: string) => Promise<string | null>,
+): Promise<FrozenRenderRequest> {
   const clone = structuredClone(plan);
   const evidence: FrozenRenderRequest["evidence"] = {};
   for (const entry of clone.entries) {
-    evidence[entry.trackId] = snapshotTrackEvidence(
+    const snapshot = snapshotTrackEvidence(
       analyses,
       entry.trackId,
       tracks.findById(entry.trackId)?.fileFingerprint ?? null,
     );
+    if ("present" in snapshot) {
+      // Strong render-input identity, computed once at freeze time (F4a):
+      // the head/tail fingerprint cannot see same-size interior edits, so a
+      // queued render must be verified against full content bytes.
+      const contentHash = await sourceHashForTrack(entry.trackId);
+      if (contentHash != null) {
+        snapshot.sourceContentSha256 = contentHash;
+      }
+    }
+    evidence[entry.trackId] = snapshot;
   }
   return {
     planContentHash: sha256Json(clone),
@@ -299,6 +312,13 @@ function previewCacheIdentity(
 export class RenderCoordinator {
   canRun: () => boolean = () => true;
   private readonly active = new Set<Promise<void>>();
+  /**
+   * Full-content SHA-256 per source file, cached by path+size+mtime+cheap
+   * fingerprint (F4a). Same-process re-freezes and execution checks reuse
+   * it; a different process re-hashes once. Bounded to keep long-lived
+   * servers from growing without limit.
+   */
+  private readonly sourceHashCache = new Map<string, string>();
   /** Revalidate queued full jobs against the actual plan before decoding sources. */
   validateFullPlan?: (
     plan: SetPlanV1,
@@ -478,7 +498,13 @@ export class RenderCoordinator {
         allowExcessiveTempo: input.allowExcessiveTempo,
         allowGridResidual: input.allowGridResidual,
         allowOverlongDuration: input.allowOverlongDuration,
-        request: freezeRenderRequest(stored.plan, this.analyses, this.tracks, this.settings),
+        request: await freezeRenderRequest(
+          stored.plan,
+          this.analyses,
+          this.tracks,
+          this.settings,
+          (trackId) => this.sourceHashForTrack(trackId),
+        ),
       },
     });
     this.kick();
@@ -530,7 +556,13 @@ export class RenderCoordinator {
       );
     }
     const windowMs = input.windowMs ?? this.settings.previewWindowMs;
-    const request = freezeRenderRequest(stored.plan, this.analyses, this.tracks, this.settings);
+    const request = await freezeRenderRequest(
+      stored.plan,
+      this.analyses,
+      this.tracks,
+      this.settings,
+      (trackId) => this.sourceHashForTrack(trackId),
+    );
     const cacheKey = previewCacheIdentity(request, {
       windowMs,
       template: input.template ?? pair.outgoing.transitionToNext?.type ?? "crossfade",
@@ -572,6 +604,34 @@ export class RenderCoordinator {
     });
     this.kick();
     return { job: toPublicJob(job), warnings: job.warnings };
+  }
+
+  private async sourceHashForTrack(trackId: string): Promise<string | null> {
+    const track = this.tracks.findById(trackId);
+    if (!track?.filePath) {
+      return null;
+    }
+    try {
+      const resolved = path.resolve(track.filePath);
+      const info = await stat(resolved);
+      const fingerprint = await fingerprintFile(resolved, {
+        size: info.size,
+        mtimeMs: info.mtimeMs,
+      });
+      const key = `${resolved}|${info.size}|${info.mtimeMs}|${fingerprint}`;
+      const cached = this.sourceHashCache.get(key);
+      if (cached != null) {
+        return cached;
+      }
+      const hash = await sha256File(resolved);
+      if (this.sourceHashCache.size > 1_000) {
+        this.sourceHashCache.clear();
+      }
+      this.sourceHashCache.set(key, hash);
+      return hash;
+    } catch {
+      return null;
+    }
   }
 
   getStatus(renderJobId: string): RenderJob {
@@ -1626,7 +1686,34 @@ export class RenderCoordinator {
     const resolved = path.resolve(track.filePath);
     const info = await stat(resolved);
     const fingerprint = await fingerprintFile(resolved, { size: info.size, mtimeMs: info.mtimeMs });
-    if (fingerprint !== track.fileFingerprint) {
+    // F4a execution precondition: the source identity FROZEN in the queued
+    // request governs, not the live catalog row. Replacing a file and
+    // rescanning makes the live row match again while an older queued plan
+    // still froze different bytes; a same-size interior edit is invisible to
+    // the head/tail fingerprint and only the full-content hash catches it.
+    // Moving (or re-saving) identical bytes keeps the hash and stays
+    // supported. Legacy requests frozen before this field fall back to the
+    // frozen cheap fingerprint, then to the pre-F4a live-row comparison.
+    const frozenEvidence = request?.evidence[track.id];
+    const frozen = frozenEvidence && "present" in frozenEvidence ? frozenEvidence : undefined;
+    if (typeof frozen?.sourceContentSha256 === "string" && frozen.sourceContentSha256 !== "") {
+      const contentHash = await this.sourceHashForTrack(track.id);
+      if (contentHash == null || contentHash !== frozen.sourceContentSha256) {
+        throw new DomainError(
+          "AUDIO_FILE_UNAVAILABLE",
+          `${track.title} changed on disk since this render was queued (content hash differs from the frozen request)`,
+          { details: { trackId: track.id } },
+        );
+      }
+    } else if (typeof frozen?.fileFingerprint === "string" && frozen.fileFingerprint !== "") {
+      if (fingerprint !== frozen.fileFingerprint) {
+        throw new DomainError(
+          "AUDIO_FILE_UNAVAILABLE",
+          `${track.title} changed on disk since this render was queued (fingerprint differs from the frozen request)`,
+          { details: { trackId: track.id } },
+        );
+      }
+    } else if (fingerprint !== track.fileFingerprint) {
       throw new DomainError(
         "AUDIO_FILE_UNAVAILABLE",
         `${track.title} changed on disk since the last scan`,
