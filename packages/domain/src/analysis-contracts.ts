@@ -186,9 +186,11 @@ export const sonicDescriptorsSchema = z.object({
   bars: z
     .object({
       rms: z.array(z.number()),
-      sub: z.array(z.number()),
-      midFlux: z.array(z.number()),
-      onsetDensity: z.array(z.number()),
+      sub: z.array(z.number()).optional(),
+      midFlux: z.array(z.number()).optional(),
+      onsetDensity: z.array(z.number()).optional(),
+      // Per-bar backbone syncopation; null bars carry no measurable groove.
+      syncopation: z.array(z.number().nullable()).optional(),
       beatKick: z.array(z.number()).optional(),
       beatSnare: z.array(z.number()).optional(),
       beatOnset: z.array(z.number()).optional(),
@@ -196,6 +198,15 @@ export const sonicDescriptorsSchema = z.object({
     .nullable()
     .optional(),
   keyCandidates: z.array(z.string()).max(2).nullable().optional(),
+  // Groove/phase diagnostics (DSP 3.9–3.12). Every field below is optional
+  // and nullable exactly like SonicDescriptors; parsing a stored descriptor
+  // through this schema must not drop them (F5, repository review
+  // 2026-10-08 — guarded by test/descriptor-contracts.test.ts).
+  grooveSyncopation: z.number().nullable().optional(),
+  backbeatConcentration: z.number().nullable().optional(),
+  gridPhaseMaxErrorMs: z.number().nullable().optional(),
+  gridPhaseSuspect: z.boolean().nullable().optional(),
+  beatPhaseHistogram: z.array(z.number()).nullable().optional(),
 });
 
 export const beatGridSummarySchema = z.object({

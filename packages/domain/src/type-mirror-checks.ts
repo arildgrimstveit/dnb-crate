@@ -16,7 +16,9 @@ import type {
   scoreBreakdownSchema,
   setPlanV1Schema,
 } from "./contracts/planning.ts";
+import type { sonicDescriptorsSchema } from "./analysis-contracts.ts";
 import type { rateTransitionInputSchema, transitionFeedbackSchema } from "./feedback-contracts.ts";
+import type { BarEnergySeries, SonicDescriptors } from "./analysis.ts";
 import type {
   CreateSetPlanInput,
   PlanQualityReport,
@@ -60,3 +62,85 @@ export const _transitionFeedback_typeMatchesSchema: TransitionFeedback =
   null as unknown as SchemaOf<typeof transitionFeedbackSchema>;
 export const _transitionFeedback_schemaMatchesType: SchemaOf<typeof transitionFeedbackSchema> =
   null as unknown as TransitionFeedback;
+
+// ---------------------------------------------------------------------------
+// SonicDescriptors mirror (F5, repository review 2026-10-08).
+//
+// Bidirectional assignability alone cannot catch an OPTIONAL field added to
+// the type but not the schema (both directions stay assignable), which is
+// exactly how grooveSyncopation, backbeatConcentration, bars.syncopation and
+// the DSP 3.12 phase fields were silently stripped by schema parses. The
+// key lists below close that hole: every key of the type must appear in the
+// list (compile-time, via AssertNever), and the list must equal the zod
+// shape's keys (runtime, in test/descriptor-contracts.test.ts). Adding an
+// optional field to SonicDescriptors without the schema therefore fails
+// typecheck OR the contract test — never silently.
+export const _sonicDescriptors_typeMatchesSchema: SonicDescriptors = null as unknown as SchemaOf<
+  typeof sonicDescriptorsSchema
+>;
+export const _sonicDescriptors_schemaMatchesType: SchemaOf<typeof sonicDescriptorsSchema> =
+  null as unknown as SonicDescriptors;
+
+/** Every property name of SonicDescriptors, in one maintained list. */
+export const SONIC_DESCRIPTOR_KEYS = [
+  "integratedLufs",
+  "shortTermRmsDbfsMean",
+  "shortTermRmsDbfsMax",
+  "truePeakDb",
+  "subBassRatio",
+  "brightness",
+  "onsetDensity",
+  "dynamicRange",
+  "dropIntensity",
+  "suggestedEnergy",
+  "energy",
+  "danceability",
+  "acousticness",
+  "melodicness",
+  "valence",
+  "waveformSummary",
+  "lowBandEnergy",
+  "midBandEnergy",
+  "highBandEnergy",
+  "chromaVector",
+  "tempoEvidence",
+  "audioStartMs",
+  "audioEndMs",
+  "bars",
+  "keyCandidates",
+  "grooveSyncopation",
+  "backbeatConcentration",
+  "gridPhaseMaxErrorMs",
+  "gridPhaseSuspect",
+  "beatPhaseHistogram",
+] as const;
+
+/** Every property name of BarEnergySeries. */
+export const BAR_SERIES_KEYS = [
+  "rms",
+  "sub",
+  "midFlux",
+  "onsetDensity",
+  "syncopation",
+  "beatKick",
+  "beatSnare",
+  "beatOnset",
+] as const;
+
+type AssertEmpty<T> = [T] extends [never] ? true : never;
+
+/** Fails typecheck when SonicDescriptors grows a key the list misses. */
+export const _descriptorKeyListExact: AssertEmpty<
+  Exclude<keyof SonicDescriptors, (typeof SONIC_DESCRIPTOR_KEYS)[number]>
+> = true;
+/** Fails typecheck when the list names a key SonicDescriptors dropped. */
+export const _descriptorKeyListComplete: AssertEmpty<
+  Exclude<(typeof SONIC_DESCRIPTOR_KEYS)[number], keyof SonicDescriptors>
+> = true;
+/** Same two guards for the per-bar series. */
+export const _barSeriesKeyListExact: AssertEmpty<
+  Exclude<keyof BarEnergySeries, (typeof BAR_SERIES_KEYS)[number]>
+> = true;
+export const _barSeriesKeyListComplete: AssertEmpty<
+  Exclude<(typeof BAR_SERIES_KEYS)[number], keyof BarEnergySeries>
+> = true;
