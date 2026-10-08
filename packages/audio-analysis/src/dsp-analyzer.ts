@@ -1817,17 +1817,19 @@ export function gridPhaseDiagnostics(
     }
     storedScore = storedN === 0 ? 0 : storedScore / storedN;
     // A shifted grid must beat the stored one DECISIVELY to count as an
-    // error: in syncopated DnB the off-beat legitimately rivals the
-    // on-beat, so "loudest phase != stored phase" is syncopation, not
-    // misalignment. Only a clear win (>25%) marks the window — measured
-    // on the live library, this separates the 130-175ms half-beat
-    // cluster (syncopation artifacts) from genuine offsets.
+    // error, AND the shift must be sub-beat scale: genuine grid offsets
+    // (drift, global mis-fit — the WCHIA class, 93ms) are small, while a
+    // decisive win at half a beat (~172ms at 174bpm) is syncopated
+    // bassline content dominating the sub band — not misalignment.
+    // Measured on the live library: 296 tracks sat in the 130-175ms band
+    // with >25% margins; none correspond to audible misalignment.
     let err = 0;
     if (bestScore > storedScore * 1.25) {
       let delta = bestOff - storedPhase;
       if (delta > periodMs / 2) delta -= periodMs;
       if (delta < -periodMs / 2) delta += periodMs;
-      if (Math.abs(delta) > 20) err = Math.abs(delta);
+      const magnitude = Math.abs(delta);
+      if (magnitude > 20 && magnitude <= 110) err = magnitude;
     }
     maxErrorMs = Math.max(maxErrorMs, err);
     windowsMeasured += 1;
