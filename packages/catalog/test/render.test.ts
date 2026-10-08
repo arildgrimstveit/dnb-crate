@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -734,8 +734,12 @@ describe("render jobs", () => {
     expect(join.audioUnmeasuredReason).not.toBeNull();
     expect(checked.failures.some((text) => /stored-grid residual/.test(text))).toBe(true);
     expect(checked.ok).toBe(false);
-    // Diagnostic scratch files must not survive the check.
-    await expect(access(`${checked.outputPath}.phase4-${join.order}.pcm`)).rejects.toThrow();
+    // Diagnostic scratch files must not survive the check (unique per
+    // invocation; concurrent checks cannot collide on one name).
+    const leftovers = (await readdir(path.dirname(checked.outputPath))).filter((name) =>
+      name.includes(".phase4-"),
+    );
+    expect(leftovers).toEqual([]);
   });
 
   it("renders a queued preview from the frozen plan after trims change", async () => {

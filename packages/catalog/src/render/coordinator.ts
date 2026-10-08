@@ -870,7 +870,9 @@ export class RenderCoordinator {
         const startSec =
           Math.max(0, Math.min(Math.max(0, durationMs - windowMs), midpointMs - windowMs / 2)) /
           1000;
-        const tempPcm = `${outputPath}.phase4-${join.order}.pcm`;
+        // Unique per invocation: concurrent checks of the same render must
+        // not collide on one deterministic filename (F10).
+        const tempPcm = `${outputPath}.phase4-${join.order}-${crypto.randomUUID().slice(0, 8)}.pcm`;
         try {
           const pcmRun = await runner.run({
             executable: binaries.ffmpegPath,
