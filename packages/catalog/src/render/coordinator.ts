@@ -93,6 +93,7 @@ import {
   storedGridFromEvidence,
 } from "./check-metrics.ts";
 import { fingerprintFile } from "../fingerprint.ts";
+import { resolveLibraryRoots } from "../scanner.ts";
 import { isPathInsideAnyRoot, isPathInsideRoot } from "../paths.ts";
 import { sectionEnergyAt } from "../planning/cues.ts";
 import { planDurationMs, plannedMixDurationMs, playableOutputMs } from "../planning/timeline.ts";
@@ -1741,7 +1742,12 @@ export class RenderCoordinator {
           "FFmpeg is missing atempo/lowpass/highpass/asplit/amix/afade needed for aligned mixes. Rubber Band is used for stretch when present.",
       });
     }
-    const resolvedRoots = this.config.libraryRoots.map((root) => path.resolve(root));
+    // Realpath the roots exactly as the scanner does when it stores track
+    // paths: on Windows a configured root can carry an 8.3 short name
+    // (C:\Users\RUNNER~1\...) while stored paths are expanded long forms,
+    // and a bare path.resolve() would place every track "outside" the
+    // roots. Caught by the Windows smoke lane, October 2026.
+    const { resolved: resolvedRoots } = await resolveLibraryRoots(this.config.libraryRoots);
     for (const entry of plan.entries) {
       const track = tracksById.get(entry.trackId);
       if (!track) {

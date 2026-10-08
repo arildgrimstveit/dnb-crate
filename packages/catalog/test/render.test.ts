@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -740,6 +740,51 @@ describe("render jobs", () => {
       name.includes(".phase4-"),
     );
     expect(leftovers).toEqual([]);
+  });
+
+  it("keeps a rendered plan ready when the configured root is an alias of the scanned files", async () => {
+    // Windows smoke lane catch (October 2026): the scanner stores
+    // realpath()'d track paths, but readiness compared them against bare
+    // path.resolve(config.libraryRoots). Any root whose configured form
+    // differs from its real path — an 8.3 short name (C:\Users\RUNNER~1),
+    // a junction, a symlink — placed every track "outside the library
+    // roots" and refused every render. Both sides must resolve the same
+    // way.
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-alias-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const realLibrary = path.join(root, "real-library");
+    const aliasLibrary = path.join(root, "alias-library");
+    await mkdir(realLibrary, { recursive: true });
+    await symlink(realLibrary, aliasLibrary, process.platform === "win32" ? "junction" : "dir");
+    const catalog = createCatalogRuntime(
+      {
+        ...testConfig(root),
+        libraryRoots: [aliasLibrary],
+      },
+      undefined,
+      { useFakeFfmpeg: true },
+    );
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(realLibrary, "alpha.wav"), {
+      title: "Alpha",
+      artist: "A",
+      durationMs: 8000,
+    });
+    await writeSineWav(path.join(realLibrary, "bravo.wav"), {
+      title: "Bravo",
+      artist: "B",
+      durationMs: 8000,
+    });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
+    const alpha = tracks.find((track) => track.title === "Alpha")!;
+    const bravo = tracks.find((track) => track.title === "Bravo")!;
+    const plan = saveTwoTrackPlan(catalog, alpha.id, bravo.id);
+    const started = await catalog.service.startSetRender({ setPlanId: plan.id });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
   });
 
   it("renders a queued preview from the frozen plan after trims change", async () => {
