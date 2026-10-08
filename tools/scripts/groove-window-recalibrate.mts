@@ -124,10 +124,10 @@ try {
     }
     const outTl = { ...out, analysis: runtime.service.toTimeline(out) };
     const inTl = { ...inc, analysis: runtime.service.toTimeline(inc) };
-    const chosen = chooseTransition(outTl as TimelineTrack, inTl as TimelineTrack, {});
-    const window = resolveWindow(outTl as TimelineTrack, inTl as TimelineTrack);
-    const oldM = meanGap(outTl as TimelineTrack, inTl as TimelineTrack, window, "pre-overlap");
-    const newM = meanGap(outTl as TimelineTrack, inTl as TimelineTrack, window, "overlap-local");
+    const chosen = chooseTransition(outTl, inTl, {});
+    const window = resolveWindow(outTl, inTl);
+    const oldM = meanGap(outTl, inTl, window, "pre-overlap");
+    const newM = meanGap(outTl, inTl, window, "overlap-local");
     newGaps.push({
       pair: `${pair.outgoing} → ${pair.incoming}`,
       gap: newM.gap,
@@ -185,28 +185,15 @@ try {
         alignedJoins += 1;
         // Judge at the stored join's own window: the historical mix-out is
         // where the labeled praise/complaints were actually heard.
-        const mixOutMs =
-          typeof entries[i]!.transitionToNext?.parameters.mixOutMs === "number"
-            ? entries[i]!.transitionToNext!.parameters.mixOutMs
-            : null;
-        const mixInMs =
-          typeof entries[i]!.transitionToNext?.parameters.mixInMs === "number"
-            ? entries[i]!.transitionToNext!.parameters.mixInMs
-            : null;
-        const barCount = (entries[i]!.transitionToNext?.parameters.barCount ?? 16) as 8 | 16 | 32;
+        const mixOutRaw = entries[i]!.transitionToNext?.parameters.mixOutMs;
+        const mixInRaw = entries[i]!.transitionToNext?.parameters.mixInMs;
+        const barCountRaw = entries[i]!.transitionToNext?.parameters.barCount;
+        const mixOutMs = typeof mixOutRaw === "number" ? mixOutRaw : null;
+        const mixInMs = typeof mixInRaw === "number" ? mixInRaw : null;
+        const barCount = (typeof barCountRaw === "number" ? barCountRaw : 16) as 8 | 16 | 32;
         if (mixOutMs != null && mixInMs != null) {
-          const atJoinOld = meanGap(
-            outTl as TimelineTrack,
-            inTl as TimelineTrack,
-            { mixOutMs, mixInMs, barCount },
-            "pre-overlap",
-          );
-          const atJoinNew = meanGap(
-            outTl as TimelineTrack,
-            inTl as TimelineTrack,
-            { mixOutMs, mixInMs, barCount },
-            "overlap-local",
-          );
+          const atJoinOld = meanGap(outTl, inTl, { mixOutMs, mixInMs, barCount }, "pre-overlap");
+          const atJoinNew = meanGap(outTl, inTl, { mixOutMs, mixInMs, barCount }, "overlap-local");
           const oldFires =
             atJoinOld.gap != null && atJoinOld.gap > PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP;
           const newFires =
@@ -218,7 +205,7 @@ try {
             );
           }
         }
-        const chosen = chooseTransition(outTl as TimelineTrack, inTl as TimelineTrack, {
+        const chosen = chooseTransition(outTl, inTl, {
           recall: runtime.service.recipeLookupFor(plan),
         });
         if (
