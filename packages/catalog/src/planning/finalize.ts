@@ -36,6 +36,8 @@ export type FinalizeInput = {
     repairSearch: ReturnType<typeof repairSequence>["diagnostics"] | undefined;
     chainRetry: PlanExplanation["chainRetry"];
     varietyPairs: Array<{ outgoingTrackId: string; incomingTrackId: string }>;
+    recentArtistUses: Record<string, number>;
+    varietyHistoryMode: "auto" | "explicit" | "off";
   };
   targetDurationMs: number;
   requestedArc: NonNullable<CreateSetPlanInput["requestedArc"]>;
@@ -90,6 +92,11 @@ export function buildFinalPlan(input: FinalizeInput): {
           variety: {
             referencePlanIds: brief.variety.referencePlanIds,
             strength: exp.varietyStrength,
+            historyMode: exp.varietyHistoryMode,
+            ...(exp.varietyHistoryMode === "auto"
+              ? { recentArtistUses: exp.recentArtistUses }
+              : {}),
+            policyVersion: 1,
             trackIds: [...exp.historyIds],
             pairs: exp.varietyPairs,
             repeatedTracks: selected.filter((track) =>

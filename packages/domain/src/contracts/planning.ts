@@ -223,10 +223,11 @@ export const createSetPlanInputSchema = z.object({
     .object({
       referencePlanIds: z.array(z.string().uuid()).max(20),
       strength: z.number().min(0).max(1).optional(),
+      history: z.enum(["auto", "off"]).optional(),
     })
     .optional()
     .describe(
-      "Prefer fresh recordings and directed pairs relative to these explicit prior mixes. Soft cost; never bypasses quality or required tracks/pairs. Strength defaults to 0.7. Search drafts are not automatically listening history.",
+      "Prefer fresh recordings and directed pairs relative to these explicit prior mixes. Soft cost; never bypasses quality or required tracks/pairs. Strength defaults to 0.7. history: 'auto' (default) also diversifies against recent qualifying plans when no ids are given; 'off' disables that automatic history. Search drafts are not automatically listening history.",
     ),
   startTrackId: trackIdSchema.optional(),
   endTrackId: trackIdSchema.optional(),
@@ -458,6 +459,9 @@ export const planExplanationSchema = z.object({
     .object({
       referencePlanIds: z.array(z.string()),
       strength: z.number(),
+      historyMode: z.enum(["auto", "explicit", "off"]).optional(),
+      recentArtistUses: z.record(z.string(), z.number()).optional(),
+      policyVersion: z.number().int().optional(),
       trackIds: z.array(z.string()),
       pairs: z.array(z.object({ outgoingTrackId: z.string(), incomingTrackId: z.string() })),
       repeatedTracks: z.number().int(),

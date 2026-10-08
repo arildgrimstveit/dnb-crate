@@ -51,6 +51,7 @@ import {
   resolveCanonicalKeyConfidence,
   resolveDescriptorFilters,
   toPublicTrack,
+  VARIETY_AUTO_HISTORY_SCAN,
   VARIETY_RECENT_PLAN_WINDOW,
 } from "@dnb-crate/domain";
 import { ffmpegMixReady } from "@dnb-crate/audio-renderer";
@@ -602,14 +603,27 @@ export class CatalogService {
     candidateTrackIds?: ReadonlySet<string>,
   ): CreateSetPlanResult {
     try {
+      // F8 (repository review 2026-10-08): the freshness-history resolution is
+      // explicit and recorded. Explicit referencePlanIds win ("explicit");
+      // otherwise "auto" (default) diversifies against the most recent
+      // QUALIFYING plans — filtering for eligibility BEFORE limiting, so a
+      // page of short drafts cannot hide older qualifying history — and
+      // "off" disables automatic history entirely. The resolved ids, mode,
+      // artist-rotation counts and policy version are persisted with the
+      // explanation, so "same catalog + brief + seed" is no longer an
+      // implicit reproducibility claim.
+      const historyPreference = input.variety?.history ?? "auto";
       const explicitReferenceIds = input.variety?.referencePlanIds ?? [];
       let referencePlanIds = explicitReferenceIds;
-      if (explicitReferenceIds.length === 0) {
-        // Freshness default: when the brief doesn't name reference plans,
-        // plan against the most recent mixes so the same honor roll doesn't
-        // fill every set (measured: Pendulum 16/16 plans, 178 of 252
-        // artists never selected). Explicit referencePlanIds still win.
-        const recent = this.setPlans.list(VARIETY_RECENT_PLAN_WINDOW * 2).plans;
+      let historyMode: "auto" | "explicit" | "off";
+      if (explicitReferenceIds.length > 0) {
+        historyMode = "explicit";
+      } else if (historyPreference === "off") {
+        historyMode = "off";
+        referencePlanIds = [];
+      } else {
+        historyMode = "auto";
+        const recent = this.setPlans.list(VARIETY_AUTO_HISTORY_SCAN).plans;
         referencePlanIds = recent
           .filter((summary) => summary.entryCount >= 8)
           .slice(0, VARIETY_RECENT_PLAN_WINDOW)
@@ -643,6 +657,7 @@ export class CatalogService {
         trackIds: [...trackIds],
         pairs,
         recentArtistUses,
+        mode: historyMode,
       };
       const allTracks = this.repository.listAll();
       const descriptorPercentiles = this.getLibraryStats().descriptorPercentiles;
@@ -661,6 +676,12 @@ export class CatalogService {
         {
           ...input,
           descriptors: resolveDescriptorFilters(input.descriptors, descriptorPercentiles),
+          // The brief the planner and its explanation see carries the
+          // RESOLVED reference ids, not the user's raw input.
+          variety: {
+            referencePlanIds,
+            ...(input.variety?.strength != null ? { strength: input.variety.strength } : {}),
+          },
         },
         analyses,
         {

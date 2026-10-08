@@ -1,6 +1,6 @@
 # Scoring and planning
 
-The planner is deterministic. A host model turns “soulful liquid, peak at 45 minutes” into `create_set_plan` fields. Scores are not embeddings. Same catalog + constraints + seed → same plan.
+The planner is deterministic. A host model turns “soulful liquid, peak at 45 minutes” into `create_set_plan` fields. Scores are not embeddings. Same catalog + constraints + seed + **resolved planning history** → same plan: automatic freshness history (the default when a brief names no reference plans) is itself a planning input — it changes when qualifying plans are added, edited or deleted, and each plan records exactly which references it resolved against (`explanation.variety.historyMode`, `referencePlanIds`, `recentArtistUses`, `policyVersion` in `summarize-plan`). Pass `variety.history: "off"` to plan against zero history.
 
 ## Default weights
 

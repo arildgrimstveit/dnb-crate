@@ -2894,3 +2894,90 @@ describe("structural edits invalidate changed adjacencies only (F7)", () => {
     expect(trimmed.explanation.edited).toBeUndefined();
   });
 });
+
+describe("resolved planning history is explicit and recorded (F8)", () => {
+  function seededHistoryCatalog(entryCount: number) {
+    const catalog = runtime();
+    for (let i = 0; i < 6; i += 1) {
+      seedTrack(catalog, {
+        title: `F8 Prolific ${i}`,
+        artist: "F8 Prolific",
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    for (let i = 0; i < 14; i += 1) {
+      seedTrack(catalog, {
+        title: `F8 Solo ${i}`,
+        artist: `F8 Soloist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    const brief = {
+      name: "F8 history",
+      targetDurationMs: 100_000 * entryCount,
+      seed: 3,
+      explorationWeight: 0,
+    };
+    return { catalog, brief };
+  }
+
+  it("records the resolved auto history, mode, artist counts and policy version", () => {
+    const { catalog, brief } = seededHistoryCatalog(9);
+    const first = createPlan(catalog, brief);
+    expect(first.plan.entries.length).toBeGreaterThanOrEqual(8);
+
+    const second = createPlan(catalog, { ...brief, name: "F8 history 2" });
+    expect(second.explanation.variety?.historyMode).toBe("auto");
+    expect(second.explanation.variety?.referencePlanIds).toEqual([first.plan.id]);
+    expect(second.explanation.variety?.policyVersion).toBe(1);
+    expect(Object.keys(second.explanation.variety?.recentArtistUses ?? {}).length).toBeGreaterThan(
+      0,
+    );
+    // The resolved context is persisted, not just returned.
+    expect(
+      catalog.setPlans.findById(second.plan.id)?.explanation.variety?.referencePlanIds,
+    ).toEqual([first.plan.id]);
+  });
+
+  it("does not let a page of short drafts hide older qualifying history", () => {
+    const { catalog, brief } = seededHistoryCatalog(9);
+    const first = createPlan(catalog, brief);
+    expect(first.plan.entries.length).toBeGreaterThanOrEqual(8);
+    // Fourteen discarded 3-entry drafts push the qualifying plan beyond the
+    // old 12-deep recent window; eligibility filtering before the limit must
+    // still find it.
+    for (let i = 0; i < 14; i += 1) {
+      const draft = createPlan(catalog, {
+        name: `F8 draft ${i}`,
+        targetDurationMs: 300_000,
+        seed: i + 1,
+        explorationWeight: 0,
+      });
+      expect(draft.plan.entries.length).toBeLessThan(8);
+    }
+    const after = createPlan(catalog, { ...brief, name: "F8 after drafts" });
+    expect(after.explanation.variety?.historyMode).toBe("auto");
+    expect(after.explanation.variety?.referencePlanIds).toContain(first.plan.id);
+  });
+
+  it("supports an explicit off mode with empty history", () => {
+    const { catalog, brief } = seededHistoryCatalog(9);
+    const first = createPlan(catalog, brief);
+    const off = createPlan(catalog, {
+      ...brief,
+      name: "F8 off",
+      variety: { referencePlanIds: [], history: "off" },
+    });
+    expect(off.explanation.variety?.historyMode).toBe("off");
+    expect(off.explanation.variety?.referencePlanIds).toEqual([]);
+    expect(off.explanation.variety?.trackIds).toEqual([]);
+    expect(off.explanation.variety?.recentArtistUses ?? {}).toEqual({});
+    void first;
+  });
+});

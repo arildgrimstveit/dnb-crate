@@ -70,6 +70,8 @@ export function draftSetPlan(
        * artist. Penalizes artists heard in recent mixes so prolific
        * catalogs don't just rotate tracks. */
       recentArtistUses?: Record<string, number>;
+      /** How the references were resolved (F8): recorded with the plan. */
+      mode?: "auto" | "explicit" | "off";
     };
     /** Internal single retry with complete-chain candidates; keeps the user's brief and seed. */
     chainSearch?: boolean;
@@ -882,6 +884,8 @@ export function draftSetPlan(
       repairSearch,
       chainRetry,
       varietyPairs: options.varietyHistory?.pairs ?? [],
+      recentArtistUses: options.varietyHistory?.recentArtistUses ?? {},
+      varietyHistoryMode: options.varietyHistory?.mode ?? "explicit",
     },
     targetDurationMs,
     requestedArc,

@@ -121,8 +121,14 @@ export type CreateSetPlanInput = {
   artistRepeatSpacing?: number;
   harmonicImportance?: number;
   explorationWeight?: number;
-  /** Explicit prior mixes to diversify against; search drafts are never implicitly history. */
-  variety?: { referencePlanIds: string[]; strength?: number };
+  /** Explicit prior mixes to diversify against; search drafts are never implicitly history.
+   *  history: "auto" (default) also plans against recent qualifying mixes when
+   *  no explicit ids are given; "off" disables that automatic history. */
+  variety?: {
+    referencePlanIds: string[];
+    strength?: number;
+    history?: "auto" | "off";
+  };
   startTrackId?: string;
   endTrackId?: string;
   seed?: number;
@@ -168,6 +174,15 @@ export type PlanExplanation = {
   variety?: {
     referencePlanIds: string[];
     strength: number;
+    /** How the reference ids were resolved (F8): "explicit" from the brief,
+     *  "auto" from recent qualifying plans, "off" when disabled. */
+    historyMode?: "auto" | "explicit" | "off";
+    /** Auto mode: per-artist plan counts the artist-rotation penalty used. */
+    recentArtistUses?: Record<string, number>;
+    /** Version of the auto-history selection policy (eligibility and
+     *  ordering); bump when the policy changes so old explanations stay
+     *  interpretable. */
+    policyVersion?: number;
     trackIds: string[];
     pairs: Array<{ outgoingTrackId: string; incomingTrackId: string }>;
     repeatedTracks: number;
