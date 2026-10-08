@@ -88,10 +88,27 @@ alignment, and an inconclusive scan no longer clears a stored-grid failure
 listening evidence but not independent alignment verification.
 
 Remaining for full resolution: the independent verifier over the two placed,
-stretched deck probes and the final blend — coverage across overlap
+stretched deck probes and the final blend - coverage across overlap
 start/middle/end, per-region confidence, ambiguity reporting, and calibration
 against labeled good/bad joins (including whole-beat phase-equivalent shifts,
 offbeat hats, and drifting grids) before any audio signal gates a render.
+
+October 2026 (batch 7 first slice): an independent **deck-probe verifier**
+now exists. `render:check` decodes each deck's OWN placed source window,
+beat-locks the measured onset trains to the projected frozen grids, and
+compares the trains in output time (`verifyDeckAlignment`): inter-deck
+offset, start/end-half drift, and honest abstention when either train is
+too sparse. Modes: `--audio fast` (default; a 10 s window at the overlap
+midpoint) and `--audio full` (whole overlap, also reporting half-drift);
+`--audio off` skips. Whole-beat relationships stay phase-equivalent
+(bar-phase judgment needs downbeat anchors and belongs to the grid
+checks). First calibration (`tools/scripts/audio-verifier-calibrate.mts`,
+the two accepted-listen renders, 47 aligned joins): **0 measured fails,
+12 pass, 7 review (14.9%), 28 unmeasured** - no hard false positives on
+praised mixes; measured fails appear only on unlabeled draft renders. The
+signal stays ADVISORY (warnings) until the labeled corpus grows and each
+accepted-review is understood; the stored-grid residual remains the only
+alignment gate.
 
 ## 5. Recipe persistence for hand-tuned joins
 

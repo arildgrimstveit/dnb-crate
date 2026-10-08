@@ -87,7 +87,13 @@ export async function run(
       if (!id) {
         throw new Error("render:check requires --id");
       }
-      const checked = await runtime.service.checkRender(id);
+      const audioFlag = option(args, "--audio");
+      if (audioFlag != null && !["off", "fast", "full"].includes(audioFlag)) {
+        throw new Error("render:check --audio must be off, fast, or full");
+      }
+      const checked = await runtime.service.checkRender(id, undefined, {
+        ...(audioFlag ? { audioVerification: audioFlag as "off" | "fast" | "full" } : {}),
+      });
       if (checked.ok) {
         printJson({ ok: true, data: checked });
       } else {

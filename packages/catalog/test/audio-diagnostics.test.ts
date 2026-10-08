@@ -9,6 +9,7 @@ import {
   fadePcm,
   insertSilence,
   mixPcm,
+  verifyDeckAlignment,
 } from "../src/render/audio-diagnostics.ts";
 
 const SR = 8_000;
@@ -215,6 +216,92 @@ describe("independent overlap audio diagnostics", () => {
     expect(result.mix.stutterScore).toBeGreaterThan(0.4);
     expect(result.status).toBe("fail");
     expect(result.reasons.some((reason) => /stutter/.test(reason))).toBe(true);
+  });
+});
+
+describe("independent deck alignment verification (F2 step 2)", () => {
+  const BEAT = 60_000 / 174;
+
+  it("passes two aligned deck trains", () => {
+    const base = Array.from({ length: 40 }, (_, i) => i * BEAT);
+    const result = verifyDeckAlignment({
+      outgoingOnsetsMs: base,
+      incomingOnsetsMs: base.map((time) => time + 3),
+      overlapMs: 40 * BEAT,
+      beatPeriodMs: BEAT,
+    });
+    expect(result.status).toBe("pass");
+    expect(Math.abs(result.deckOffsetMs ?? 99)).toBeLessThanOrEqual(20);
+  });
+
+  it("fails decks half a beat apart", () => {
+    const base = Array.from({ length: 40 }, (_, i) => i * BEAT);
+    const result = verifyDeckAlignment({
+      outgoingOnsetsMs: base,
+      incomingOnsetsMs: base.map((time) => time + BEAT / 2),
+      overlapMs: 40 * BEAT,
+      beatPeriodMs: BEAT,
+    });
+    expect(result.status).toBe("fail");
+    expect(Math.abs(result.deckOffsetMs ?? 0)).toBeGreaterThan(80);
+  });
+
+  it("treats a whole-beat offset as beat-phase equivalent, like the grid checks", () => {
+    // Whole-beat relationships are phase-equivalent on the beat grid: the
+    // onset trains alone cannot establish bar phase (that needs downbeat
+    // anchors, which belong to the grid-level checks). A uniform train
+    // shifted one beat is literally the same point set, so this reads as
+    // aligned — deliberately.
+    const out = Array.from({ length: 40 }, (_, i) => i * BEAT).filter((_, i) => i % 2 === 0);
+    const inc = out.map((time) => time + BEAT);
+    const result = verifyDeckAlignment({
+      outgoingOnsetsMs: out,
+      incomingOnsetsMs: inc,
+      overlapMs: 40 * BEAT,
+      beatPeriodMs: BEAT,
+    });
+    expect(result.status).toBe("pass");
+  });
+
+  it("reviews decks that drift apart across the overlap", () => {
+    // ~3 ms cumulative lag per beat: the halves' offset medians diverge past
+    // the drift threshold.
+    const out = Array.from({ length: 40 }, (_, i) => i * BEAT);
+    const inc = out.map((time, i) => time + i * 3);
+    const result = verifyDeckAlignment({
+      outgoingOnsetsMs: out,
+      incomingOnsetsMs: inc,
+      overlapMs: 40 * BEAT,
+      beatPeriodMs: BEAT,
+    });
+    expect(result.status === "review" || result.status === "fail").toBe(true);
+    expect(result.reasons.some((reason) => /drifts/.test(reason))).toBe(true);
+  });
+
+  it("stays unmeasured when either train is too sparse", () => {
+    const base = Array.from({ length: 40 }, (_, i) => i * BEAT);
+    const result = verifyDeckAlignment({
+      outgoingOnsetsMs: base,
+      incomingOnsetsMs: base.slice(0, 3),
+      overlapMs: 40 * BEAT,
+      beatPeriodMs: BEAT,
+    });
+    expect(result.status).toBe("unmeasured");
+    expect(result.reasons[0]).toMatch(/insufficient deck onsets/);
+  });
+
+  it("flags sparse trains that sit half a beat apart", () => {
+    // Sparse but decisive: even when both trains carry only half the beats,
+    // a half-beat phase relationship is a measured conflict, never a pass.
+    const out = Array.from({ length: 40 }, (_, i) => i * BEAT).filter((_, i) => i % 2 === 0);
+    const inc = out.map((time) => time + BEAT / 2);
+    const result = verifyDeckAlignment({
+      outgoingOnsetsMs: out,
+      incomingOnsetsMs: inc,
+      overlapMs: 40 * BEAT,
+      beatPeriodMs: BEAT,
+    });
+    expect(result.status).toBe("fail");
   });
 });
 

@@ -840,8 +840,12 @@ export class CatalogService {
     return this.renders.getManifest(renderJobId);
   }
 
-  checkRender(renderJobId: string, abortSignal?: AbortSignal) {
-    return this.renders.checkRender(renderJobId, abortSignal);
+  checkRender(
+    renderJobId: string,
+    abortSignal?: AbortSignal,
+    options?: { audioVerification?: "off" | "fast" | "full" },
+  ) {
+    return this.renders.checkRender(renderJobId, abortSignal, options);
   }
 
   listRenderJobs(limit?: number, cursor?: string, setPlanId?: string) {

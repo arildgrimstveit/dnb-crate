@@ -234,6 +234,152 @@ const MIX_ALIGNMENT_UNMEASURED_REASON =
   "mixed decode cannot attribute transients to decks; no independent deck-probe verification ran";
 
 /**
+ * Independent deck alignment verification (F2 step 2, repository review
+ * 2026-10-08): onset trains measured from each deck's OWN placed source
+ * window, compared in output time. Unlike a mixed-waveform scan, each
+ * train is deck-attributed by construction, so inter-deck phase errors are
+ * visible. Whole-beat offsets are phase-equivalent on the beat grid and
+ * deliberately NOT flagged: establishing bar phase needs each deck's
+ * downbeat anchor, which onset trains alone do not carry — that judgment
+ * belongs to the grid-based checks where downbeats exist.
+ */
+export type DeckAlignmentVerification = {
+  status: "pass" | "fail" | "review" | "unmeasured";
+  reasons: string[];
+  /** Median onset-train offset between the decks, wrapped to ±half a bar (ms). */
+  deckOffsetMs: number | null;
+  /** Offset measured over the first half of the overlap (drift detection). */
+  startHalfOffsetMs: number | null;
+  /** Offset measured over the second half of the overlap. */
+  endHalfOffsetMs: number | null;
+  outgoingOnsetCount: number;
+  incomingOnsetCount: number;
+  confidence: DiagnosticConfidence;
+};
+
+const DECK_TRAIN_MIN_ONSETS = 6;
+const DECK_PASS_MS = 20;
+const DECK_REVIEW_MS = 40;
+
+function nearestDelta(target: number, times: number[]): number | null {
+  let best: number | null = null;
+  for (const time of times) {
+    const delta = time - target;
+    if (best == null || Math.abs(delta) < Math.abs(best)) {
+      best = delta;
+    }
+  }
+  return best;
+}
+
+function medianOffset(
+  from: number[],
+  to: number[],
+  wrapMs: number,
+  filter?: (time: number) => boolean,
+): number | null {
+  const deltas: number[] = [];
+  for (const time of from) {
+    if (filter && !filter(time)) {
+      continue;
+    }
+    const delta = nearestDelta(time, to);
+    if (delta == null) {
+      continue;
+    }
+    // Wrap to ±half the comparison period: a 1-bar offset reads as ~0 only
+    // if it is exactly a bar; whole-beat offsets stay visible against bars.
+    const half = wrapMs / 2;
+    const wrapped = ((((delta + half) % wrapMs) + wrapMs) % wrapMs) - half;
+    deltas.push(wrapped);
+  }
+  if (deltas.length < 3) {
+    return null;
+  }
+  deltas.sort((a, b) => a - b);
+  return deltas[Math.floor(deltas.length / 2)]!;
+}
+
+export function verifyDeckAlignment(input: {
+  /** Onset times (ms, output-time) measured from the outgoing deck's placed window. */
+  outgoingOnsetsMs: number[];
+  /** Onset times (ms, output-time) measured from the incoming deck's placed window. */
+  incomingOnsetsMs: number[];
+  /** Overlap duration in output ms; the second half starts at its midpoint. */
+  overlapMs: number;
+  beatPeriodMs: number;
+}): DeckAlignmentVerification {
+  const out = [...input.outgoingOnsetsMs].sort((a, b) => a - b);
+  const inc = [...input.incomingOnsetsMs].sort((a, b) => a - b);
+  // Wrap at the BEAT period: whole-beat relationships are phase-equivalent
+  // on the beat grid and belong to the grid-level checks, not the audio.
+  const wrapMs = input.beatPeriodMs;
+  const reasons: string[] = [];
+  if (out.length < DECK_TRAIN_MIN_ONSETS || inc.length < DECK_TRAIN_MIN_ONSETS) {
+    return {
+      status: "unmeasured",
+      reasons: [
+        `insufficient deck onsets (outgoing ${out.length}, incoming ${inc.length}; need ${DECK_TRAIN_MIN_ONSETS} each)`,
+      ],
+      deckOffsetMs: null,
+      startHalfOffsetMs: null,
+      endHalfOffsetMs: null,
+      outgoingOnsetCount: out.length,
+      incomingOnsetCount: inc.length,
+      confidence: "insufficient",
+    };
+  }
+  const deckOffsetMs = medianOffset(out, inc, wrapMs);
+  const startHalf = medianOffset(out, inc, wrapMs, (time) => time < input.overlapMs / 2);
+  const endHalf = medianOffset(out, inc, wrapMs, (time) => time >= input.overlapMs / 2);
+  if (deckOffsetMs == null) {
+    return {
+      status: "unmeasured",
+      reasons: ["onset trains could not be paired"],
+      deckOffsetMs: null,
+      startHalfOffsetMs: startHalf,
+      endHalfOffsetMs: endHalf,
+      outgoingOnsetCount: out.length,
+      incomingOnsetCount: inc.length,
+      confidence: "insufficient",
+    };
+  }
+  const absOffset = Math.abs(deckOffsetMs);
+  let status: DeckAlignmentVerification["status"];
+  if (absOffset <= DECK_PASS_MS) {
+    status = "pass";
+  } else if (absOffset > 80) {
+    status = "fail";
+    reasons.push(`decks ${deckOffsetMs.toFixed(0)} ms apart in the overlap`);
+  } else {
+    status = "review";
+    reasons.push(`decks ${deckOffsetMs.toFixed(0)} ms apart in the overlap`);
+  }
+  if (startHalf != null && endHalf != null && Math.abs(startHalf - endHalf) > DECK_REVIEW_MS) {
+    // The relationship moves across the overlap: tempo drift between decks.
+    if (status === "pass") {
+      status = "review";
+    }
+    reasons.push(
+      `deck offset drifts ${startHalf.toFixed(0)} ms → ${endHalf.toFixed(0)} ms across the overlap`,
+    );
+  }
+  if (status === "pass") {
+    reasons.push(`deck trains aligned (${deckOffsetMs.toFixed(0)} ms)`);
+  }
+  return {
+    status,
+    reasons,
+    deckOffsetMs,
+    startHalfOffsetMs: startHalf,
+    endHalfOffsetMs: endHalf,
+    outgoingOnsetCount: out.length,
+    incomingOnsetCount: inc.length,
+    confidence: status === "pass" ? "high" : "low",
+  };
+}
+
+/**
  * Diagnose the FINAL mixed waveform around one overlap. This measures mix
  * quality (stutter, clipping, holes, boundary discontinuities) only. It is
  * fed the rendered master, not the two decks, so it has no deck-attributed
