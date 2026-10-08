@@ -57,7 +57,7 @@ try {
         outgoingTrackId: outTrack.id,
         incomingTrackId: inTrack.id,
       }).ratings;
-      const liked = feedback.some((row) => (row.overall ?? 0) >= 0.7);
+      const liked = feedback.some((row) => typeof row.overall === "number" && row.overall >= 0.7);
       const recipe = typeof transition.parameters.appliedRecipeId === "string" ? "recipe" : null;
       const protectedBy = liked ? "liked feedback" : recipe;
 
