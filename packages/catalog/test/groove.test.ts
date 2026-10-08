@@ -236,6 +236,25 @@ describe("chooseTransition structural groove conflict", () => {
       chosen.transition.parameters.barCount === 32 ? 12 : 8,
     );
   });
+
+  it("keeps phrase_mix when the kick conflict is mild (audition-calibrated)", () => {
+    // October 2026 audition: every automatic bass_swap in the -0.002..-0.207
+    // groove-score band was noise (2 wins, 2 losses by ear). The trigger now
+    // requires decisive conflict, so a partial label swap that lands in the
+    // mild band must stay phrase_mix — the user's principle: phrase_mix
+    // preserves volume and energy whenever the blend works.
+    const outgoing = gridTrack("faaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 0.55);
+    outgoing.analysis!.bars = swappedBackbone(false);
+    outgoing.analysis!.beatTimesMs = fullBeatGrid();
+    const incoming = gridTrack("fbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", 0.6);
+    // 0.095 of the file ≈ beat 49, inside the incoming's 16-bar overlap
+    // window (beats 4-68): ~70% of the window carries the label swap, which
+    // lands the groove score around -0.2 — inside the auditioned noise band.
+    incoming.analysis!.bars = swappedBackbone(true, 0.095);
+    incoming.analysis!.beatTimesMs = fullBeatGrid();
+    const chosen = chooseTransition(outgoing, incoming, { chainTargetBpm: 174 });
+    expect(chosen.transition.type).toBe("phrase_mix");
+  });
 });
 
 /** Beat grid covering the 180 s gridTrack fixture (345 ms two-step grid). */
@@ -483,8 +502,13 @@ describe("structural gate reads the actual overlap interval (F3)", () => {
   });
 });
 
-/** Two-step backbone with optionally swapped kick/snare placement. */
-function swappedBackbone(swap: boolean): {
+/** Two-step backbone with optionally swapped kick/snare placement.
+ *  swapFraction caps how far into the profile the swap applies — a partial
+ *  swap models a mild conflict that lands in the audition noise band. */
+function swappedBackbone(
+  swap: boolean,
+  swapFraction = 1,
+): {
   rms: number[];
   beatKick: number[];
   beatSnare: number[];
@@ -494,10 +518,12 @@ function swappedBackbone(swap: boolean): {
   const beatSnare: number[] = [];
   const beatOnset: number[] = [];
   const rms: number[] = [];
-  for (let beat = 0; beat < Math.floor(180_000 / 345); beat += 1) {
+  const total = Math.floor(180_000 / 345);
+  for (let beat = 0; beat < total; beat += 1) {
+    const swapped = swap && beat < total * swapFraction;
     const pos = beat % 4;
-    const kickPos = swap ? pos === 1 || pos === 3 : pos === 0;
-    const snarePos = swap ? pos === 0 : pos === 1 || pos === 3;
+    const kickPos = swapped ? pos === 1 || pos === 3 : pos === 0;
+    const snarePos = swapped ? pos === 0 : pos === 1 || pos === 3;
     beatKick.push(kickPos ? 1 : 0);
     beatSnare.push(snarePos ? 1 : 0);
     beatOnset.push(kickPos || snarePos ? 0.8 : 0.1);

@@ -7,6 +7,7 @@ import {
   LEVEL_MATCH_GAIN_MAX_DB,
   LEVEL_MATCH_GAIN_MIN_DB,
   MAX_TEMPO_DEVIATION,
+  PLANNER_BASS_SWAP_TRIGGER_GROOVE,
   PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP,
   SHORT_CROSSFADE_MS,
   MIN_ANALYSIS_CONFIDENCE,
@@ -419,6 +420,10 @@ export function chooseTransition(
   // file tail/head profiles can describe material the join never plays).
   // Profiles are grid-indexed, so without beat times there is no way to
   // locate the overlap in them; abstain rather than scoring the wrong bars.
+  // The trigger requires DECISIVE conflict (PLANNER_BASS_SWAP_TRIGGER_GROOVE,
+  // audition-calibrated October 2026): mild negatives are measurement noise,
+  // and phrase_mix — which preserves volume and energy — is preferred
+  // whenever the blend works. Hand-pinned bass swaps belong in recipes.
   const outProfile = outgoing.analysis?.bars;
   const inProfile = incoming.analysis?.bars;
   const outStartBeat =
@@ -442,7 +447,7 @@ export function chooseTransition(
           { positioned: true },
         )
       : null;
-  const grooveTriggeredSwap = groove != null && groove < 0.0;
+  const grooveTriggeredSwap = groove != null && groove < PLANNER_BASS_SWAP_TRIGGER_GROOVE;
   // Explicit abstention: per-bar series exist but a side's overlap window is
   // drum-sparse (fewer than two measured bars), so the structural gate could
   // not compare. Distinguish this from "no per-bar evidence at all".

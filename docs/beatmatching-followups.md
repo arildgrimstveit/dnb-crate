@@ -174,6 +174,29 @@ Labeled joins from this session (all on 174 BPM material, all verified by ear):
   trigger's own overlap-local rescoring, which flips a few dozen fresh
   template choices in both directions — audition those on the next replan,
   not the whole library.
+- **October 2026 first A/B audition of the overlap-local trigger**
+  (`tools/scripts/audition-previews.mts`, 9 October): six recurring flip
+  pairs rendered OLD vs NEW on the same frozen windows. Verdicts: 4/6 fresh
+  choices confirmed (Hayling→Pieces and Still In Love→Pathways prefer
+  bass_swap+glide; Signs→Picton Blues and Pathways→All Our Yesterdays
+  prefer the blend), 2/6 preferred the old phrase_mix (Moment to
+  Moment→Better Perspective, Coming Down→In The Woods). User principle:
+  _phrase_mix is always better when it works — it preserves volume and
+  keeps energy flowing; bass_swap fades the outgoing out too much before
+  the incoming fades in, leaving a volume/energy dip._ Measurement: all
+  four automatic triggers sat in a −0.002..−0.207 groove-score band with
+  no separation by outcome (the phrase_mix-preferring pair scored MORE
+  negative than one bass_swap-preferring pair) — the old `groove < 0.0`
+  bar fired on rounding noise (~10% of library pairs). Library-wide
+  distribution (173 distinct pairs): p10 −0.002, median 0.26, only 5
+  pairs below −0.2, 1 below −0.45; the designed kick/snare label-swap
+  case scores ≈−0.95. **The automatic trigger now requires a decisive
+  conflict (`PLANNER_BASS_SWAP_TRIGGER_GROOVE = −0.45`)**: mild negatives
+  stay phrase_mix; joins that prefer bass_swap without decisive conflict
+  belong in approved recipes. All 12 A/B verdicts were recorded as
+  transition feedback on the exact preview renders, so the two hand-liked
+  bass swaps are recallable while the trigger is tight. Provisional
+  pending more labeled pairs.
 - October 2026 groove-sync plan audition (23 tracks, same seed/brief as the
   kick-weighted plan): X-Ray drops out of the set entirely, all 22 joins
   phrase_mix within a 0.44–0.65 syncopation band, render:check green, and the

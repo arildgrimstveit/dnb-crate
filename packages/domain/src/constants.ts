@@ -141,6 +141,18 @@ export const PLANNER_GROOVE_LOCAL_WINDOW_BARS = 16;
  * either side's window is drum-sparse or unmeasured the gate stays silent
  * (no gate beats a wrong gate). */
 export const PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP = 0.58;
+/** Groove score below which the planner AUTOMATICALLY selects bass_swap
+ * instead of phrase_mix. Calibrated 9 October 2026 from the first A/B
+ * audition of overlap-local rescoring (6 pairs): every trigger in the
+ * -0.002..-0.207 band was noise (2 wins, 2 losses by ear) while the user's
+ * principle is "phrase_mix whenever it works — bass_swap's fade-out/in
+ * sequencing costs volume and energy". The bar therefore requires DECISIVE
+ * conflict: the designed kick/snare label-swap case scores ~-0.95 and must
+ * keep triggering; library-wide only ~0.6% of distinct pairs fall below
+ * -0.45 (173 measured). Joins that prefer bass_swap without decisive
+ * conflict belong in approved recipes (preview + approve), not in this
+ * trigger. Provisional pending more labeled pairs. */
+export const PLANNER_BASS_SWAP_TRIGGER_GROOVE = -0.45;
 /** Sparse-overlap penalty weight: how strongly the planner avoids joins where
  * both tracks' overlap regions lack rhythmic content (the blend feels like
  * it dips, gets quiet, or loses momentum). Calibrated on the Phase 4 test
