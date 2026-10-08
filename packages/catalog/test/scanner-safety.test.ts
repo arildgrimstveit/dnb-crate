@@ -58,8 +58,20 @@ describe("scanner safety", () => {
       await runtime.service.scanLibrary();
       const id = runtime.repository.listAll()[0]!.id;
       const original = await vi.importActual<typeof fs>("node:fs/promises");
+      // The scanner walks the REALPATH of the configured root, which on
+      // Windows runners expands 8.3 short names (C:\Users\RUNNER~1) that
+      // os.tmpdir() returns — so match the readdir call against both forms
+      // (normalized), or the mock never fires and the scan reads complete.
+      const nestedReal = await original.realpath(nested);
+      const sameDir = (value: unknown) => {
+        const target = path.resolve(String(value)).replaceAll("\\", "/").toLowerCase();
+        return (
+          target === path.resolve(nested).replaceAll("\\", "/").toLowerCase() ||
+          target === nestedReal.replaceAll("\\", "/").toLowerCase()
+        );
+      };
       vi.mocked(fs.readdir).mockImplementation((...args: Parameters<typeof fs.readdir>) => {
-        if (String(args[0]) === nested) return Promise.reject(new Error("EACCES"));
+        if (sameDir(args[0])) return Promise.reject(new Error("EACCES"));
         return original.readdir(...args);
       });
       const partial = await runtime.service.scanLibrary();
