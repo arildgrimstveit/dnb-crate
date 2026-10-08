@@ -66,6 +66,15 @@ export function applySetPlanUpdate(
 ): CreateSetPlanResult {
   const stored = service.requirePlan(input.setPlanId);
   const entries = [...stored.plan.entries].sort((a, b) => a.order - b.order);
+  // Original adjacencies, captured before any mutation applies (F7).
+  const originalSorted = [...stored.plan.entries].sort((a, b) => a.order - b.order);
+  const originalNextByEntryId = new Map<string, string | null>();
+  for (let i = 0; i < originalSorted.length; i += 1) {
+    originalNextByEntryId.set(
+      originalSorted[i]!.id,
+      i + 1 < originalSorted.length ? originalSorted[i + 1]!.trackId : null,
+    );
+  }
   if (input.replaceTrack) {
     const entry = entries.find((item) => item.id === input.replaceTrack!.entryId);
     if (!entry) {
@@ -180,6 +189,35 @@ export function applySetPlanUpdate(
     const to = Math.min(input.moveEntry.toOrder, entries.length);
     entries.splice(to, 0, moved!);
   }
+  // F7 (repository review 2026-10-08): a transition belongs to an ordered
+  // PAIR, not just its outgoing track. After any structural edit, drop
+  // transitions whose incoming side changed so buildEntries replans them
+  // for the new neighbor with fresh cues/automation — carrying A→B's
+  // parameters onto A→C keeps B-specific settings on the wrong pair.
+  // Adjacencies whose pair is unchanged keep their (possibly approved)
+  // treatments. Chain-tempo rates stay as stored; downstream re-derivation
+  // on early-pair changes remains deliberate follow-up work.
+  const changedJoins: string[] = [];
+  for (let i = 0; i < entries.length - 1; i += 1) {
+    const entry = entries[i]!;
+    const next = entries[i + 1]!;
+    if (!entry.transitionToNext) {
+      continue;
+    }
+    const originalNext = originalNextByEntryId.get(entry.id) ?? null;
+    const recorded = entry.transitionToNext.parameters.incomingTrackId;
+    const pairChanged = originalNext !== next.trackId;
+    if (typeof recorded === "string" && recorded === next.trackId) {
+      // The transition was explicitly created for exactly this pair.
+      continue;
+    }
+    if (pairChanged || (typeof recorded === "string" && recorded !== next.trackId)) {
+      const previousLabel =
+        typeof originalNext === "string" ? `${entry.trackId}->${originalNext}` : entry.trackId;
+      changedJoins.push(`${previousLabel}=>${next.trackId}`);
+      entry.transitionToNext = null;
+    }
+  }
   const tracksById = new Map(service.repository.listAll().map((track) => [track.id, track]));
   const orderedTracks = entries.map((entry) => {
     const track = tracksById.get(entry.trackId);
@@ -215,7 +253,19 @@ export function applySetPlanUpdate(
       },
     );
   }
-  const saved = service.setPlans.save(plan, stored.seed, stored.explanation);
+  const saved = service.setPlans.save(
+    plan,
+    stored.seed,
+    changedJoins.length > 0
+      ? {
+          ...stored.explanation,
+          // F7: the rankings below describe the pre-edit selection. Changed
+          // adjacencies were replanned, so the stored rationale may no
+          // longer match the rebuilt plan.
+          edited: { at: new Date().toISOString(), changedJoins },
+        }
+      : stored.explanation,
+  );
   const quality = service.qualityFor(saved.plan, { validation, partial: false });
   return {
     plan: saved.plan,

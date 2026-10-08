@@ -161,6 +161,10 @@ export type RejectionExplanation = {
 
 export type PlanExplanation = {
   openerSearch?: Array<{ openerTrackId: string | null; durationMs: number }>;
+  /** Set when a structural edit changed track adjacencies (F7): the stored
+   *  rankings below describe the pre-edit selection, and the changed joins
+   *  were replanned — treat the rationale as stale until the next full plan. */
+  edited?: { at: string; changedJoins: string[] };
   variety?: {
     referencePlanIds: string[];
     strength: number;

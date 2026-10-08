@@ -2792,3 +2792,105 @@ describe("descriptor filters and mood presets", () => {
     });
   });
 });
+
+describe("structural edits invalidate changed adjacencies only (F7)", () => {
+  function multiTrackPlan(catalog: ReturnType<typeof runtime>, entryCount: number) {
+    for (let i = 0; i < entryCount * 3; i += 1) {
+      seedTrack(catalog, {
+        title: `F7 Move ${i}`,
+        artist: `F7 Artist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    const created = createPlan(catalog, {
+      name: "F7 move fixture",
+      targetDurationMs: 100_000 * entryCount,
+      seed: 11,
+      explorationWeight: 0,
+    });
+    // Fixture guard: the move assertions assume this many distinct entries.
+    expect(created.plan.entries.length).toBe(entryCount);
+    expect(new Set(created.plan.entries.map((entry) => entry.trackId)).size).toBe(entryCount);
+    return created;
+  }
+
+  function transitionIdsByTrack(plan: SetPlanV1): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const entry of plan.entries) {
+      if (entry.transitionToNext) {
+        map.set(entry.trackId, entry.transitionToNext.id);
+      }
+    }
+    return map;
+  }
+
+  it("replans transitions whose incoming side changed and preserves unchanged pairs", () => {
+    const catalog = runtime();
+    const created = multiTrackPlan(catalog, 4);
+    const order = created.plan.entries.map((entry) => entry.trackId);
+    const before = transitionIdsByTrack(created.plan);
+
+    // Move the second entry to the end: [A,B,C,D] -> [A,C,D,B].
+    const moved = catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      moveEntry: { entryId: created.plan.entries[1]!.id, toOrder: created.plan.entries.length - 1 },
+    });
+    const newOrder = moved.plan.entries.map((entry) => entry.trackId);
+    expect(newOrder).toEqual([order[0], order[2], order[3], order[1]]);
+
+    for (let i = 0; i < newOrder.length - 1; i += 1) {
+      const outgoing = newOrder[i]!;
+      const incoming = newOrder[i + 1]!;
+      const transition = moved.plan.entries[i]!.transitionToNext!;
+      // Every surviving transition is stamped for its exact pair.
+      expect(transition.parameters.incomingTrackId).toBe(incoming);
+      const originalIndex = order.indexOf(outgoing);
+      const pairUnchanged = order[originalIndex + 1] === incoming;
+      if (pairUnchanged) {
+        expect(transition.id).toBe(before.get(outgoing));
+      } else {
+        expect(transition.id).not.toBe(before.get(outgoing));
+      }
+    }
+    // The moved track became the last entry: no transition from it.
+    expect(moved.plan.entries.at(-1)!.transitionToNext).toBeNull();
+    // The explanation records that the plan was structurally edited.
+    expect(moved.explanation.edited?.changedJoins.length).toBeGreaterThan(0);
+    expect(catalog.setPlans.findById(created.plan.id)?.explanation.edited).toEqual(
+      moved.explanation.edited,
+    );
+  });
+
+  it("marks only genuinely changed joins and leaves no-op edits unmarked", () => {
+    const catalog = runtime();
+    const created = multiTrackPlan(catalog, 3);
+    const order = created.plan.entries.map((entry) => entry.trackId);
+
+    // Rotate the first entry to the end: [A,B,C] -> [B,C,A]. The B->C
+    // adjacency is unchanged and must keep its transition.
+    const moved = catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      moveEntry: { entryId: created.plan.entries[0]!.id, toOrder: created.plan.entries.length - 1 },
+    });
+    const newOrder = moved.plan.entries.map((entry) => entry.trackId);
+    expect(newOrder).toEqual([order[1], order[2], order[0]]);
+    const before = transitionIdsByTrack(created.plan);
+    const kept = moved.plan.entries[0]!.transitionToNext!;
+    expect(kept.id).toBe(before.get(order[1]!));
+    expect(kept.parameters.incomingTrackId).toBe(order[2]);
+
+    // A window trim does not change adjacency: no edited marker.
+    const trimmed = catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      setTrim: {
+        entryId: moved.plan.entries[0]!.id,
+        sourceStartMs: 100,
+        sourceEndMs: 99_900,
+      },
+    });
+    expect(trimmed.explanation.edited).toBeUndefined();
+  });
+});

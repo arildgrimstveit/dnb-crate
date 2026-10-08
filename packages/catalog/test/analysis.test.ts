@@ -593,7 +593,7 @@ describe("analysis freshness: inputs, force, and anchor invalidation (F9)", () =
     const before = catalog.service.getTrackAnalysis(trackId).analyzedAt;
     // Unchanged config: a stale pass finds nothing to do.
     expect(catalog.analyses.listIdsForScope("stale")).not.toContain(trackId);
-    catalog.close();
+    await catalog.close();
     cleanups.pop();
 
     // Reopening the same catalog with tempo bounds configured changes the

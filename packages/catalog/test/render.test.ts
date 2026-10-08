@@ -192,9 +192,7 @@ describe("render jobs", () => {
     const frozenRequest = catalog.renderJobs.findById(first.job.id)!.params.request!;
     const evidenceRows = Object.values(frozenRequest.evidence);
     expect(
-      evidenceRows.some(
-        (row) => row && typeof row === "object" && "sourceContentSha256" in row,
-      ),
+      evidenceRows.some((row) => row && typeof row === "object" && "sourceContentSha256" in row),
     ).toBe(true);
 
     const bytes = await readFile(aPath);

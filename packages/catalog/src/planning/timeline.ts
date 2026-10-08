@@ -796,6 +796,10 @@ export function buildEntries(
                 existing?.get(tracks[index + 1]!.id)?.sourceStartMs ??
                 nextWindow?.sourceStartMs ??
                 window.mixInMs,
+              // Pair identity (F7): a transition's parameters belong to this
+              // exact ordered pair; structural edits use it to invalidate
+              // treatments whose incoming side changed.
+              incomingTrackId: tracks[index + 1]!.id,
             },
           };
     const playbackRate =

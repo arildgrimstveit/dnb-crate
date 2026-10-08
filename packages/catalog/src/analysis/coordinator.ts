@@ -50,7 +50,7 @@ export function stripGridIndexedFeatures(row: StoredTrackAnalysis): StoredTrackA
     sections: [],
     suggestedCues: [],
     descriptors: descriptors
-      ? ({
+      ? {
           ...descriptors,
           bars: null,
           tempoEvidence: null,
@@ -59,7 +59,7 @@ export function stripGridIndexedFeatures(row: StoredTrackAnalysis): StoredTrackA
           gridPhaseMaxErrorMs: null,
           gridPhaseSuspect: null,
           beatPhaseHistogram: null,
-        } as typeof descriptors)
+        }
       : descriptors,
   };
 }
