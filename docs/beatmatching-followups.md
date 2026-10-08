@@ -181,3 +181,18 @@ Labeled joins from this session (all on 174 BPM material, all verified by ear):
     their auditioned transitions; only the two orphaned joins recomputed) and
     the final mix passed audition: "two new joins hold up. mix is good."
     The beatmatching plan is fully auditioned.
+- October 2026 grid-phase detector calibration (DSP 3.12.0–3.12.3, three
+  iterations on the live library): broadband scan flagged 44% at exactly
+  half a beat (172ms) — off-beat hats; the kick+snare backbone still
+  flagged 296 at half a beat — syncopated basslines share the sub band;
+  the decisive-margin rule (>25%) didn't separate them. The discriminator
+  that worked is scale: genuine grid errors are sub-beat (the WCHIA class
+  measures ~90–100ms), half-beat dominance is content. 3.12.3 bounds
+  flaggable shifts to 20–110ms: the half-beat cluster is eliminated
+  (0 tracks >130ms), leaving 159 suspects in the 40–110ms gray zone where
+  16th-note syncopation (~86ms at 174) overlaps real drift. Advisory-only
+  — no planner path consumes it. Calibration continues opportunistically:
+  each future "slightly off" ear report carries the track's measured
+  error, building the labeled set that separates the gray zone (Sakura
+  106ms was audibly bad; Starchild's Theme 110ms auditioned clean — the
+  band is genuinely mixed).
