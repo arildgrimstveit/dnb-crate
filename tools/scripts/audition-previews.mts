@@ -141,20 +141,38 @@ try {
       ["OLD", undefined as undefined | "phrase_mix" | "bass_swap" | "crossfade"],
       ["NEW", spec.newTemplate],
     ] as const) {
-      const started = await runtime.service.createTransitionPreview({
-        setPlanId: hit.planId,
-        transitionId: hit.transitionId,
-        ...(template ? { template } : {}),
-      });
-      const done = await runtime.service.waitForRenderJob(started.job.id, 600_000);
-      if (done.status !== "succeeded" || !done.outputRootRelativePath) {
-        console.log(`   ${side}: FAILED (${done.status} ${done.errorMessage ?? ""})`);
-        continue;
-      }
       const dest = path.join(
         outDir,
         `${base} [${side}-${template ?? hit.storedType}].flac`.replace(/[<>:"|?*]/g, ""),
       );
+      let done;
+      try {
+        const started = await runtime.service.createTransitionPreview({
+          setPlanId: hit.planId,
+          transitionId: hit.transitionId,
+          ...(template ? { template } : {}),
+        });
+        done = await runtime.service.waitForRenderJob(started.job.id, 600_000);
+        if (done.status === "cancelled") {
+          // A raced claim or an aborted worker can cancel a fresh job; one
+          // retry settles it.
+          const retry = await runtime.service.createTransitionPreview({
+            setPlanId: hit.planId,
+            transitionId: hit.transitionId,
+            ...(template ? { template } : {}),
+          });
+          done = await runtime.service.waitForRenderJob(retry.job.id, 600_000);
+        }
+      } catch (error) {
+        console.log(
+          `   ${side}: SKIPPED (${error instanceof Error ? error.message : String(error)})`,
+        );
+        continue;
+      }
+      if (done.status !== "succeeded" || !done.outputRootRelativePath) {
+        console.log(`   ${side}: FAILED (${done.status} ${done.errorMessage ?? ""})`);
+        continue;
+      }
       await copyFile(path.join(config.outputRoot, done.outputRootRelativePath), dest);
       sheet.push(
         `# ${base}\n  ${side}: ${template ?? hit.storedType}  (${spec.note})\n  file: ${path.basename(dest)}\n  plan: ${hit.planName}\n`,
