@@ -1808,10 +1808,28 @@ export function gridPhaseDiagnostics(
       firstBeat = b;
     }
     const storedPhase = (((firstBeat - startMs) % periodMs) + periodMs) % periodMs;
-    let err = bestOff - storedPhase;
-    if (err > periodMs / 2) err -= periodMs;
-    if (err < -periodMs / 2) err += periodMs;
-    maxErrorMs = Math.max(maxErrorMs, Math.abs(err));
+    // Score the stored phase explicitly.
+    let storedScore = 0;
+    let storedN = 0;
+    for (let tMs = storedPhase; tMs < windowMs; tMs += periodMs) {
+      storedScore += interpolateOnset(onset, (startMs + tMs) / hopMs);
+      storedN += 1;
+    }
+    storedScore = storedN === 0 ? 0 : storedScore / storedN;
+    // A shifted grid must beat the stored one DECISIVELY to count as an
+    // error: in syncopated DnB the off-beat legitimately rivals the
+    // on-beat, so "loudest phase != stored phase" is syncopation, not
+    // misalignment. Only a clear win (>25%) marks the window — measured
+    // on the live library, this separates the 130-175ms half-beat
+    // cluster (syncopation artifacts) from genuine offsets.
+    let err = 0;
+    if (bestScore > storedScore * 1.25) {
+      let delta = bestOff - storedPhase;
+      if (delta > periodMs / 2) delta -= periodMs;
+      if (delta < -periodMs / 2) delta += periodMs;
+      if (Math.abs(delta) > 20) err = Math.abs(delta);
+    }
+    maxErrorMs = Math.max(maxErrorMs, err);
     windowsMeasured += 1;
   }
   if (windowsMeasured === 0) {
