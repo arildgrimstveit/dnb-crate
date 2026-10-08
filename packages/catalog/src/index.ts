@@ -161,8 +161,13 @@ export function createCatalogRuntime(
       // A previous owner may have been hard-killed mid-render; its working
       // files are stale now that this runtime owns the catalog.
       void sweepStaleRenderTemps(config.outputRoot, { logger }).catch(() => undefined);
-    } else {
-      owner.heartbeat();
+    } else if (!owner.heartbeat()) {
+      // Fenced out by a takeover (stale heartbeat while this process was
+      // busy): stop claiming or completing further work immediately. The
+      // next tick re-evaluates acquisition; recovery of interrupted jobs is
+      // the new owner's responsibility.
+      ownsWorker = false;
+      return;
     }
     workflows.kick();
     renders.kick();

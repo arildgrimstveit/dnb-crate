@@ -6,6 +6,8 @@ import { decodeWavPcm, type PcmAudio } from "@dnb-crate/audio-analysis";
 import { DomainError } from "@dnb-crate/domain";
 import type { FfmpegBinaries, ProcessRunner } from "@dnb-crate/audio-renderer";
 
+import { claimScratchDir } from "../scratch.ts";
+
 const WAV_EXTS = new Set([".wav"]);
 
 export async function loadPcmForAnalysis(
@@ -28,6 +30,9 @@ export async function loadPcmForAnalysis(
     });
   }
   const dir = await mkdtemp(path.join(os.tmpdir(), "dnb-an-"));
+  // Ownership marker so the sweeper never deletes this decode under a
+  // long-running analysis in this process (F10).
+  await claimScratchDir(dir);
   const tmp = path.join(dir, "decode.wav");
   try {
     const result = await runner.run({

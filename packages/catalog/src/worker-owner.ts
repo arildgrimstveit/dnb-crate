@@ -69,15 +69,41 @@ export class WorkerOwner {
 
   /** Refresh the ownership heartbeat. Throttled; safe to call from the polling
    * loop every tick. Token-scoped so a deposed owner cannot revive a row now
-   * owned by another runtime. */
-  heartbeat(): void {
-    if (!this.owned) return;
+   * owned by another runtime.
+   *
+   * Fencing (repository review item 5): when the token-scoped update affects
+   * no row, this owner has been deposed by a takeover — it clears its owned
+   * flag and returns false so the caller stops claiming new work. The return
+   * value must be honored by the polling loop; an in-flight synchronous job
+   * still completes (SQLite serializes writers), but no further claims
+   * happen under the lost token. */
+  heartbeat(): boolean {
+    if (!this.owned) return false;
     const now = Date.now();
-    if (now - this.lastBeat < WORKER_HEARTBEAT_INTERVAL_MS) return;
+    if (now - this.lastBeat < WORKER_HEARTBEAT_INTERVAL_MS) return true;
     this.lastBeat = now;
-    this.db
+    const result = this.db
       .prepare("UPDATE worker_owner SET heartbeat_at = ? WHERE id = 1 AND token = ?")
       .run(new Date().toISOString(), this.token);
+    if (result.changes === 0) {
+      // Another runtime took over while this process was busy or paused:
+      // everything this owner believed about exclusivity is void.
+      this.owned = false;
+      return false;
+    }
+    return true;
+  }
+
+  /** True while this owner still holds the row under its token. */
+  stillOwned(): boolean {
+    if (!this.owned) return false;
+    const row = this.db.prepare("SELECT token FROM worker_owner WHERE id = 1").get() as
+      { token: string } | undefined;
+    if (!row || row.token !== this.token) {
+      this.owned = false;
+      return false;
+    }
+    return true;
   }
 
   release(): void {

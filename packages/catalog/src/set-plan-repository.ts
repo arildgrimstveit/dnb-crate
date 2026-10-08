@@ -69,10 +69,38 @@ function parseStoredJson<T>(
   try {
     parsed = JSON.parse(json);
   } catch {
-    throw new DomainError("INVALID_SET_PLAN", `Stored plan ${planId} has an unreadable ${label}`);
+    throw new DomainError(
+      "INVALID_SET_PLAN",
+      `Stored plan ${planId} has an unreadable ${label} (corrupt JSON; ` +
+        `the plan row is intact otherwise — re-save or clone the plan to rewrite it)`,
+      { details: { planId, field: label } },
+    );
   }
-  if (schema && !schema.safeParse(parsed).success) {
-    throw new DomainError("INVALID_SET_PLAN", `Stored plan ${planId} has an invalid ${label}`);
+  if (schema) {
+    const checked = schema.safeParse(parsed);
+    if (!checked.success) {
+      // Fail closed, but say WHICH stored shape failed and how to recover:
+      // legacy rows written before a schema change land here (review item 2
+      // — a raw "invalid" gave no remediation path).
+      const issue = checked.error?.issues?.[0];
+      const where = issue ? ` at ${issue.path.join(".")}` : "";
+      throw new DomainError(
+        "INVALID_SET_PLAN",
+        `Stored plan ${planId} has an invalid ${label}${where}: it predates the current ` +
+          `persisted schema or was written by another version. ` +
+          `Re-create the plan (clone with replan) to rewrite it with the current shape.`,
+        {
+          details: {
+            planId,
+            field: label,
+            issues: checked.error?.issues?.slice(0, 5).map((row) => ({
+              path: row.path,
+              message: row.message,
+            })),
+          },
+        },
+      );
+    }
   }
   return parsed as T;
 }

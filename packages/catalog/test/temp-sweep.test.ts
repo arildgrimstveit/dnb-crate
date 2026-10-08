@@ -1,9 +1,19 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile, readdir } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  rm,
+  utimes,
+  writeFile,
+  readdir,
+  readFile,
+  symlink,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { sweepStaleRenderTemps, TEMP_SWEEP_MIN_AGE_MS } from "../src/render/temp-sweep.ts";
+import { claimScratchDir } from "../src/scratch.ts";
 
 async function touch(file: string, ageMs: number): Promise<void> {
   await writeFile(file, "x");
@@ -88,6 +98,85 @@ describe("sweepStaleRenderTemps", () => {
       expect(removed).not.toContain(foreign);
     } finally {
       await Promise.allSettled(fixtures.map((dir) => rm(dir, { recursive: true, force: true })));
+    }
+  });
+
+  it("keeps a stale scratch dir owned by a live process and sweeps a dead owner's", async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const liveOwned = path.join(os.tmpdir(), `dnb-live-owner-${suffix}`);
+    const deadOwned = path.join(os.tmpdir(), `dnb-dead-owner-${suffix}`);
+    const fixtures = [liveOwned, deadOwned];
+    try {
+      await claimScratchDir(liveOwned);
+      await claimScratchDir(deadOwned);
+      // Overwrite the markers with distinct fake pids so the injected
+      // liveness function discriminates them deterministically.
+      await writeFile(
+        path.join(liveOwned, "owner.json"),
+        JSON.stringify({ pid: 4242, startedAt: new Date().toISOString() }),
+      );
+      await writeFile(
+        path.join(deadOwned, "owner.json"),
+        JSON.stringify({ pid: 9191, startedAt: new Date().toISOString() }),
+      );
+      const old = new Date(Date.now() - 2 * TEMP_SWEEP_MIN_AGE_MS);
+      // Age both directories past the threshold; the live owner's mtime is
+      // irrelevant — its pid decides (F10: mtime is not liveness).
+      await utimes(liveOwned, old, old);
+      await utimes(deadOwned, old, old);
+
+      const root = await mkdtemp(path.join(os.tmpdir(), "dnb-sweep-"));
+      // Fake owner state: pid 4242 is "live", pid 9191 is "dead".
+      const removed = await sweepStaleRenderTemps(root, {
+        isAlive: (pid) => pid === 4242,
+      });
+      expect(removed).not.toContain(liveOwned);
+      expect(removed).toContain(deadOwned);
+    } finally {
+      await Promise.allSettled(fixtures.map((dir) => rm(dir, { recursive: true, force: true })));
+    }
+  });
+
+  it("sweeps render:check deck/phase-4 scratch left by a crashed check", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "dnb-sweep-"));
+    const renders = path.join(root, "renders");
+    await mkdir(renders, { recursive: true });
+    const probe = path.join(renders, "job.flac.deck-out-3-ab12cd34.pcm");
+    const phase4 = path.join(renders, "job.flac.phase4-1-ab12cd34.pcm");
+    await touch(probe, 2 * TEMP_SWEEP_MIN_AGE_MS);
+    await touch(phase4, 2 * TEMP_SWEEP_MIN_AGE_MS);
+    const removed = await sweepStaleRenderTemps(root);
+    const removedInRoot = removed.filter((entry) => entry.startsWith(root));
+    expect(removedInRoot).toEqual(expect.arrayContaining([probe, phase4]));
+  });
+
+  it("never follows a dnb-* symlink out of the temp dir", async () => {
+    const outside = await mkdtemp(path.join(os.tmpdir(), "kept-"));
+    const link = path.join(os.tmpdir(), `dnb-escape-${Date.now()}`);
+    let linked = false;
+    try {
+      await writeFile(path.join(outside, "precious.wav"), "x");
+      const old = new Date(Date.now() - 2 * TEMP_SWEEP_MIN_AGE_MS);
+      await utimes(outside, old, old);
+      try {
+        await symlink(outside, link);
+        linked = true;
+      } catch {
+        // Windows without symlink privileges: the guard cannot be exercised
+        // here; the containment check itself is still covered by the code
+        // path above returning early for unreadable realpaths.
+      }
+      if (linked) {
+        const root = await mkdtemp(path.join(os.tmpdir(), "dnb-sweep-"));
+        const removed = await sweepStaleRenderTemps(root);
+        expect(removed).not.toContain(link);
+        expect(await readFile(path.join(outside, "precious.wav"), "utf8")).toBe("x");
+      }
+    } finally {
+      await Promise.allSettled([
+        rm(outside, { recursive: true, force: true }),
+        linked ? rm(link, { force: true }) : Promise.resolve(),
+      ]);
     }
   });
 

@@ -1,0 +1,56 @@
+name: Windows smoke
+
+# Bounded Windows lane (repository review item 9): Windows is an active
+# development/runtime platform, so paths, native process execution, locks,
+# cancellation, and temp cleanup get a smoke-level check on every push.
+# This lane makes no new platform support promise; the full Linux/native
+# lane in ci.yml remains the complete gate.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  windows-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install FFmpeg (winget)
+        shell: pwsh
+        run: |
+          # choco is slow to provision; winget's ffmpeg shim is enough for
+          # the smoke scope and puts ffmpeg/ffprobe on PATH for later steps.
+          winget install --id=Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements
+          $ffmpegDir = (Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Directory |
+            Where-Object Name -like "Gyan.FFmpeg*" | Select-Object -First 1).FullName
+          if (-not $ffmpegDir) { throw "ffmpeg package directory not found" }
+          $bin = (Get-ChildItem $ffmpegDir -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+          echo $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Verify FFmpeg
+        shell: pwsh
+        run: |
+          ffmpeg -version
+          ffprobe -version
+      - name: Typecheck, lint, format
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm lint
+          pnpm lint:exports
+          pnpm format:check
+      - name: Smoke test suite (bounded, no rubberband)
+        # Native rubberband/keyfinder integrations stay on the Linux lane;
+        # this run covers Windows-path behavior: temp-dir hygiene, process
+        # spawning and cancellation, SQLite locking, rename/publication,
+        # and the non-native test files.
+        run: pnpm vitest run analysis.test.ts audio-diagnostics.test.ts check-metrics.test.ts evidence.test.ts groove.test.ts planning.test.ts quality.test.ts render.test.ts temp-sweep.test.ts worker-owner-fencing.test.ts runtime-lifecycle.test.ts scanner-safety.test.ts
+        env:
+          CI: true
