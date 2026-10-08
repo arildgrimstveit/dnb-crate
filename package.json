@@ -13,6 +13,7 @@
     "mcp": "tsx apps/mcp-server/src/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "fix": "eslint . --fix && prettier --write .",
     "typecheck": "pnpm -r --if-present typecheck && tsc --noEmit -p tools/tsconfig.json",
     "lint": "eslint .",
     "lint:exports": "tsx tools/scripts/check-barrel-exports.mts",
