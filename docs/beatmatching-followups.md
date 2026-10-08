@@ -110,6 +110,19 @@ signal stays ADVISORY (warnings) until the labeled corpus grows and each
 accepted-review is understood; the stored-grid residual remains the only
 alignment gate.
 
+October 2026 (verifier-suspect audition, same week): the first two
+candidate catches — Picton Blues → Hayling (decks ~100 ms apart despite a
+9 ms stored offset) and Tour → Under (a designed 8-beat onset-lock slip
+with measured sub-beat drift) — were both auditioned PERFECT by ear:
+labeled false positives, recorded as liked feedback on the preview
+renders. Root cause: full-band onset trains time vocals and pads, not
+kicks. The probes now extract **kick-band onsets** (180 Hz low-pass)
+before comparison. Re-measured: both false positives clear, zero measured
+fails across all renders, accepted-listen joins remain 0-fail (6 review
+12.8%, 32 unmeasured — the sparser kick signal abstains more, which is
+the honest direction). Still advisory; promotion needs a labeled corpus
+including true positives.
+
 ## 5. Recipe persistence for hand-tuned joins
 
 Join treatments pinned by hand (`updateSetPlan` + preview + approve, as done for the

@@ -681,7 +681,9 @@ function isSustained(rms: number[]): boolean {
   return mid > peak * 0.12 && mid > 0.02;
 }
 
-function lowpass(pcm: Float32Array, sampleRate: number, cutoffHz: number): Float32Array {
+/** First-order low-pass. Exported for the deck probes' kick-band onset
+ *  extraction: full-band onset trains time vocals and pads, not kicks. */
+export function lowpass(pcm: Float32Array, sampleRate: number, cutoffHz: number): Float32Array {
   const out = new Float32Array(pcm.length);
   const rc = 1 / (2 * Math.PI * cutoffHz);
   const dt = 1 / sampleRate;

@@ -110,7 +110,12 @@ import type { FrozenRenderRequest } from "../render-job-repository.ts";
 import type { SetPlanRepository } from "../set-plan-repository.ts";
 import type { RenderJobRepository, StoredRenderJob } from "../render-job-repository.ts";
 import type { AnalysisRepository } from "../analysis-repository.ts";
-import { diagnoseRenderedMix, onsetTimesMs, verifyDeckAlignment } from "./audio-diagnostics.ts";
+import {
+  diagnoseRenderedMix,
+  lowpass,
+  onsetTimesMs,
+  verifyDeckAlignment,
+} from "./audio-diagnostics.ts";
 
 export type RenderCheckJoin = {
   order: number;
@@ -1009,8 +1014,14 @@ export class RenderCoordinator {
             if (samples.length < 22_050) {
               return [];
             }
+            // Kick-band onsets (calibration 9 October 2026): full-band
+            // trains timed vocals and pads — the verifier's first two
+            // candidate catches were auditioned false positives on
+            // vocal-heavy material. A 180 Hz low-pass keeps the kick
+            // (and the bass it lands on) as the timing authority.
+            const kick = lowpass(samples, 22_050, 180);
             // Source-time onsets mapped to output time within the probe.
-            return onsetTimesMs(samples, 22_050).map((time) => time / rate + probeOffsetMs);
+            return onsetTimesMs(kick, 22_050).map((time) => time / rate + probeOffsetMs);
           };
           const outgoingOnsets = await decodeDeck(
             path.resolve(outTrack.filePath),
