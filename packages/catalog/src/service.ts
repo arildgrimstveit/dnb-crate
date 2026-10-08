@@ -595,7 +595,7 @@ export class CatalogService {
     const best = planned.proposals[0] ?? null;
     const params = transition.parameters;
     const number = (key: string): number | null =>
-      typeof params[key] === "number" ? (params[key]) : null;
+      typeof params[key] === "number" ? params[key] : null;
     const pairStamp = typeof params.incomingTrackId === "string" ? params.incomingTrackId : null;
     return {
       setPlanId: input.setPlanId,
