@@ -1,4 +1,13 @@
-import { DomainError, type SonicDescriptors, type TrackSection } from "@dnb-crate/domain";
+import {
+  DomainError,
+  effectiveEnergy,
+  resolveCanonicalBpm,
+  resolveCanonicalKeyConfidence,
+  type BpmSource,
+  type KeySource,
+  type SonicDescriptors,
+  type TrackSection,
+} from "@dnb-crate/domain";
 
 import type {
   AnalysisRepository,
@@ -18,6 +27,26 @@ export type FrozenEvidenceRef = {
   rhythmEngine: string | null;
   structureEngine: string | null;
   keyEngine: string | null;
+};
+
+/**
+ * Canonical (user-visible) track metadata frozen at queue time (F4b,
+ * repository review 2026-10-08). Manual/published keys and BPM keep their
+ * precedence over analyzed values while a job sits in the queue, and later
+ * metadata edits or re-analysis cannot change a queued plan's quality
+ * result. This block is captured with the same resolvers the live quality
+ * path uses, so live and frozen evaluations agree by construction. Absent
+ * only on requests frozen before October 2026.
+ */
+export type FrozenCanonicalEvidence = {
+  musicalKey: string | null;
+  camelotKey: string | null;
+  keySource: string | null;
+  keyConfidence: number | null;
+  nativeBpm: number | null;
+  effectiveEnergy: number | null;
+  keyAnalyzerName: string | null;
+  gridEngine: string | null;
 };
 
 /** Snapshot of the analysis values used to plan or render. Absent stays absent. */
@@ -48,6 +77,8 @@ export type FrozenTrackEvidence = FrozenEvidenceRef & {
    * freeze time (then `fileFingerprint` governs execution).
    */
   sourceContentSha256?: string | null;
+  /** Canonical metadata frozen at queue time; see FrozenCanonicalEvidence. */
+  canonical?: FrozenCanonicalEvidence | null;
   descriptors: SonicDescriptors | null;
 };
 
@@ -139,9 +170,39 @@ export function snapshotTrackEvidence(
   analyses: AnalysisRepository,
   trackId: string,
   fileFingerprint: string | null,
+  track?: {
+    musicalKey: string | null;
+    camelotKey: string | null;
+    keySource: KeySource | null;
+    bpm: number | null;
+    bpmSource: BpmSource | null;
+    energy: number | null;
+  } | null,
 ): FrozenTrackEvidence {
   const resolved = resolveTrackEvidence(analyses, trackId);
   const merged = analysisForTimeline(resolved);
+  // Canonical metadata uses the same resolvers as the live quality path, so
+  // a queued plan is judged on exactly what an immediate render would be
+  // judged on — and keeps judging it that way after later edits (F4b).
+  const keyRow = resolved.key ?? resolved.rhythm;
+  const canonical: FrozenCanonicalEvidence | null = track
+    ? {
+        musicalKey:
+          track.keySource === "manual" || track.keySource === "published"
+            ? track.musicalKey
+            : (keyRow?.musicalKey ?? track.musicalKey),
+        camelotKey:
+          track.keySource === "manual" || track.keySource === "published"
+            ? track.camelotKey
+            : (keyRow?.camelotKey ?? track.camelotKey),
+        keySource: track.keySource,
+        keyConfidence: resolveCanonicalKeyConfidence(track, keyRow),
+        nativeBpm: resolveCanonicalBpm(track, resolved.rhythm).bpm,
+        effectiveEnergy: effectiveEnergy(track, resolved.rhythm?.descriptors ?? null),
+        keyAnalyzerName: keyRow?.analyzerName ?? null,
+        gridEngine: resolved.rhythm?.analyzerName ?? null,
+      }
+    : null;
   if (!merged) {
     return {
       present: false,
@@ -162,6 +223,9 @@ export function snapshotTrackEvidence(
       camelotKey: null,
       audioEndMs: null,
       fileFingerprint,
+      // Absent ANALYSIS is not absent canonical metadata: a manual/published
+      // key and BPM still freeze here and govern queued quality (F4b).
+      canonical,
       descriptors: null,
     };
   }
@@ -185,6 +249,7 @@ export function snapshotTrackEvidence(
     audioEndMs:
       typeof merged.descriptors?.audioEndMs === "number" ? merged.descriptors.audioEndMs : null,
     fileFingerprint,
+    canonical,
     descriptors: merged.descriptors ? structuredClone(merged.descriptors) : null,
   };
 }

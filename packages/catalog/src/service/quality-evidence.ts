@@ -72,6 +72,7 @@ export function qualityForPlan(
   const keyConfidence = keyConfidenceByTrackId(ctx);
   const firstDropStart = firstDropStartMsByTrackId(ctx);
   const evidenceByTrackId = qualityEvidenceByTrackId(ctx);
+  const effectiveEnergy = effectiveEnergyByTrackId(ctx);
   if (evidence) {
     for (const [trackId, row] of Object.entries(evidence)) {
       if (!isFrozenSnapshot(row)) {
@@ -80,8 +81,13 @@ export function qualityForPlan(
       if (typeof row.audioEndMs === "number") {
         audioEnd.set(trackId, row.audioEndMs);
       }
-      if (typeof row.keyConfidence === "number") {
+      if (typeof row.canonical?.keyConfidence === "number") {
+        keyConfidence.set(trackId, row.canonical.keyConfidence);
+      } else if (typeof row.keyConfidence === "number") {
         keyConfidence.set(trackId, row.keyConfidence);
+      }
+      if (typeof row.canonical?.effectiveEnergy === "number") {
+        effectiveEnergy.set(trackId, row.canonical.effectiveEnergy);
       }
       const drops = row.sections.filter((section) => section.type === "drop");
       const drop = drops[0];
@@ -89,22 +95,27 @@ export function qualityForPlan(
         firstDropStart.set(trackId, drop.startMs);
       }
       const track = tracksById.get(trackId);
+      // F4b: the frozen CANONICAL block governs queued quality — manual/
+      // published keys and BPM keep their precedence over the analyzed row,
+      // and later catalog edits cannot change a queued plan's result.
+      // Legacy requests without it keep the previous row-derived values.
+      const canonical = row.canonical;
       evidenceByTrackId.set(trackId, {
-        musicalKey: row.musicalKey ?? track?.musicalKey ?? null,
-        camelotKey: row.camelotKey ?? track?.camelotKey ?? null,
-        keySource: track?.keySource ?? null,
-        keyConfidence: row.keyConfidence ?? 0,
-        keyAnalyzerName: row.keyEngine ?? null,
-        nativeBpm: row.bpm,
+        musicalKey: canonical?.musicalKey ?? row.musicalKey ?? track?.musicalKey ?? null,
+        camelotKey: canonical?.camelotKey ?? row.camelotKey ?? track?.camelotKey ?? null,
+        keySource: canonical?.keySource ?? track?.keySource ?? null,
+        keyConfidence: canonical?.keyConfidence ?? row.keyConfidence ?? 0,
+        keyAnalyzerName: canonical?.keyAnalyzerName ?? row.keyEngine ?? null,
+        nativeBpm: canonical?.nativeBpm ?? row.bpm,
         gridOk: row.present && !row.gridRejected,
-        gridEngine: row.rhythmEngine ?? null,
+        gridEngine: canonical?.gridEngine ?? row.rhythmEngine ?? null,
       });
     }
   }
   const validation = validateSetPlan(plan, tracksById, {
     artistRepeatSpacing: plan.planningConstraints?.artistRepeatSpacing,
     audioEndMsByTrackId: audioEnd,
-    effectiveEnergyByTrackId: effectiveEnergyByTrackId(ctx),
+    effectiveEnergyByTrackId: effectiveEnergy,
     keyConfidenceByTrackId: keyConfidence,
     firstDropStartMsByTrackId: firstDropStart,
   });

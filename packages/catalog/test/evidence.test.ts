@@ -206,3 +206,103 @@ describe("evidence and cue edits", () => {
     );
   });
 });
+
+describe("frozen canonical evidence (F4b)", () => {
+  async function catalogWithTrack(title: string, file: string) {
+    const root = path.join(os.tmpdir(), `dnb-canon-${crypto.randomUUID()}`);
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(library, file), { title, durationMs: 1000 });
+    await catalog.service.scanLibrary();
+    const track = catalog.service.searchTracks({ query: title, limit: 1 }).tracks[0]!;
+    return { catalog, track };
+  }
+
+  it("freezes a manual key even when no analysis exists", async () => {
+    const { catalog, track } = await catalogWithTrack("Manual", "manual.wav");
+    catalog.service.updateTrackMetadata(track.id, { musicalKey: "Gm" });
+    const fresh = catalog.repository.findById(track.id)!;
+
+    const frozen = snapshotTrackEvidence(catalog.analyses, track.id, fresh.fileFingerprint, fresh);
+    // Absent analysis is not absent canonical metadata: the manual key and
+    // its confidence govern queued quality instead of nulls.
+    expect(frozen.present).toBe(false);
+    expect(frozen.canonical?.musicalKey).toBe("Gm");
+    expect(frozen.canonical?.keySource).toBe("manual");
+    expect(frozen.canonical?.keyConfidence).toBe(1);
+  });
+
+  it("keeps manual key precedence over a conflicting analyzed key in the snapshot", async () => {
+    const { catalog, track } = await catalogWithTrack("Conflict", "conflict.wav");
+    catalog.analyses.upsert({
+      ...analysisBase,
+      trackId: track.id,
+      analyzerName: DSP_ANALYZER_NAME,
+      // Analyzed key disagrees with the manual key set below.
+      musicalKey: "Fm",
+      camelotKey: "4A",
+      keyConfidence: 0.4,
+      gridSource: "analyzed",
+      sections: [],
+    });
+    catalog.service.updateTrackMetadata(track.id, { musicalKey: "Am" });
+    const fresh = catalog.repository.findById(track.id)!;
+    const frozen = snapshotTrackEvidence(catalog.analyses, track.id, fresh.fileFingerprint, fresh);
+    expect(frozen.present).toBe(true);
+    // The merged row carries the analyzed key; canonical keeps the manual
+    // one with manual confidence, exactly like the live quality path.
+    expect(frozen.musicalKey).toBe("Fm");
+    expect(frozen.canonical?.musicalKey).toBe("Am");
+    expect(frozen.canonical?.keyConfidence).toBe(1);
+    expect(frozen.canonical?.keySource).toBe("manual");
+  });
+
+  it("freezes native BPM precedence and independent engine identities", async () => {
+    const { catalog, track } = await catalogWithTrack("Engines", "engines.wav");
+    catalog.analyses.upsert({
+      ...analysisBase,
+      trackId: track.id,
+      analyzerName: DSP_ANALYZER_NAME,
+      bpm: 174,
+      gridSource: "analyzed",
+      sections: [],
+    });
+    catalog.analyses.upsert({
+      ...analysisBase,
+      trackId: track.id,
+      analyzerName: "keyfinder",
+      musicalKey: "Dm",
+      camelotKey: "7A",
+      keyConfidence: 0.9,
+      gridSource: "analyzed",
+      sections: [],
+    });
+    // Split engine selection: rhythm from the DSP, key from keyfinder.
+    catalog.service.selectTrackEvidence({ trackId: track.id, keyEngine: "keyfinder" });
+    catalog.service.updateTrackMetadata(track.id, { bpm: 176 });
+    const fresh = catalog.repository.findById(track.id)!;
+    const frozen = snapshotTrackEvidence(catalog.analyses, track.id, fresh.fileFingerprint, fresh);
+    // Manual BPM wins over the analyzed 174; the key and rhythm engine
+    // identities freeze independently of the merged analyzer version.
+    expect(frozen.bpm).toBe(174);
+    expect(frozen.canonical?.nativeBpm).toBe(176);
+    expect(frozen.canonical?.keyAnalyzerName).toBe("keyfinder");
+    expect(frozen.canonical?.gridEngine).toBe(DSP_ANALYZER_NAME);
+  });
+
+  it("keeps queued quality stable across later metadata edits", async () => {
+    const { catalog, track } = await catalogWithTrack("Stable", "stable.wav");
+    catalog.service.updateTrackMetadata(track.id, { musicalKey: "Gm" });
+    const fresh = catalog.repository.findById(track.id)!;
+    const frozen = snapshotTrackEvidence(catalog.analyses, track.id, fresh.fileFingerprint, fresh);
+    // The user edits the key after the job was queued.
+    catalog.service.updateTrackMetadata(track.id, { musicalKey: "Bm" });
+    const after = catalog.repository.findById(track.id)!;
+    expect(after.musicalKey).toBe("Bm");
+    // The frozen snapshot still describes queue-time canonical metadata.
+    expect(frozen.canonical?.musicalKey).toBe("Gm");
+    expect(frozen.canonical?.keyConfidence).toBe(1);
+  });
+});

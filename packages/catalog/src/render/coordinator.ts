@@ -36,6 +36,8 @@ import {
   outputPositionToSourceMs,
   type AppConfig,
   type AutomationEvent,
+  type BpmSource,
+  type KeySource,
   type Logger,
   type MixPresetParams,
   type RenderJob,
@@ -265,7 +267,16 @@ async function freezeRenderRequest(
   plan: SetPlanV1,
   analyses: AnalysisRepository,
   tracks: {
-    findById(id: string): { fileFingerprint: string | null; filePath: string | null } | null;
+    findById(id: string): {
+      fileFingerprint: string | null;
+      filePath: string | null;
+      musicalKey: string | null;
+      camelotKey: string | null;
+      keySource: KeySource | null;
+      bpm: number | null;
+      bpmSource: BpmSource | null;
+      energy: number | null;
+    } | null;
   },
   settings: RenderSettings,
   sourceHashForTrack: (trackId: string) => Promise<string | null>,
@@ -273,10 +284,12 @@ async function freezeRenderRequest(
   const clone = structuredClone(plan);
   const evidence: FrozenRenderRequest["evidence"] = {};
   for (const entry of clone.entries) {
+    const track = tracks.findById(entry.trackId);
     const snapshot = snapshotTrackEvidence(
       analyses,
       entry.trackId,
-      tracks.findById(entry.trackId)?.fileFingerprint ?? null,
+      track?.fileFingerprint ?? null,
+      track ?? null,
     );
     if ("present" in snapshot) {
       // Strong render-input identity, computed once at freeze time (F4a):
