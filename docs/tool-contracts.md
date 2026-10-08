@@ -107,11 +107,12 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 - Input: `{ outgoingTrackId, incomingTrackId, preferredType?, barCount?, targetBpm?, allowExcessiveTempo?, allowLowConfidence?, allowDropIn? }`
 - Output: `{ proposals: TransitionProposal[] }` ranked; analyzer-derived cues are reasons, not blockers; incoming `drop` only when `preferredType=bass_swap` and `allowDropIn`
+- Structural eligibility is shared with the set planner: when the overlap-local groove gate conflicts on the resolved window, aligned proposals are returned infeasible with the `groove-syncopation-conflict` blocker and crossfade is the feasible aligned alternative. `allowLowConfidence` / `allowExcessiveTempo` remain explicit overrides for grid/tempo feasibility only — they do not bypass structural conflict.
 
 ## `validate_transition`
 
 - Input: type plus optional duration/rates/overrides
-- Output: `{ valid, feasible, errors, warnings }`
+- Output: `{ valid, feasible, errors, warnings }`; validates against the same structural eligibility as set planning, so a template the full planner would crossfade cannot validate as feasible here
 
 ## `get_planning_readiness`
 

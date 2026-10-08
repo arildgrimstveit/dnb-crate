@@ -1814,6 +1814,215 @@ describe("transition tempo validation", () => {
   });
 });
 
+describe("transition proposals share the planner's structural eligibility (F6)", () => {
+  // The drop sits at bar 8 (16 s) so the shared chooser plans an 8-bar
+  // drop-anchored window: the outgoing's overlap starts at its quiet outro
+  // (140 s → grid bar 102) and the incoming's at bar 0.
+  const overlapBar = Math.round(140_000 / ((4 * 60_000) / 174));
+
+  function grooveBundle(
+    id: string,
+    barSeries: Array<number | null>,
+    overrides: { gridRejected?: boolean; bpmConfidence?: number } = {},
+  ) {
+    return {
+      track: {
+        id,
+        filePath: `${id}.wav`,
+        fileFingerprint: id,
+        artist: "A",
+        title: id,
+        album: null,
+        durationMs: 180_000,
+        sampleRateHz: 44100,
+        channels: 2,
+        bpm: 174,
+        bpmSource: "manual" as const,
+        musicalKey: "Fm",
+        camelotKey: "4A",
+        keySource: "manual" as const,
+        energy: 5,
+        rating: 4,
+        subgenres: [],
+        moods: [],
+        tags: [],
+        notes: null,
+        analysisStatus: "complete" as const,
+        fileMissing: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      analysis: {
+        trackId: id,
+        analyzerName: "dnb-crate-dsp",
+        analyzerVersion: "3.12.0",
+        bpm: 174,
+        bpmConfidence: overrides.bpmConfidence ?? 0.9,
+        bpmRaw: 174,
+        beatTimesMs: Array.from({ length: Math.floor(180_000 / 345) }, (_, i) => i * 345),
+        downbeatTimesMs: Array.from({ length: 145 }, (_, i) => i * ((4 * 60_000) / 174)),
+        gridRejected: overrides.gridRejected ?? false,
+        gridRejectionReason: overrides.gridRejected ? "low confidence" : null,
+        musicalKey: "Fm",
+        keyConfidence: 0.7,
+        keyMode: "minor" as const,
+        camelotKey: "4A",
+        tempoStability: 0.8,
+        downbeatConfidence: 0.7,
+        integratedLufs: null,
+        truePeakDb: null,
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        waveformSummary: null,
+        beatAnchorMs: null,
+        descriptors: {
+          ...testSonicDescriptors({ audioStartMs: 0, audioEndMs: 180_000 }),
+          bars: {
+            rms: Array.from({ length: 131 }, () => 0.6),
+            syncopation: barSeries,
+          },
+        },
+        engineRuntimeMs: 1,
+        analyzedAt: new Date().toISOString(),
+        suggestedCues: [],
+        sections: [
+          {
+            type: "intro" as const,
+            startMs: 0,
+            endMs: 16_000,
+            startBar: 0,
+            endBar: 8,
+            confidence: 0.6,
+            sectionEnergy: 0.4,
+          },
+          {
+            type: "drop" as const,
+            startMs: 16_000,
+            endMs: 80_000,
+            startBar: 8,
+            endBar: 32,
+            confidence: 0.8,
+            sectionEnergy: 0.9,
+          },
+          {
+            type: "outro" as const,
+            startMs: 140_000,
+            endMs: 180_000,
+            startBar: 56,
+            endBar: 72,
+            confidence: 0.62,
+            sectionEnergy: 0.3,
+          },
+        ],
+      },
+      cues: [],
+    };
+  }
+
+  function series(from: number, to: number, high = 0.9, low = 0.2): Array<number | null> {
+    return Array.from({ length: 131 }, (_, bar) => (bar >= from && bar <= to ? high : low));
+  }
+
+  const flat = series(0, 130, 0.2, 0.2);
+
+  it("marks aligned proposals infeasible when the shared chooser crossfades the pair", () => {
+    // Conflict inside the actual overlap (outgoing bars from its mix-out at
+    // 140 s): the set planner crossfades this pair, so the standalone
+    // proposer must not return the requested template as feasible.
+    const outgoing = grooveBundle("out", series(overlapBar, overlapBar + 15));
+    const incoming = grooveBundle("in", flat);
+    const planned = planTransition(outgoing, incoming, {
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      preferredType: "any",
+    });
+    const phrase = planned.proposals.find((item) => item.type === "phrase_mix")!;
+    expect(phrase.feasible).toBe(false);
+    expect(phrase.blockers.some((blocker) => /groove-syncopation-conflict/.test(blocker))).toBe(
+      true,
+    );
+    const swap = planned.proposals.find((item) => item.type === "bass_swap")!;
+    expect(swap.feasible).toBe(false);
+    const crossfade = planned.proposals.find((item) => item.type === "crossfade")!;
+    expect(crossfade.feasible).toBe(true);
+  });
+
+  it("keeps the shared rejection out of proposals whose conflict is not in the overlap", () => {
+    const outgoing = grooveBundle("out", series(overlapBar - 16, overlapBar - 1));
+    const incoming = grooveBundle("in", flat);
+    const planned = planTransition(outgoing, incoming, {
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      preferredType: "phrase_mix",
+    });
+    const phrase = planned.proposals.find((item) => item.type === "phrase_mix")!;
+    expect(phrase.feasible).toBe(true);
+    expect(phrase.blockers).toHaveLength(0);
+  });
+
+  it("validates an aligned request against the same structural eligibility", () => {
+    const outgoing = grooveBundle("out", series(overlapBar, overlapBar + 15));
+    const incoming = grooveBundle("in", flat);
+    const result = validateTransition(outgoing, incoming, {
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      type: "phrase_mix",
+    });
+    expect(result.valid).toBe(false);
+    expect(result.feasible).toBe(false);
+    expect(result.errors.some((error) => /groove-syncopation-conflict/.test(error.message))).toBe(
+      true,
+    );
+  });
+
+  it("keeps aligned proposals feasible when the local evidence is sparse", () => {
+    // Per-bar series exist but the outgoing's overlap window is drum-sparse:
+    // the gate abstains, so the proposal stays eligible.
+    const sparse = Array.from({ length: 131 }, (_, bar) =>
+      bar >= overlapBar && bar <= overlapBar + 15 ? null : 0.2,
+    );
+    const outgoing = grooveBundle("out", sparse);
+    const incoming = grooveBundle("in", flat);
+    const planned = planTransition(outgoing, incoming, {
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      preferredType: "phrase_mix",
+    });
+    const phrase = planned.proposals.find((item) => item.type === "phrase_mix")!;
+    expect(phrase.feasible).toBe(true);
+  });
+
+  it("treats grid rejection as an explicit override, not a structural bypass", () => {
+    const outgoing = grooveBundle("out", series(overlapBar, overlapBar + 15), {
+      gridRejected: true,
+    });
+    const incoming = grooveBundle("in", flat);
+    const strict = validateTransition(outgoing, incoming, {
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      type: "phrase_mix",
+    });
+    expect(strict.valid).toBe(false);
+    expect(
+      strict.errors.some((error) =>
+        /grid is missing, rejected, or low-confidence/.test(error.message),
+      ),
+    ).toBe(true);
+    // With the explicit low-confidence override the aligned template is
+    // judged on its own merits; the structural conflict still applies.
+    const overridden = validateTransition(outgoing, incoming, {
+      outgoingTrackId: "out",
+      incomingTrackId: "in",
+      type: "phrase_mix",
+      allowLowConfidence: true,
+    });
+    expect(
+      overridden.errors.some((error) => /groove-syncopation-conflict/.test(error.message)),
+    ).toBe(true);
+  });
+});
+
 describe("applyTransition and silence windows", () => {
   it("applies a phrase-length proposal without collapsing the outgoing start", () => {
     const catalog = runtime();

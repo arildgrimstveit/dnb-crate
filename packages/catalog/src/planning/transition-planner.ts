@@ -3,6 +3,7 @@ import {
   DEFAULT_PHRASE_BARS,
   MAX_TEMPO_DEVIATION,
   MIN_ANALYSIS_CONFIDENCE,
+  PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP,
   assertPlaybackRate,
   clampMixPresetParams,
   expandPreset,
@@ -22,6 +23,7 @@ import {
 
 import type { StoredTrackAnalysis } from "../analysis-repository.ts";
 import { audioBounds, constrainMixOut, pickMixIn, pickMixOut, snapMixMs } from "./cues.ts";
+import { structuralGrooveConflict } from "./shared.ts";
 import { analysisToTimeline, chooseTransition, type TimelineTrack } from "./timeline.ts";
 import { planPhraseWindow } from "./windows.ts";
 
@@ -163,6 +165,36 @@ function propose(
           incomingRate,
           ...(options.maxBars ? { maxBars: options.maxBars } : {}),
         }));
+  // Template ELIGIBILITY versus preference (F6, repository review
+  // 2026-10-08): the structural groove gate is evaluated on this proposal's
+  // resolved window with the same shared function the set planner uses, so
+  // every entry point (set planning, proposals, validation) reports the same
+  // eligibility and reason for the same pair/window. The shared chooser
+  // already applied it when it returned a window; re-evaluating here keeps
+  // parity when the chooser rejected early (grid/tempo) and the caller's
+  // explicit override flags (allowLowConfidence / allowExcessiveTempo)
+  // legitimately allow proceeding anyway.
+  const structural =
+    type !== "crossfade" && window
+      ? structuralGrooveConflict(
+          {
+            syncopation: outTl.analysis?.descriptors?.bars?.syncopation,
+            bpm: outTl.analysis?.bpm,
+            downbeat0Ms: outTl.analysis?.downbeatTimesMs?.[0] ?? null,
+            windowStartMs: window.mixOutMs,
+            windowBars: window.barCount,
+          },
+          {
+            syncopation: inTl.analysis?.descriptors?.bars?.syncopation,
+            bpm: inTl.analysis?.bpm,
+            downbeat0Ms: inTl.analysis?.downbeatTimesMs?.[0] ?? null,
+            windowStartMs: window.mixInMs,
+            windowBars: window.barCount,
+          },
+          PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP,
+        )
+      : null;
+  const structurallyInfeasible = structural?.conflict === true;
   const resolvedBars = window?.barCount ?? barCount ?? DEFAULT_PHRASE_BARS;
   const durationMs =
     type === "crossfade" ? 30_000 : Math.round(phraseDurationMs(resolvedBars, targetBpm ?? 174));
@@ -205,6 +237,16 @@ function propose(
     outgoing.track.durationMs > outSourceOverlap
   ) {
     blockers.push("Outgoing window cannot fit the phrase overlap");
+  }
+  if (structurallyInfeasible) {
+    // Same wording the set planner records, so every entry point reports the
+    // same reason for the same pair/window.
+    blockers.push(
+      "Structural groove conflict in the overlap local window: no grid-aligned template can blend these backbones (groove-syncopation-conflict)",
+    );
+    reasons.push(
+      "Shared planner crossfades this pair; crossfade is the feasible aligned alternative",
+    );
   }
   if (type !== "crossfade") {
     if (!gridOk(outgoing.analysis, options.allowLowConfidence === true)) {

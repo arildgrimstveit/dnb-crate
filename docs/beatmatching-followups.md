@@ -140,6 +140,23 @@ Labeled joins from this session (all on 174 BPM material, all verified by ear):
   side) separate all four labeled pairs cleanly: praised pairs 0.174 / 0.176 /
   0.447 vs bad 0.706 — threshold 0.58 in the empty band. Gate fires only on
   local measurement; sparse or unmeasured windows leave it silent.
+- October 2026 overlap-local correction remeasurement (repository review F3;
+  `tools/scripts/groove-window-recalibrate.mts`): the numbers above were
+  taken with the pre-fix window, which sampled the outgoing's 16 bars
+  _before_ its mix-out. Replaying every stored join of the 50 most recent
+  plans (576 aligned joins) at each join's own mix-out/mix-in found **zero
+  gate decisions that differ between the old and corrected windows** — no
+  existing plan changes treatment, so no forced auditions. At the fresh
+  planner's current windows the four labeled pairs all measure 0.186–0.33 on
+  both windows (gate silent; the labeled 0.706 lived at the historical
+  join's mix-out, and fresh planning now lands elsewhere — one stored
+  "Sparse-aware" join X-Ray → Somewhere does crossfade on replan for exactly
+  this reason). Threshold 0.58 retained: it still catches the labeled bad
+  pair where that conflict is actually placed and rejects none of the
+  praised pairs. The larger fresh-plan change comes from the bass-swap
+  trigger's own overlap-local rescoring, which flips a few dozen fresh
+  template choices in both directions — audition those on the next replan,
+  not the whole library.
 - October 2026 groove-sync plan audition (23 tracks, same seed/brief as the
   kick-weighted plan): X-Ray drops out of the set entirely, all 22 joins
   phrase_mix within a 0.44–0.65 syncopation band, render:check green, and the
