@@ -15,6 +15,7 @@ import {
 } from "@dnb-crate/domain";
 
 import type { SqliteDatabase } from "./db.ts";
+import { dspInputIdentity } from "./analysis/dsp-identity.ts";
 
 type AnalysisRow = {
   track_id: string;
@@ -462,7 +463,10 @@ export class AnalysisRepository {
     };
   }
 
-  listIdsForScope(scope: "unanalyzed" | "stale" | "all"): string[] {
+  listIdsForScope(
+    scope: "unanalyzed" | "stale" | "all",
+    freshness: { bpmMin?: number | null; bpmMax?: number | null } = {},
+  ): string[] {
     if (scope === "all") {
       return (
         this.db.prepare("SELECT id FROM tracks WHERE file_missing = 0").all() as { id: string }[]
@@ -475,12 +479,23 @@ export class AnalysisRepository {
           .all() as { id: string }[]
       ).map((row) => row.id);
     }
+    // Same freshness contract as the coordinator's dspCurrent (F9): version,
+    // reference lock, plus the versioned input identity — configured tempo
+    // bounds and the stored beat anchor. Unset optional inputs keep the bare
+    // analyzer version so existing rows stay current.
     const rows = this.db
       .prepare(
-        `SELECT t.id, t.analysis_status, t.bpm, t.bpm_source, a.analyzer_version, a.reference_bpm
+        `SELECT t.id, t.analysis_status, t.bpm, t.bpm_source, t.file_fingerprint,
+                a.analyzer_version, a.reference_bpm,
+                s.state AS stage_state, s.fingerprint AS stage_fingerprint, s.identity AS stage_identity,
+                b.position_ms AS beat_anchor_ms
          FROM tracks t
          LEFT JOIN track_analyses a
            ON a.track_id = t.id AND a.analyzer_name = ?
+         LEFT JOIN analysis_stages s
+           ON s.track_id = t.id AND s.stage = 'dsp'
+         LEFT JOIN beat_anchors b
+           ON b.track_id = t.id
          WHERE t.file_missing = 0`,
       )
       .all(DSP_ANALYZER_NAME) as Array<{
@@ -488,8 +503,13 @@ export class AnalysisRepository {
       analysis_status: string;
       bpm: number | null;
       bpm_source: string | null;
+      file_fingerprint: string | null;
       analyzer_version: string | null;
       reference_bpm: number | null;
+      stage_state: string | null;
+      stage_fingerprint: string | null;
+      stage_identity: string | null;
+      beat_anchor_ms: number | null;
     }>;
     return rows
       .filter((row) => {
@@ -502,15 +522,37 @@ export class AnalysisRepository {
         if (analyzerVersionLessThan(row.analyzer_version, DSP_ANALYZER_VERSION)) {
           return true;
         }
-        const hasCanon =
-          (row.bpm_source === "published" || row.bpm_source === "manual") && row.bpm != null;
+        // Reference-lock freshness, same rule as dspCurrent: the stored
+        // reference must match what the current manual/published BPM would
+        // lock to. Drift or removal re-runs; the analyzed writeback echo is
+        // not a reference input.
+        const trackRef =
+          row.bpm != null && (row.bpm_source === "published" || row.bpm_source === "manual")
+            ? row.bpm
+            : null;
         if (
-          hasCanon &&
-          (row.reference_bpm == null || Math.abs(row.reference_bpm - row.bpm!) > 0.01)
+          (trackRef == null) !== (row.reference_bpm == null) ||
+          (trackRef != null &&
+            row.reference_bpm != null &&
+            Math.abs(trackRef - row.reference_bpm) > 0.01)
         ) {
           return true;
         }
-        return false;
+        if (row.stage_state == null) {
+          return false;
+        }
+        if (row.stage_state !== "succeeded") {
+          return true;
+        }
+        if (row.stage_fingerprint !== row.file_fingerprint) {
+          return true;
+        }
+        const identity = dspInputIdentity({
+          beatAnchorMs: row.beat_anchor_ms,
+          bpmMin: freshness.bpmMin,
+          bpmMax: freshness.bpmMax,
+        });
+        return row.stage_identity !== identity;
       })
       .map((row) => row.id);
   }

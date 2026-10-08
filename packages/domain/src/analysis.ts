@@ -184,6 +184,9 @@ export type AnalysisJob = {
   errorCode: string | null;
   errorMessage: string | null;
   retryable: boolean;
+  /** True when the requester explicitly asked to recompute (explicit track
+   *  ids or `scope: "all"`): the DSP freshness skip must not defeat them. */
+  forceDsp?: boolean;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;

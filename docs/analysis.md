@@ -46,13 +46,28 @@ pnpm cli analysis:get --track-id UUID
 pnpm cli analysis:report
 ```
 
-| Scope           | Selects                                                                                            |
-| --------------- | -------------------------------------------------------------------------------------------------- |
-| `ids`           | Explicit `trackIds`                                                                                |
-| `unanalyzed`    | Incomplete analysis, file present                                                                  |
-| `stale`         | Missing DSP row, old analyzer version, failed, reference BPM drift, or missing/stale automatic key |
-| `planningReady` | Tracks that already pass readiness                                                                 |
-| `all`           | Every non-missing file                                                                             |
+| Scope           | Selects                                                                                                                                                            |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ids`           | Explicit `trackIds`; a pure ids request also **forces** a DSP pass on tracks that look current                                                                     |
+| `unanalyzed`    | Incomplete analysis, file present                                                                                                                                  |
+| `stale`         | Missing DSP row, old analyzer version, failed, changed analysis inputs (tempo bounds, beat anchor, reference BPM drift or removal), or missing/stale automatic key |
+| `planningReady` | Tracks that already pass readiness                                                                                                                                 |
+| `all`           | Every non-missing file; also **forces** a DSP pass                                                                                                                 |
+
+Freshness (F9, October 2026): a DSP row is current only when its analyzer
+version, file fingerprint, and a versioned **input identity** match — the
+identity covers the configured `analysis.bpmMin`/`bpmMax` and any stored
+beat anchor, so changing either re-analyzes through `--scope stale` exactly
+as the docs promise. Unset optional inputs keep the bare-version identity,
+so existing libraries are not mass-invalidated. Reference locks are
+manual/published assertions only; drift or removal re-runs the free
+estimate, while the analyzed-BPM writeback echo is never treated as a
+reference. Editing a beat anchor rebuilds the grid but strips every
+grid-indexed feature (sections, per-bar series, per-beat drum profiles,
+grid-relative groove/phase descriptors, beat-snapped cues) so old
+descriptors are never interpreted against the new grid origin; independent
+measurements (loudness, bands, chroma, energy) survive until the next pass
+recomputes the rest.
 
 ## Automatic KeyFinder stage
 

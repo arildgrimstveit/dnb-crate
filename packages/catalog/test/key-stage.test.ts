@@ -51,9 +51,12 @@ async function fixture() {
   await writeSineWav(path.join(library, "source.wav"), { durationMs: 1000 });
   await runtime.service.scanLibrary();
   const track = runtime.repository.listAll()[0]!;
+  // Freshness-gated pass that still names the track: repeat runs must not
+  // redo successful DSP, while key stages re-check per run. (A pure
+  // explicit-ids request now means "recompute now" — see F9.)
   const analyze = async () =>
     runtime.service.waitForAnalysisJob(
-      runtime.service.startTrackAnalysis({ trackIds: [track.id] }).job.id,
+      runtime.service.startTrackAnalysis({ scope: "stale", trackIds: [track.id] }).job.id,
     );
   return {
     root,

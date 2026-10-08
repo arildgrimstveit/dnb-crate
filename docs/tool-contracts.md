@@ -49,7 +49,7 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `start_track_analysis`
 
-- Input: `{ trackIds?: UUID[], planningReadyOnly?: boolean, scope?: ids|planningReady|unanalyzed|stale|all, engines?: ["dnb-crate-dsp"] }` — pass trackIds, planningReadyOnly=true, or a non-ids scope. Whole-library is allowed via `scope`. DSP is the only analysis engine.
+- Input: `{ trackIds?: UUID[], planningReadyOnly?: boolean, scope?: ids|planningReady|unanalyzed|stale|all, engines?: ["dnb-crate-dsp"] }` — pass trackIds, planningReadyOnly=true, or a non-ids scope. Whole-library is allowed via `scope`. DSP is the only analysis engine. A pure `ids` request or `scope: "all"` forces a DSP recompute even when rows look current (`forceDsp` on the job); selector scopes stay freshness-gated, now including tempo-bound and beat-anchor input changes.
 - Output: analysis job
 - Errors: `TRACK_NOT_FOUND`, `ANALYSIS_FAILED`, `INVALID_METADATA` when the selection resolves to zero tracks
 

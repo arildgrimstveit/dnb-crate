@@ -26,11 +26,43 @@ import {
 
 import type { AnalysisJobRepository } from "../analysis-job-repository.ts";
 import type { AnalysisRepository, StoredTrackAnalysis } from "../analysis-repository.ts";
+import { dspInputIdentity } from "./dsp-identity.ts";
 import { loadPcmForAnalysis } from "./load-pcm.ts";
 import type { TrackRepository } from "../repository.ts";
 
 import { probeKeyEngine, type KeyEngineProbe } from "./key-engine.ts";
 import { KeyAnalysisService } from "./key-service.ts";
+
+/**
+ * Drop every grid-indexed feature from a stored analysis row after the grid
+ * origin moved (F9, repository review 2026-10-08): per-bar series, per-beat
+ * drum profiles, bar-numbered sections, beat-snapped cues, and the
+ * grid-relative groove/phase descriptors all describe the PREVIOUS grid and
+ * must never be interpreted against the new origin. Time-based
+ * measurements (loudness, bands, chroma, energy/danceability descriptors,
+ * waveform summary, audio bounds, key candidates) are grid-independent and
+ * survive until the next full analysis recomputes the rest.
+ */
+export function stripGridIndexedFeatures(row: StoredTrackAnalysis): StoredTrackAnalysis {
+  const descriptors = row.descriptors;
+  return {
+    ...row,
+    sections: [],
+    suggestedCues: [],
+    descriptors: descriptors
+      ? ({
+          ...descriptors,
+          bars: null,
+          tempoEvidence: null,
+          grooveSyncopation: null,
+          backbeatConcentration: null,
+          gridPhaseMaxErrorMs: null,
+          gridPhaseSuspect: null,
+          beatPhaseHistogram: null,
+        } as typeof descriptors)
+      : descriptors,
+  };
+}
 
 export class AnalysisCoordinator {
   canRun: () => boolean = () => true;
@@ -71,7 +103,7 @@ export class AnalysisCoordinator {
     if (this.activeJobId === id) this.abort.abort();
   }
 
-  start(trackIds: string[]): { job: AnalysisJob } {
+  start(trackIds: string[], options: { forceDsp?: boolean } = {}): { job: AnalysisJob } {
     if (trackIds.length === 0) {
       throw new DomainError("ANALYSIS_FAILED", "No tracks to analyze");
     }
@@ -82,7 +114,7 @@ export class AnalysisCoordinator {
       }
     }
     const resolved = [DEFAULT_ANALYSIS_ENGINE];
-    const job = this.jobs.insertQueued(trackIds, resolved);
+    const job = this.jobs.insertQueued(trackIds, resolved, { forceDsp: options.forceDsp === true });
     this.kick();
     return { job };
   }
@@ -120,21 +152,30 @@ export class AnalysisCoordinator {
     const existing = this.analyses.findByTrackId(trackId);
     const canonical = resolveCanonicalBpm(track, existing);
     if (!canonical.bpm) {
+      // No tempo to reconstruct a grid from: the stored grid-indexed features
+      // now describe the previous grid, so drop them rather than leave them
+      // to be interpreted against a new origin. The next analysis pass
+      // recomputes them (the anchor is part of the input identity).
+      if (existing) {
+        this.analyses.upsert(stripGridIndexedFeatures(existing));
+      }
       return;
     }
     const grid = reconstructGrid(positionMs, canonical.bpm, track.durationMs);
     if (existing) {
-      this.analyses.upsert({
-        ...existing,
-        bpm: canonical.bpm,
-        bpmConfidence: Math.max(existing.bpmConfidence ?? 0, MIN_ANALYSIS_CONFIDENCE),
-        beatTimesMs: grid.beatTimesMs,
-        downbeatTimesMs: grid.downbeatTimesMs,
-        beatAnchorMs: positionMs,
-        gridRejected: false,
-        gridRejectionReason: null,
-        gridSource: "anchor",
-      });
+      this.analyses.upsert(
+        stripGridIndexedFeatures({
+          ...existing,
+          bpm: canonical.bpm,
+          bpmConfidence: Math.max(existing.bpmConfidence ?? 0, MIN_ANALYSIS_CONFIDENCE),
+          beatTimesMs: grid.beatTimesMs,
+          downbeatTimesMs: grid.downbeatTimesMs,
+          beatAnchorMs: positionMs,
+          gridRejected: false,
+          gridRejectionReason: null,
+          gridSource: "anchor",
+        }),
+      );
     }
   }
 
@@ -231,12 +272,16 @@ export class AnalysisCoordinator {
           }
         }
         try {
-          if (!this.dspCurrent(trackId)) {
+          if (job.forceDsp || !this.dspCurrent(trackId)) {
             await this.analyzeTrack(trackId, binaries, pcmCache.get(trackId));
             this.analyses.setStage(trackId, "dsp", {
               state: "succeeded",
               fingerprint: this.tracks.findById(trackId)!.fileFingerprint,
-              identity: DSP_ANALYZER_VERSION,
+              identity: dspInputIdentity({
+                beatAnchorMs: this.analyses.getBeatAnchorMs(trackId),
+                bpmMin: this.config.analysis?.bpmMin,
+                bpmMax: this.config.analysis?.bpmMax,
+              }),
               reason: null,
             });
           }
@@ -290,16 +335,32 @@ export class AnalysisCoordinator {
       track.analysisStatus === "failed"
     )
       return false;
+    // Reference-lock freshness: compare the stored referenceBpm against the
+    // reference the CURRENT track state would lock to (manual/published —
+    // the analyzed writeback echo is the analyzer's own result and is not a
+    // reference input). Drift re-analyzes; removing the reference re-runs
+    // free (F9).
+    const trackRef =
+      track.bpm != null && (track.bpmSource === "manual" || track.bpmSource === "published")
+        ? track.bpm
+        : null;
     if (
-      (track.bpmSource === "manual" || track.bpmSource === "published") &&
-      track.bpm != null &&
-      (row.referenceBpm == null || Math.abs(row.referenceBpm - track.bpm) > 0.01)
+      (trackRef == null) !== (row.referenceBpm == null) ||
+      (trackRef != null && row.referenceBpm != null && Math.abs(trackRef - row.referenceBpm) > 0.01)
     )
       return false;
+    // Input identity covers the configured tempo bounds and the beat anchor
+    // in addition to the analyzer version (F9): a config or anchor change
+    // re-analyzes even though version and fingerprint are unchanged.
+    const identity = dspInputIdentity({
+      beatAnchorMs: this.analyses.getBeatAnchorMs(trackId),
+      bpmMin: this.config.analysis?.bpmMin,
+      bpmMax: this.config.analysis?.bpmMax,
+    });
     return stage
       ? stage.state === "succeeded" &&
           stage.fingerprint === track.fileFingerprint &&
-          stage.identity === DSP_ANALYZER_VERSION
+          stage.identity === identity
       : track.analysisStatus === "complete";
   }
 
@@ -318,11 +379,12 @@ export class AnalysisCoordinator {
     const pcm = await (preloaded ??
       loadPcmForAnalysis(track.filePath, this.runner, binaries, this.abort.signal));
     const anchor = this.analyses.getBeatAnchorMs(trackId);
+    // Reference locks are manual/published assertions only. The analyzed
+    // writeback echo is the analyzer's own result — passing it back as a
+    // reference would store an input the freshness contract (correctly)
+    // ignores, marking the row stale forever (F9).
     const referenceBpm =
-      track.bpm != null &&
-      (track.bpmSource === "published" ||
-        track.bpmSource === "manual" ||
-        track.bpmSource === "analyzed")
+      track.bpm != null && (track.bpmSource === "published" || track.bpmSource === "manual")
         ? track.bpm
         : undefined;
     const dsp = dspAnalyzer.analyze(pcm, {

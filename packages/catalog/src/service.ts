@@ -270,11 +270,15 @@ export class CatalogService {
   } {
     const scope = input.scope ?? (input.planningReadyOnly === true ? "planningReady" : "ids");
     const ids = new Set<string>();
+    const explicitIds = (input.trackIds ?? []).length > 0;
     for (const id of input.trackIds ?? []) {
       ids.add(id);
     }
     if (scope === "unanalyzed" || scope === "stale" || scope === "all") {
-      for (const id of this.analyses.listIdsForScope(scope)) {
+      for (const id of this.analyses.listIdsForScope(scope, {
+        bpmMin: this.config.analysis?.bpmMin,
+        bpmMax: this.config.analysis?.bpmMax,
+      })) {
         ids.add(id);
       }
     }
@@ -296,7 +300,14 @@ export class CatalogService {
         "No tracks to analyze. Pass trackIds, planningReadyOnly=true, or scope unanalyzed|stale|all|planningReady.",
       );
     }
-    return this.analysis.start([...ids]);
+    // A pure explicit-ids request (scope defaults to "ids") or a whole-library
+    // request means "recompute now" and must not be defeated by the freshness
+    // skip (F9). Selector scopes (unanalyzed/stale/planningReady) stay
+    // freshness-gated — including when ids are unioned in — and with the
+    // input identity now covering tempo bounds and anchors, a config change
+    // correctly re-analyzes through them too.
+    const forceDsp = (scope === "ids" && explicitIds) || scope === "all";
+    return this.analysis.start([...ids], { forceDsp });
   }
 
   private needsKeyBackfill(track: Track): boolean {

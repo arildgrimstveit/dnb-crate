@@ -136,6 +136,8 @@ export const analysisJobSchema = z.object({
   errorCode: z.string().nullable(),
   errorMessage: z.string().nullable(),
   retryable: z.boolean(),
+  /** Present when the job explicitly recomputes (explicit ids / scope all). */
+  forceDsp: z.boolean().optional(),
   createdAt: z.string(),
   startedAt: z.string().nullable(),
   completedAt: z.string().nullable(),

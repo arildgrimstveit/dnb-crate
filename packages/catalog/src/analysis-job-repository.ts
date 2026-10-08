@@ -19,6 +19,7 @@ type JobRow = {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  force_dsp?: number;
 };
 
 function mapJob(row: JobRow): AnalysisJob {
@@ -35,6 +36,7 @@ function mapJob(row: JobRow): AnalysisJob {
     errorCode: row.error_code,
     errorMessage: row.error_message,
     retryable: row.retryable === 1,
+    forceDsp: row.force_dsp === 1,
     createdAt: row.created_at,
     startedAt: row.started_at,
     completedAt: row.completed_at,
@@ -44,16 +46,26 @@ function mapJob(row: JobRow): AnalysisJob {
 export class AnalysisJobRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
-  insertQueued(trackIds: string[], engines: AnalysisEngineId[] = ["dnb-crate-dsp"]): AnalysisJob {
+  insertQueued(
+    trackIds: string[],
+    engines: AnalysisEngineId[] = ["dnb-crate-dsp"],
+    options: { forceDsp?: boolean } = {},
+  ): AnalysisJob {
     const id = crypto.randomUUID();
     const timestamp = nowIso();
     this.db
       .prepare(
         `INSERT INTO analysis_jobs (
-          id, status, progress, track_ids_json, engines_json, completed_ids_json, failed_ids_json, created_at
-        ) VALUES (?, 'queued', 0, ?, ?, '[]', '[]', ?)`,
+          id, status, progress, track_ids_json, engines_json, completed_ids_json, failed_ids_json, force_dsp, created_at
+        ) VALUES (?, 'queued', 0, ?, ?, '[]', '[]', ?, ?)`,
       )
-      .run(id, JSON.stringify(trackIds), JSON.stringify(engines), timestamp);
+      .run(
+        id,
+        JSON.stringify(trackIds),
+        JSON.stringify(engines),
+        options.forceDsp === true ? 1 : 0,
+        timestamp,
+      );
     return this.require(id);
   }
 

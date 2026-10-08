@@ -561,3 +561,108 @@ describe("track analysis and aligned transitions", () => {
     expect(catalog.service.getTrackAnalysis(track.id).analyzerName).toBe("beat-this");
   });
 });
+
+describe("analysis freshness: inputs, force, and anchor invalidation (F9)", () => {
+  async function clickCatalog(config?: AppConfig["analysis"]) {
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-f9-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(
+      {
+        ...testConfig(root),
+        analysis: config ?? { defaultEngine: "dnb-crate-dsp" },
+      },
+      undefined,
+      { useFakeFfmpeg: true },
+    );
+    const pcm = buildClickTrackPcm({ bpm: 174, durationMs: 12_000 });
+    await writeFile(path.join(library, "click.wav"), encodeMonoWav(pcm));
+    await catalog.service.scanLibrary();
+    const track = catalog.service.searchTracks({ query: "click", limit: 1 }).tracks[0]!;
+    const started = catalog.service.startTrackAnalysis({ trackIds: [track.id] });
+    const done = await catalog.service.waitForAnalysisJob(started.job.id, 60_000);
+    expect(done.status).toBe("succeeded");
+    return { root, catalog, trackId: track.id };
+  }
+
+  it("re-analyzes when the configured tempo bounds change, and not when they do not", async () => {
+    const { root, catalog, trackId } = await clickCatalog();
+    const before = catalog.service.getTrackAnalysis(trackId).analyzedAt;
+    // Unchanged config: a stale pass finds nothing to do.
+    expect(catalog.analyses.listIdsForScope("stale")).not.toContain(trackId);
+    catalog.close();
+    cleanups.pop();
+
+    // Reopening the same catalog with tempo bounds configured changes the
+    // effective input identity: the current row must become stale and a
+    // stale pass must actually re-run the DSP.
+    const reopened = createCatalogRuntime(
+      {
+        ...testConfig(root),
+        analysis: { defaultEngine: "dnb-crate-dsp", bpmMin: 160, bpmMax: 190 },
+      },
+      undefined,
+      { useFakeFfmpeg: true },
+    );
+    cleanups.push(() => reopened.close());
+    expect(reopened.analyses.listIdsForScope("stale", { bpmMin: 160, bpmMax: 190 })).toContain(
+      trackId,
+    );
+    const rerun = reopened.service.startTrackAnalysis({ scope: "stale" });
+    const done = await reopened.service.waitForAnalysisJob(rerun.job.id, 60_000);
+    expect(done.status).toBe("succeeded");
+    const after = reopened.service.getTrackAnalysis(trackId).analyzedAt;
+    expect(Date.parse(after)).toBeGreaterThanOrEqual(Date.parse(before));
+    expect(after).not.toBe(before);
+    // Idempotent: with bounds unchanged now, stale finds nothing again.
+    expect(reopened.analyses.listIdsForScope("stale", { bpmMin: 160, bpmMax: 190 })).not.toContain(
+      trackId,
+    );
+  });
+
+  it("forces a DSP pass for explicitly requested tracks even when current", async () => {
+    const { catalog, trackId } = await clickCatalog();
+    const before = catalog.service.getTrackAnalysis(trackId).analyzedAt;
+    expect(catalog.analyses.listIdsForScope("stale")).not.toContain(trackId);
+    const rerun = catalog.service.startTrackAnalysis({ trackIds: [trackId] });
+    expect(rerun.job.forceDsp).toBe(true);
+    const done = await catalog.service.waitForAnalysisJob(rerun.job.id, 60_000);
+    expect(done.status).toBe("succeeded");
+    expect(catalog.service.getTrackAnalysis(trackId).analyzedAt).not.toBe(before);
+  });
+
+  it("strips grid-indexed features when the beat anchor moves", async () => {
+    const { catalog, trackId } = await clickCatalog();
+    const analyzed = catalog.service.getTrackAnalysis(trackId);
+    expect(analyzed.sections.length).toBeGreaterThan(0);
+    expect(analyzed.descriptors?.bars ?? null).not.toBeNull();
+
+    catalog.service.setCuePoints(trackId, [], 3000);
+
+    const anchored = catalog.service.getTrackAnalysis(trackId);
+    expect(anchored.gridSource).toBe("anchor");
+    expect(anchored.sections).toEqual([]);
+    expect(anchored.descriptors?.bars ?? null).toBeNull();
+    expect(anchored.descriptors?.grooveSyncopation ?? null).toBeNull();
+    expect(anchored.descriptors?.gridPhaseSuspect ?? null).toBeNull();
+    // Grid-independent measurements survive until the next full pass.
+    expect(anchored.descriptors?.suggestedEnergy).not.toBeNull();
+    // The anchor is part of the input identity: the row is stale until
+    // re-analysis recomputes the grid-indexed features against it.
+    expect(catalog.analyses.listIdsForScope("stale")).toContain(trackId);
+  });
+
+  it("re-runs free estimation when the manual reference BPM is removed", async () => {
+    const { catalog, trackId } = await clickCatalog();
+    catalog.service.updateTrackMetadata(trackId, { bpm: 174 });
+    const locked = catalog.service.startTrackAnalysis({ scope: "stale" });
+    await catalog.service.waitForAnalysisJob(locked.job.id, 60_000);
+    expect(catalog.analyses.listIdsForScope("stale")).not.toContain(trackId);
+
+    catalog.service.updateTrackMetadata(trackId, { bpm: null });
+    expect(catalog.analyses.listIdsForScope("stale")).toContain(trackId);
+  });
+});
