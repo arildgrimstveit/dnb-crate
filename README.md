@@ -10,7 +10,7 @@ An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server. The same ser
 
 ## Ask for a mix
 
-Talk to the MCP host (Cursor, Codex). Mood or energy plus a length is enough. The host maps that onto `start_mix_workflow` using `create_set_plan` brief fields. The planner picks the order and joins; it does not write audio. The renderer prints a gapless **24-bit 48 kHz master** and a **16-bit listen** FLAC named from the plan.
+Talk to the MCP host (Cursor, Codex, Claude Code, OpenCode, etc.). Mood or energy plus a length is enough. The host maps that onto `start_mix_workflow` using `create_set_plan` brief fields. The planner picks the order and joins; it does not write audio. The renderer prints a gapless **24-bit 48 kHz master** and a **16-bit listen** FLAC named from the plan.
 
 Say whatever else you care about: preferred moods, subgenres, or artists; how the energy should move; a start or closer by title; a seed; genres to include or exclude; how pretty, danceable, or heavy the tracks should stay. Named titles are resolved with `search_tracks` (your catalog only). If you omit a length, the plan is **60 minutes**. Allowed range is 1 minute–8 hours.
 
