@@ -189,6 +189,10 @@ function timelineAnalysis(stability: number | null): TimelineAnalysis {
     tailEnergy: null,
     integratedLufs: null,
     keyConfidence: null,
+    audioStartMs: null,
+    audioEndMs: null,
+    mixInMs: null,
+    mixOutMs: null,
     tempoStability: stability,
   };
 }
