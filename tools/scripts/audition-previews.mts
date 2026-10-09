@@ -20,50 +20,31 @@ type PairSpec = {
   incoming: string;
   newTemplate: "phrase_mix" | "bass_swap" | "crossfade";
   note: string;
+  /** Pin to a specific plan's transition (defaults to the most recent). */
+  planId?: string;
 };
 
 const PAIRS: PairSpec[] = [
   {
-    outgoing: "Hayling",
-    incoming: "Pieces",
-    newTemplate: "bass_swap",
-    note: "groove-kick-conflict: fresh planner swaps the low end",
-  },
-  {
-    outgoing: "Red Velvet",
-    incoming: "Miami",
-    newTemplate: "bass_swap",
-    note: "groove-kick-conflict: fresh planner swaps the low end",
-  },
-  {
-    outgoing: "Moment to Moment",
-    incoming: "Better Perspective",
-    newTemplate: "bass_swap",
-    note: "groove-kick-conflict: fresh planner swaps the low end",
-  },
-  {
-    outgoing: "Still in Love",
-    incoming: "Pathways",
-    newTemplate: "bass_swap",
-    note: "groove-kick-conflict: fresh planner swaps the low end",
-  },
-  {
-    outgoing: "Coming Down",
-    incoming: "In the Woods",
-    newTemplate: "bass_swap",
-    note: "groove-kick-conflict: fresh planner swaps the low end",
-  },
-  {
-    outgoing: "Signs",
-    incoming: "Picton Blues",
+    outgoing: "Together In The Night",
+    incoming: "Renaissance - Edit",
     newTemplate: "phrase_mix",
-    note: "fresh planner keeps the blend (no kick conflict)",
+    note: "high-gear join 15: bass_swap in the perfect mix - test the blend",
+    planId: "6b21e8fa-a597-4ea6-ad89-8a85490d3736",
   },
   {
-    outgoing: "Pathways",
-    incoming: "All Our Yesterdays",
+    outgoing: "Renaissance - Edit",
+    incoming: "Don't You Fade Away",
     newTemplate: "phrase_mix",
-    note: "fresh planner keeps the blend (no kick conflict)",
+    note: "high-gear join 16: bass_swap in the perfect mix - test the blend",
+    planId: "6b21e8fa-a597-4ea6-ad89-8a85490d3736",
+  },
+  {
+    outgoing: "Escape",
+    incoming: "Through The Silence",
+    newTemplate: "phrase_mix",
+    note: "high-gear join 25: bass_swap in the perfect mix - test the blend",
+    planId: "6b21e8fa-a597-4ea6-ad89-8a85490d3736",
   },
 ];
 
@@ -85,32 +66,43 @@ type JoinHit = {
 
 try {
   const tracks = runtime.repository.listAll();
-  const byTitle = (needle: string) =>
-    tracks.find((track) => track.title.toLowerCase().includes(needle.toLowerCase()));
+  // Exact title match first; several recordings can share a title, so
+  // adjacency checks match against ALL candidates.
+  const byTitleCandidates = (needle: string) => {
+    const lower = needle.toLowerCase().trim();
+    const exact = tracks.filter((track) => track.title.toLowerCase().trim() === lower);
+    return exact.length > 0 ? exact : tracks.filter((track) => track.title.toLowerCase().includes(lower));
+  };
 
   const summaries = runtime.setPlans.list(50).plans;
   const sheet: string[] = [];
   let index = 0;
   for (const spec of PAIRS) {
-    const outTrack = byTitle(spec.outgoing);
-    const inTrack = byTitle(spec.incoming);
-    if (!outTrack || !inTrack) {
+    const outCandidates = byTitleCandidates(spec.outgoing);
+    const inCandidates = byTitleCandidates(spec.incoming);
+    const outIds = new Set(outCandidates.map((track) => track.id));
+    const inIds = new Set(inCandidates.map((track) => track.id));
+    if (outIds.size === 0 || inIds.size === 0) {
       console.log(`!! missing track for ${spec.outgoing} -> ${spec.incoming}`);
       continue;
     }
-    // Most recent stored plan containing this adjacency.
+    // Prefer the pinned plan when given; otherwise the most recent stored
+    // adjacency wins.
     let hit: JoinHit | null = null;
-    for (const summary of summaries) {
+    const planIds: string[] = spec.planId
+      ? [spec.planId]
+      : summaries.map((summary) => summary.id);
+    for (const planId of planIds) {
       let stored: ReturnType<typeof runtime.setPlans.findById>;
       try {
-        stored = runtime.setPlans.findById(summary.id);
+        stored = runtime.setPlans.findById(planId);
       } catch {
         continue;
       }
       if (!stored) continue;
       const entries = [...stored.plan.entries].sort((a, b) => a.order - b.order);
       for (let i = 0; i < entries.length - 1; i += 1) {
-        if (entries[i]!.trackId !== outTrack.id || entries[i + 1]!.trackId !== inTrack.id) {
+        if (!outIds.has(entries[i]!.trackId) || !inIds.has(entries[i + 1]!.trackId)) {
           continue;
         }
         const transition = entries[i]!.transitionToNext;
@@ -120,8 +112,8 @@ try {
           planName: stored.plan.name,
           transitionId: transition.id,
           storedType: transition.type,
-          outgoingTitle: outTrack.title,
-          incomingTitle: inTrack.title,
+          outgoingTitle: outCandidates.find((t) => t.id === entries[i]!.trackId)!.title,
+          incomingTitle: inCandidates.find((t) => t.id === entries[i + 1]!.trackId)!.title,
           updatedAt: stored.plan.updatedAt,
         };
         if (!hit || candidate.updatedAt > hit.updatedAt) {
