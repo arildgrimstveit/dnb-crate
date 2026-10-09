@@ -57,6 +57,15 @@ describe("edition variant families", () => {
     );
   });
 
+  it("collapses dash-suffixed VIP and edit variants into the family", () => {
+    expect(recordingFamilyKeyFrom({ artist: "Etherwood", title: "Pool Hopping - VIP" })).toBe(
+      recordingFamilyKeyFrom({ artist: "Etherwood", title: "Pool Hopping" }),
+    );
+    expect(recordingFamilyKeyFrom({ artist: "Etherwood", title: "It Began - Edit" })).toBe(
+      recordingFamilyKeyFrom({ artist: "Etherwood", title: "It Began" }),
+    );
+  });
+
   it("keeps genuinely different songs in different families", () => {
     expect(recordingFamilyKeyFrom({ artist: "Sub Focus", title: "Rock It" })).not.toBe(
       recordingFamilyKeyFrom({ artist: "Sub Focus", title: "Tidal Wave" }),

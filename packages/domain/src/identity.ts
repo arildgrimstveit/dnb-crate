@@ -44,8 +44,10 @@ export function stripVariantLabels(title: string): string {
  * distinct their productions are — recording identity (recordingKey) keeps
  * remixes separate; only the plan-dedup family collapses them.
  */
-const REMIX_PAREN_GROUP = /\s*[([]\s*[^)\]]*\b(?:remix|rmx|rework|bootleg|flip)\b[^)\]]*[)\]]/i;
-const REMIX_DASH_SUFFIX = /\s*[-–]\s*[^)\]]*\b(?:remix|rmx|rework|bootleg|flip)\b[^)\]]*$/i;
+const REMIX_PAREN_GROUP =
+  /\s*[([]\s*[^)\]]*\b(?:remix|rmx|rework|bootleg|flip|vip|edit)\b[^)\]]*[)\]]/i;
+const REMIX_DASH_SUFFIX =
+  /\s*[-–]\s*[^)\]]*\b(?:remix|rmx|rework|bootleg|flip|vip|edit)\b[^)\]]*$/i;
 
 function familyTitle(title: string): string {
   return stripFeaturing(title)
