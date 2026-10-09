@@ -941,8 +941,13 @@ export class RenderCoordinator {
     // where a mixed-waveform scan cannot attribute anything. "fast" probes a
     // 10 s window at the overlap midpoint (2 decodes per aligned join);
     // "full" covers the whole overlap and also reports start/end-half drift.
-    // Findings stay ADVISORY (warnings) until calibrated on the labeled
-    // corpus; a measured result never clears the geometric residual yet.
+    // Findings stay ADVISORY until calibrated on the labeled corpus; a
+    // measured result never clears the geometric residual yet. They are
+    // reported on the join rows (audioStatus/audioFindings) and deliberately
+    // NOT in the top-level warnings list: that channel gates first-mix
+    // workflows, and uncalibrated deck verdicts must not fail them — nor
+    // vary with the local ffmpeg build.
+    const deckProbed = new Set<number>();
     const audioMode = options?.audioVerification ?? "fast";
     if (audioMode !== "off") {
       for (const join of joins) {
@@ -1076,6 +1081,7 @@ export class RenderCoordinator {
             overlapMs: probeMs,
             beatPeriodMs,
           });
+          deckProbed.add(join.order);
           join.audioStatus = verification.status;
           join.audioUnmeasuredReason =
             verification.status === "unmeasured" ? (verification.reasons[0] ?? null) : null;
@@ -1086,6 +1092,7 @@ export class RenderCoordinator {
             ];
           }
         } catch (error) {
+          deckProbed.add(join.order);
           join.audioUnmeasuredReason = `deck probe failed: ${
             error instanceof Error ? error.message : String(error)
           }`;
@@ -1137,19 +1144,21 @@ export class RenderCoordinator {
         .filter((join) => join.evidenceSource === "missing")
         .map((join) => `join ${join.order} stored-grid unmeasured (no frozen evidence)`),
       ...joins
-        .filter((join) => join.audioUnmeasuredReason != null)
+        .filter((join) => join.audioUnmeasuredReason != null && !deckProbed.has(join.order))
         .map(
           (join) =>
             `join ${join.order} independent audio unmeasured: ${join.audioUnmeasuredReason}`,
         ),
+      // Deck-probe advisories (review/fail/unmeasured) intentionally stay on
+      // the join rows only: uncalibrated verdicts must not gate first-mix
+      // workflows or vary with the local ffmpeg build.
       ...joins
-        .filter((join) => join.audioStatus === "review" || join.audioStatus === "fail")
-        .map(
+        .filter(
           (join) =>
-            `join ${join.order} independent audio ${join.audioStatus} (advisory until calibrated): ${join.audioFindings.join("; ")}`,
-        ),
-      ...joins
-        .filter((join) => join.audioFindings.length > 0 && join.audioStatus === "unmeasured")
+            join.audioFindings.length > 0 &&
+            join.audioStatus === "unmeasured" &&
+            !deckProbed.has(join.order),
+        )
         .map((join) => `join ${join.order} audio quality: ${join.audioFindings.join("; ")}`),
     ];
     return {
