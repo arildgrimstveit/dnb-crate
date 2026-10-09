@@ -119,6 +119,18 @@ export function buildPlanningPool(
         rejected.push({ trackId: track.id, title: track.title, reason: "UNSTABLE_GRID" });
         return false;
       }
+      // DSP 3.12 grid-phase diagnostics: a suspect flag means the stored
+      // grid phase disagrees with the track's own audio somewhere by more
+      // than the trust threshold (measured October 2026: canuhearmenow? at
+      // 55 ms and Pool Hopping - VIP at 82 ms both landed in one variety
+      // plan and produced corroborated 60-140 ms join misalignments — the
+      // stored-grid residual AND the deck-probe verifier agreed). Aligned
+      // blends on such grids flammed; keep them out of the pool until
+      // re-analysis clears the flag. Explicit pins still override below.
+      if (analysis?.descriptors?.gridPhaseSuspect === true) {
+        rejected.push({ trackId: track.id, title: track.title, reason: "GRID_PHASE_SUSPECT" });
+        return false;
+      }
       const descriptors = analysis?.descriptors ?? null;
       const descriptorMatch = matchesDescriptorFilters(track, descriptors, filters);
       if (!descriptorMatch.ok) {

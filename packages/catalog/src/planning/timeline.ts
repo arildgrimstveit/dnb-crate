@@ -111,6 +111,10 @@ export type TimelineAnalysis = {
     suggestedEnergy: number | null;
     grooveSyncopation?: number | null;
     backbeatConcentration?: number | null;
+    /** DSP 3.12: the stored grid phase disagrees with the track's own audio
+     *  somewhere beyond the trust threshold — aligned blends on it risk
+     *  constant sub-beat flams. */
+    gridPhaseSuspect?: boolean | null;
     bars?: {
       rms: number[];
       sub?: number[];
@@ -915,6 +919,7 @@ export function analysisToTimeline(
       brightness?: number | null;
       grooveSyncopation?: number | null;
       backbeatConcentration?: number | null;
+      gridPhaseSuspect?: boolean | null;
       audioStartMs?: number | null;
       audioEndMs?: number | null;
       bars?: {
@@ -1017,6 +1022,7 @@ export function analysisToTimeline(
           suggestedEnergy: analysis.descriptors.suggestedEnergy ?? null,
           grooveSyncopation: analysis.descriptors.grooveSyncopation ?? null,
           backbeatConcentration: analysis.descriptors.backbeatConcentration ?? null,
+          gridPhaseSuspect: analysis.descriptors.gridPhaseSuspect ?? null,
           bars: analysis.descriptors.bars ?? null,
         }
       : null,
