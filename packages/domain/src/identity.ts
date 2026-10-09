@@ -36,13 +36,38 @@ export function stripVariantLabels(title: string): string {
     .toLowerCase();
 }
 
+/**
+ * Family title for MIX-variety dedup: edition labels AND named remixes are
+ * stripped, and the artist is the PRIMARY artist (before the first
+ * collaborator comma). The owner's 9 October 2026 verdict: "Rock It" and
+ * "Rock It - Wilkinson Remix" in one hour is the same tune twice, however
+ * distinct their productions are — recording identity (recordingKey) keeps
+ * remixes separate; only the plan-dedup family collapses them.
+ */
+const REMIX_PAREN_GROUP = /\s*[([]\s*[^)\]]*\b(?:remix|rmx|rework|bootleg|flip)\b[^)\]]*[)\]]/i;
+const REMIX_DASH_SUFFIX = /\s*[-–]\s*[^)\]]*\b(?:remix|rmx|rework|bootleg|flip)\b[^)\]]*$/i;
+
+function familyTitle(title: string): string {
+  return stripFeaturing(title)
+    .replace(REMIX_DASH_SUFFIX, "")
+    .replace(REMIX_PAREN_GROUP, " ")
+    .replace(VARIANT_DASH_SUFFIX, "")
+    .replace(VARIANT_LABEL, " ")
+    .replace(/\s*[-–]\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 export function recordingFamilyKeyFrom(input: {
   artist?: string | null;
   artistCanonical?: string | null;
   title: string;
 }): string {
-  const artist = normalizePersonName(input.artistCanonical ?? input.artist ?? "");
-  return `fam:${artist}|${stripVariantLabels(input.title)}`;
+  const fullArtist = input.artistCanonical ?? input.artist ?? "";
+  const primary = fullArtist.split(",")[0]!.trim();
+  const artist = normalizePersonName(primary);
+  return `fam:${artist}|${familyTitle(input.title)}`;
 }
 
 export function remixTokens(title: string): Set<string> {
