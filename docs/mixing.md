@@ -30,3 +30,14 @@ A plan is ready to render when it is structurally valid, quality checks pass, an
 ## Briefs
 
 Start from `docs/examples/liquid-hour.example.brief.json` or `docs/examples/peak-hour.example.brief.json`. Change `targetDurationMinutes` (or `targetDurationMs`), moods, descriptor floors, and seed. Do not copy title lists or exclude IDs from another library. Natural-language asks and the CLI short path: README **Ask for a mix**.
+
+## Listening-session findings (2026-10)
+
+Confirmed by owner verdicts over two auditioned hours (one liquid, one peak):
+
+- **Grid stability is the strongest unmixable predictor.** Every track retired as unmixable measured `tempo_stability` ≤ 0.18 (Half Light 0.175, Break The Cycle 0.131) or flamed both of its joins despite clean stored-grid residuals. Tracks at ≥ 0.65 held up. Pool candidates below ~0.6 stability should be excluded or heavily penalized before planning.
+- **Never mix in over a drumless head.** When drop-anchored candidates fail (late first drop), the fallback can place mix-in at source 0 over an intro measuring ~0.01 energy — the owner hears "completely quiet when it comes in" every time. An incoming head energy floor (or falling back to a later drop) belongs in window selection.
+- **The gallop signature is a 32-bar phrase_mix between two busy break patterns.** Beat grids read 0 ms residual — the interleave is at the 16th-note level — and the owner hears galloping. Two confirmed cases both resolved with a 16-bar `bass_swap`. Drum coexistence through the overlap is the observable; low coexistence on an aligned 32-bar pair should steer to `bass_swap`.
+- **Plan-time body check.** A drop-anchored window whose body is thinner than head + tail join regions only fails at render ("no native body"). The renderer's rule (body > incoming + outgoing join duration) is knowable at planning; single-late-drop tracks in short windows routinely violate it.
+- **Variant edits are duplicate recordings.** Radio and extended edits carry different `recording_key`s and both can be selected (Heartbeat Loud twice, four slots apart). Normalize edit variants (extended/version/radio/edit) into one recording family for variety and duplicate rejection.
+- **Editing gotchas that cost debugging time.** `applyTransition` sets `incomingSourceEndMs` only on the last entry — trim middle entries with `setTrim`. Hand-edited windows must drop the pinned `downbeatOffsetMs`/`alignmentMode`/`alignmentPeriodMs`/`onsetLockBeats`/`recipeVersion` parameters, or the renderer skips re-deriving alignment and stale offsets become audible flams.

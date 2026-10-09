@@ -1,0 +1,37 @@
+---
+description: Operating rules for building and auditioning DnB mixes in this repo (owner preferences, track screening, plan editing, verification)
+alwaysApply: true
+---
+
+# DnB mix sessions
+
+Hard-won from the October 2026 listening sessions. Full findings also live in `docs/mixing.md` ("Listening-session findings").
+
+## Before planning — screen the pool
+
+- Exclude tracks with `tempo_stability` < 0.65 or `bpm_confidence` < 0.85 from `track_analyses`. Every owner-declared "unmixable" track had a drifting grid; paper metrics (residual 0) did not catch it.
+- Prefer tracks with an early first drop (≤ ~110s) or 2+ drops. Single-late-drop tracks produce source-0 entries ("energy dies") or sub-90s bodies (render fails "no native body").
+- Structure queries: `track_sections` (type/start_ms), stability from the latest `dnb-crate-dsp` analysis row.
+
+## After planning — audit before rendering
+
+- Reject any join whose incoming starts near source 0 with a drumless head (intro energy < 0.05). Fix by drop-anchoring: mix-in = drop start − overlap, snapped to the incoming's downbeat grid.
+- Gallop signature: 32-bar phrase_mix, aligned grids, low drum coexistence → convert to 16-bar bass_swap before auditioning.
+- Verify all joins with the beat-train predictor (`storedGridFromEvidence` from `packages/catalog/src/render/check-metrics.ts` fed analysis beats + plan windows). Iterate seeds/exclusions until clean; only then render.
+- After rendering: `render:check`, and read per-join residuals from the manifest — the predictor and checker occasionally disagree; the checker is the authority.
+
+## Editing plans
+
+- Use `updateSetPlan` (`replaceTrack`, `setTransition`, `setTrim`, `applyTransition`) — never raw `buildEntries` (it re-derives windows and can balloon a plan to 76 minutes).
+- `applyTransition` only sets `incomingSourceEndMs` on the LAST entry; trim middle entries with `setTrim` separately.
+- When hand-moving windows, strip pinned `downbeatOffsetMs`, `alignmentMode`, `alignmentPeriodMs`, `onsetLockBeats`, `recipeVersion` from that join's parameters so the renderer re-derives alignment; stale pins become audible flams.
+- Phase nudges: shift the incoming's start by the measured residual; for drop-anchored incomings prefer shifting the OUTGOING's end so the drop landing stays pinned. Search ±40..160 empirically and re-verify.
+
+## Owner preferences (Arild)
+
+- 172–176 BPM; high-energy or liquid hours both welcome.
+- Club-style pacing: 90–150s tools are good, explicitly endorsed. Do not enforce long plays.
+- Loves phrase_mix 32b joins; bass_swap 16b is the gallop antidote.
+- Hates: drumless-intro entries, energy dips between tracks, tracks that overstay (3:40+ mid-set), galloping overlaps.
+- "Unmixable" verdicts: move the file to `C:\Users\arild\Music\unmixable\`, `library:scan`, add to brief exclusions, and record a `feedback:rate` row with the diagnosis.
+- Keeper copies of final mixes: transcode the listen FLAC with ffmpeg to 256k AAC (`.m4a`) named `<mix>-keeper.m4a` in `output/renders/`.
