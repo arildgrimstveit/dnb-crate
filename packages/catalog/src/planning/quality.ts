@@ -18,7 +18,7 @@ import {
 
 import { verifiesAppliedRecipe } from "./applied-recipe.ts";
 import type { RecipeRecallLookup } from "./recall.ts";
-import { artistKey } from "./shared.ts";
+import { artistKey, isEnergyDeathContinuity } from "./shared.ts";
 
 export type TrackQualityEvidence = {
   musicalKey: string | null;
@@ -155,6 +155,13 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
       inKey.confidence < 0.5;
     const unexplainedQualityIssue =
       (type === "crossfade" || riskyOrUnknown || evidenceInvalid) && !explained;
+    const valleyBars =
+      typeof params.continuityValleyBars === "number" ? params.continuityValleyBars : null;
+    const coexistenceBars =
+      typeof params.continuityCoexistenceBars === "number"
+        ? params.continuityCoexistenceBars
+        : null;
+    const energyContinuityIssue = isEnergyDeathContinuity({ valleyBars, coexistenceBars });
     const joinTargetBpm = num(params.targetBpm);
     joins.push({
       order: i,
@@ -180,14 +187,8 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
                 typeof params.continuityEnergyFloor === "number"
                   ? params.continuityEnergyFloor
                   : null,
-              valleyBars:
-                typeof params.continuityValleyBars === "number"
-                  ? params.continuityValleyBars
-                  : null,
-              coexistenceBars:
-                typeof params.continuityCoexistenceBars === "number"
-                  ? params.continuityCoexistenceBars
-                  : null,
+              valleyBars,
+              coexistenceBars,
             },
           }
         : {}),
@@ -210,6 +211,7 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
       recipeStatus,
       constraintSatisfaction,
       unexplainedQualityIssue,
+      energyContinuityIssue,
     });
   }
 
@@ -324,12 +326,20 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
   if (entryBodyWarnings.length > 0 && !partialReasons.includes("ENTRY_BODY")) {
     partialReasons.push("ENTRY_BODY");
   }
+  if (
+    input.plan.qualityPolicy === "strict" &&
+    joins.some((join) => join.energyContinuityIssue) &&
+    !partialReasons.includes("JOIN_CONTINUITY")
+  ) {
+    partialReasons.push("JOIN_CONTINUITY");
+  }
   const qualityChecksPassed =
     joins.every((join) => !join.unexplainedQualityIssue) &&
     unsatisfiedRequired.length === 0 &&
     !boundaryOrExclusionViolation &&
     entryBodyWarnings.length === 0 &&
-    (input.plan.qualityPolicy !== "strict" || artistSpacingViolations.length === 0);
+    (input.plan.qualityPolicy !== "strict" ||
+      (artistSpacingViolations.length === 0 && joins.every((join) => !join.energyContinuityIssue)));
   if (joins.some((join) => join.unexplainedQualityIssue)) partialReasons.push("JOIN_QUALITY");
   const durationReady = !durationPartial;
   const readyForAudition =

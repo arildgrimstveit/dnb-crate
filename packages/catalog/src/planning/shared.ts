@@ -1,5 +1,7 @@
 import {
   normalizePersonName,
+  JOIN_DEATH_COEXISTENCE_BARS,
+  JOIN_DEATH_VALLEY_BARS,
   PLANNER_GROOVE_LOCAL_WINDOW_BARS,
   PLANNER_GROOVE_SYNCOPATION_PENALTY_SLOPE,
   PLANNER_GROOVE_SYNCOPATION_TOLERANCE,
@@ -14,6 +16,24 @@ export function artistKey(track: Track): string | null {
     return track.artistCanonical;
   }
   return track.artist ? normalizePersonName(track.artist) : null;
+}
+
+/**
+ * Energy-death signature from the 2026-10 listening sessions: an aligned join
+ * whose outgoing fade rides a dying breakdown or outro while the drums never
+ * co-carry (the owner hears "the energy dies"). Shared by the selection gate
+ * and the quality report so both apply the same thresholds.
+ */
+export function isEnergyDeathContinuity(continuity: {
+  valleyBars?: number | null;
+  coexistenceBars?: number | null;
+}): boolean {
+  const valley = continuity.valleyBars;
+  const coexist = continuity.coexistenceBars;
+  if (valley == null || coexist == null) {
+    return false;
+  }
+  return valley > JOIN_DEATH_VALLEY_BARS && coexist < JOIN_DEATH_COEXISTENCE_BARS;
 }
 
 /** Primary-artist identity for cross-plan freshness: the lead name before

@@ -284,6 +284,10 @@ export type JoinQualityReport = {
   recipeStatus: JoinRecipeStatus;
   constraintSatisfaction: JoinConstraintSatisfaction;
   unexplainedQualityIssue: boolean;
+  /** Energy-death signature (2026-10 listening sessions): the outgoing fade
+   * rides a dying tail while the drums never co-carry. Fails strict quality;
+   * null continuity (not measured) never flags. */
+  energyContinuityIssue: boolean;
 };
 
 export type PlanQualityReport = {

@@ -444,6 +444,128 @@ describe("edition variants cannot both be planned", () => {
   });
 });
 
+describe("energy-death continuity gates strict quality (2026-10 sessions)", () => {
+  const join = (valley: number | null, coexist: number | null) => ({
+    id: crypto.randomUUID(),
+    type: "phrase_mix" as const,
+    durationMs: 22_069,
+    outgoingCuePointId: null,
+    incomingCuePointId: null,
+    parameters: {
+      barCount: 16,
+      reason: "matched-grid-phrase",
+      targetBpm: 174,
+      phraseShape: "landing",
+      sequentialHandoff: "supported",
+      intent: "sustain",
+      ...(valley != null ? { continuityValleyBars: valley } : {}),
+      ...(coexist != null ? { continuityCoexistenceBars: coexist } : {}),
+      ...(valley != null ? { continuityEvidence: "relative-bar-energy-proxy" } : {}),
+    },
+  });
+
+  function twoEntryPlan(
+    valley: number | null,
+    coexist: number | null,
+    policy: "strict" | "off",
+  ): SetPlanV1 {
+    return {
+      schemaVersion: 1,
+      id: "plan",
+      name: "continuity fixture",
+      targetDurationMs: 260_000,
+      targetBpm: null,
+      requestedArc: [{ atFraction: 0, targetEnergy: 5 }],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      qualityPolicy: policy,
+      entries: [
+        {
+          id: "e0",
+          trackId: "a",
+          order: 0,
+          sourceStartMs: 0,
+          sourceEndMs: 120_000,
+          timelineStartMs: 0,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: join(valley, coexist),
+        },
+        {
+          id: "e1",
+          trackId: "b",
+          order: 1,
+          sourceStartMs: 0,
+          sourceEndMs: 120_000,
+          timelineStartMs: 100_000,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: null,
+        },
+      ],
+    };
+  }
+
+  function qualityOf(plan: SetPlanV1) {
+    const tracksById = new Map<string, Track>([
+      ["a", plainTrack("a", "A")],
+      ["b", plainTrack("b", "B")],
+    ]);
+    const evidenceByTrackId = new Map<string, TrackQualityEvidence>();
+    for (const track of tracksById.values()) {
+      evidenceByTrackId.set(track.id, {
+        musicalKey: track.musicalKey,
+        camelotKey: track.camelotKey,
+        keySource: track.keySource,
+        keyConfidence: 1,
+        keyAnalyzerName: "keyfinder",
+        nativeBpm: track.bpm,
+        gridOk: true,
+        gridEngine: "dnb-crate-dsp",
+      });
+    }
+    return reportSetPlanQuality({
+      plan,
+      tracksById,
+      evidenceByTrackId,
+      validation: validateSetPlan(plan, tracksById),
+    });
+  }
+
+  it.each([
+    ["Colour Me In -> Cola (night drive)", 8.1, 8],
+    ["I Need -> Push The Tempo (night drive)", 12.81, 5],
+    ["Zephyr exits (high gear drafts)", 6.58, 1],
+    ["second-drop Searching entry", 4.15, 3],
+  ])("flags the audited failure %s", (_label, valley, coexist) => {
+    const q = qualityOf(twoEntryPlan(valley, coexist, "strict"));
+    expect(q.joins[0]!.energyContinuityIssue).toBe(true);
+    expect(q.partialReasons).toContain("JOIN_CONTINUITY");
+    expect(q.qualityChecksPassed).toBe(false);
+    expect(q.readyForAudition).toBe(false);
+  });
+
+  it.each([
+    ["Stronger -> So Many Colours (night drive)", 2.9, 18],
+    ["Gifted Lover -> Somewhere Between (evening liquid)", 1.78, 10],
+    ["Into Your Arms -> Say My Name (high gear)", 1.74, 6],
+    ["Heartbeat Loud -> Atmosphere (high gear)", 2.12, 15],
+  ])("passes the owner-approved join %s", (_label, valley, coexist) => {
+    const q = qualityOf(twoEntryPlan(valley, coexist, "strict"));
+    expect(q.joins[0]!.energyContinuityIssue).toBe(false);
+    expect(q.partialReasons).not.toContain("JOIN_CONTINUITY");
+  });
+
+  it("never flags without measured continuity, and drafts bypass the gate", () => {
+    expect(qualityOf(twoEntryPlan(null, null, "strict")).joins[0]!.energyContinuityIssue).toBe(
+      false,
+    );
+    const draft = qualityOf(twoEntryPlan(12.81, 5, "off"));
+    expect(draft.joins[0]!.energyContinuityIssue).toBe(true);
+    expect(draft.partialReasons).not.toContain("JOIN_CONTINUITY");
+  });
+});
+
 describe("window edits invalidate recorded alignment pins", () => {
   function pinnedPlan(catalog: ReturnType<typeof runtime>): string {
     for (let i = 0; i < 14; i += 1) {

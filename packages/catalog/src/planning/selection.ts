@@ -13,7 +13,7 @@ import { verifiesAppliedRecipe } from "./applied-recipe.ts";
 import { buildEntries, playableMs, type TimelineAnalysis } from "./timeline.ts";
 import type { RecipeRecallLookup } from "./recall.ts";
 import type { CompiledPlanningConstraints } from "./constraints.ts";
-import { artistKey } from "./shared.ts";
+import { artistKey, isEnergyDeathContinuity } from "./shared.ts";
 
 export function hasShortPlayable(entries: SetPlanEntry[], tracks: Track[]): boolean {
   const durations = new Map(tracks.map((track) => [track.id, track.durationMs]));
@@ -193,6 +193,23 @@ export function makeSelectionQualityCheck(input: {
         return "KEY_CONFIDENCE";
       if (transition?.type === "crossfade") {
         return "CROSSFADE";
+      }
+      // Energy-death signature (2026-10 listening sessions): a chain whose
+      // fade rides a dying outgoing tail while the drums never co-carry is
+      // rejected before the track is ever selected.
+      if (
+        isEnergyDeathContinuity({
+          valleyBars:
+            typeof transition?.parameters.continuityValleyBars === "number"
+              ? transition.parameters.continuityValleyBars
+              : null,
+          coexistenceBars:
+            typeof transition?.parameters.continuityCoexistenceBars === "number"
+              ? transition.parameters.continuityCoexistenceBars
+              : null,
+        })
+      ) {
+        return "ENERGY_CONTINUITY";
       }
       if (!isConservativeHarmonic(harmonicRelation(outgoing.camelotKey, incoming.camelotKey))) {
         return "HARMONY";

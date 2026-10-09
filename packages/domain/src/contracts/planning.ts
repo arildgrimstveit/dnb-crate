@@ -393,6 +393,7 @@ export const joinQualityReportSchema = z.object({
     "none",
   ]),
   unexplainedQualityIssue: z.boolean(),
+  energyContinuityIssue: z.boolean(),
 });
 
 const artistGapSchema = z.object({

@@ -63,6 +63,14 @@ export const PLANNER_CANDIDATE_CAP = 500;
  * audible even when the stored beat labels agree on paper.
  */
 export const PLANNER_MIN_TEMPO_STABILITY = 0.6;
+/**
+ * Energy-death signature (2026-10 listening sessions): an aligned join whose
+ * outgoing fade rides a dying breakdown/outro while the incoming never
+ * co-carries the drums. Bad joins measured valley ≥ 3.69 with coexist ≤ 8;
+ * every owner-approved join measured valley ≤ 2.90 or coexist ≥ 10.
+ */
+export const JOIN_DEATH_VALLEY_BARS = 3.5;
+export const JOIN_DEATH_COEXISTENCE_BARS = 9;
 
 export const DEFAULT_SCORE_WEIGHTS = {
   mood: 8,
