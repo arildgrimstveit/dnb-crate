@@ -210,6 +210,18 @@ Labeled joins from this session (all on 174 BPM material, all verified by ear):
   transition feedback on the exact preview renders, so the two hand-liked
   bass swaps are recallable while the trigger is tight. Provisional
   pending more labeled pairs.
+- **October 2026 second A/B round (same day)**: the owner reported the
+  High gear hour perfect, then A/B'd its three noise-era bass swaps —
+  Together In The Night→Renaissance, Renaissance→Don't You Fade Away,
+  Escape→Through The Silence — and preferred **phrase_mix on all three**
+  (all scored in the mild −0.02..−0.19 band). Tally across both rounds:
+  5 of 8 flips prefer the blend, 2 prefer the swap (both pinned as
+  recipes), and the trigger score does not separate winners — confirming
+  the architecture: default phrase_mix, decisive-conflict trigger at
+  −0.45, hand-liked swaps via recipes. All six verdicts recorded as
+  transition feedback; the High gear plan's three joins were flipped to
+  phrase_mix on their frozen windows and re-rendered (v1 listen preserved
+  as `high-gear-v1-perfect.flac`).
 - October 2026 groove-sync plan audition (23 tracks, same seed/brief as the
   kick-weighted plan): X-Ray drops out of the set entirely, all 22 joins
   phrase_mix within a 0.44–0.65 syncopation band, render:check green, and the
