@@ -78,6 +78,13 @@ export type PhraseWindow = {
 const PHRASE = 8;
 const QUIET = 0.5;
 const KIT_ON = 0.5;
+/**
+ * 2026-10 listening sessions: an incoming window that opens over a head this
+ * quiet (near-silent intros measured 0.004–0.076) reads as "completely quiet
+ * when it comes in" — the drums leave while the outgoing fades. Prefer any
+ * candidate whose head carries drums; only fall back when none does.
+ */
+const INCOMING_HEAD_ENERGY_FLOOR = 0.1;
 /** Slightly under 16 bars at 174 BPM so a drop-16 tail still clears rounding. */
 const LATE_DROP_16_MS = 22_000;
 const LATE_DROP_MIN_BODY_MS = 32_000;
@@ -758,46 +765,56 @@ export function planPhraseWindow(
       item.exit.mixOutMs > (options.outgoingHeadEndMs ?? start)
     );
   });
+  const scoredCandidates = feasibleCandidates.map((item) => {
+    const incomingHeadEnergy = incomingHeadRelEnergy(incoming, item.mixInMs, inBpm);
+    const phraseShape =
+      item.exit.phraseShape === "landing"
+        ? item.exit.phraseShape
+        : incomingHeadEnergy >= KIT_ON
+          ? "sequential"
+          : item.exit.phraseShape;
+    return {
+      ...item,
+      exitKind: item.exit.exitKind,
+      phraseShape,
+      incomingHeadEnergy,
+      outgoingTailEnergy: relEnergy(sectionAtMs(outSections, item.exit.mixOutMs), outSections),
+      mixOutBar: item.exit.mixOutBar,
+      audioStartMs: inStart,
+      incomingBars: relativeWindowBars(incoming, item.mixInBar, item.barCount),
+      outgoingBars:
+        item.exit.mixOutBar == null
+          ? null
+          : relativeWindowBars(outgoing, item.exit.mixOutBar, item.barCount),
+    };
+  });
+  const drummedHeads = scoredCandidates.filter(
+    (item) => item.incomingHeadEnergy >= INCOMING_HEAD_ENERGY_FLOOR,
+  );
   let chosen =
-    pickHandoffCandidate(
-      feasibleCandidates.map((item) => {
-        const incomingHeadEnergy = incomingHeadRelEnergy(incoming, item.mixInMs, inBpm);
-        const phraseShape =
-          item.exit.phraseShape === "landing"
-            ? item.exit.phraseShape
-            : incomingHeadEnergy >= KIT_ON
-              ? "sequential"
-              : item.exit.phraseShape;
-        return {
-          ...item,
-          exitKind: item.exit.exitKind,
-          phraseShape,
-          incomingHeadEnergy,
-          outgoingTailEnergy: relEnergy(sectionAtMs(outSections, item.exit.mixOutMs), outSections),
-          mixOutBar: item.exit.mixOutBar,
-          audioStartMs: inStart,
-          incomingBars: relativeWindowBars(incoming, item.mixInBar, item.barCount),
-          outgoingBars:
-            item.exit.mixOutBar == null
-              ? null
-              : relativeWindowBars(outgoing, item.exit.mixOutBar, item.barCount),
-        };
-      }),
-    ) ??
+    pickHandoffCandidate(drummedHeads.length > 0 ? drummedHeads : scoredCandidates) ??
     feasibleCandidates.find((item) => item.exit.exitKind === "quietTail") ??
     candidates[0];
 
   if (!chosen) {
     const intro = inSections.find((section) => section.type === "intro");
-    const mixInBar = intro?.startBar ?? 0;
     const barCount = Math.min(
       largestPhraseNotAfter(dropBar),
       options.maxBars ?? 32,
     ) as PhraseBarCount;
+    const introStartBar = intro?.startBar ?? 0;
+    // Dead-intro guard (2026-10 listening sessions): entering at the top of a
+    // near-silent intro is the "energy dies" failure; anchor on the drop when
+    // the intro head cannot carry the blend.
+    const introHeadEnergy = intro?.sectionEnergy ?? 0;
+    const mixInBar =
+      introHeadEnergy < INCOMING_HEAD_ENERGY_FLOOR
+        ? Math.max(introStartBar, dropBar - barCount)
+        : introStartBar;
     chosen = {
       mixInBar,
       barCount,
-      mixInMs: intro?.startMs ?? inStart,
+      mixInMs: barToMs(mixInBar, inSections, inBpm, inDownbeats, inStart),
       exit: pickOutgoingExit(outgoing, barCount, outBpm),
     };
   }

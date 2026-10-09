@@ -275,6 +275,27 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
   }
   const artistSpacingViolations = artistGaps.filter((row) => row.gap < spacing);
 
+  // Renderer parity (2026-10 listening sessions): resolveRateRegions refuses a
+  // deck whose head + tail join regions consume the whole body. That is
+  // knowable at planning time; surface it before audio is cut.
+  const entryBodyWarnings: PlanQualityReport["entryBodyWarnings"] = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i]!;
+    const previousJoinMs = i > 0 ? (entries[i - 1]!.transitionToNext?.durationMs ?? 0) : 0;
+    const ownJoinMs = entry.transitionToNext?.durationMs ?? 0;
+    const rate = entry.playbackRate > 0 ? entry.playbackRate : 1;
+    const joinRegionsMs = Math.round((previousJoinMs + ownJoinMs) * rate);
+    const bodyMs = entry.sourceEndMs - entry.sourceStartMs;
+    if (bodyMs <= joinRegionsMs) {
+      entryBodyWarnings.push({
+        order: entry.order,
+        title: input.tracksById.get(entry.trackId)?.title ?? null,
+        bodyMs,
+        joinRegionsMs,
+      });
+    }
+  }
+
   const durationMs = input.validation.diagnostics.durationMs;
   const durationDeltaMs = input.validation.diagnostics.durationDeltaMs;
   const durationPartial = Math.abs(durationDeltaMs) > DURATION_QUALITY_WINDOW_MS;
@@ -300,10 +321,14 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
     !partialReasons.includes("ARTIST_SPACING")
   )
     partialReasons.push("ARTIST_SPACING");
+  if (entryBodyWarnings.length > 0 && !partialReasons.includes("ENTRY_BODY")) {
+    partialReasons.push("ENTRY_BODY");
+  }
   const qualityChecksPassed =
     joins.every((join) => !join.unexplainedQualityIssue) &&
     unsatisfiedRequired.length === 0 &&
     !boundaryOrExclusionViolation &&
+    entryBodyWarnings.length === 0 &&
     (input.plan.qualityPolicy !== "strict" || artistSpacingViolations.length === 0);
   if (joins.some((join) => join.unexplainedQualityIssue)) partialReasons.push("JOIN_QUALITY");
   const durationReady = !durationPartial;
@@ -320,6 +345,7 @@ export function reportSetPlanQuality(input: ReportSetPlanQualityInput): PlanQual
     artistRepeatSpacingRequested: spacing,
     artistGaps,
     artistSpacingViolations,
+    entryBodyWarnings,
     partial,
     partialReasons: [...new Set(partialReasons)],
     unsatisfiedRequiredTransitions: unsatisfiedRequired,

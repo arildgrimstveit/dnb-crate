@@ -7,6 +7,7 @@ import {
   isConfidentKeyClash,
   interpolateEnergy,
   normalizePersonName,
+  recordingFamilyKeyFrom,
   type SetPlanV1,
   type Track,
   type ValidateSetPlanResult,
@@ -31,6 +32,7 @@ export function validateSetPlan(
   const warnings: ValidationIssue[] = [];
   const seen = new Set<string>();
   const seenRecordings = new Set<string>();
+  const seenFamilies = new Set<string>();
   const spacing = options?.artistRepeatSpacing ?? DEFAULT_ARTIST_REPEAT_SPACING;
   const recentArtists: Array<string | null> = [];
 
@@ -65,6 +67,23 @@ export function validateSetPlan(
       }
       seenRecordings.add(track.recordingKey);
     }
+    // Edition variants (extended/radio/version) share a family even when their
+    // recording keys differ; one plan should not carry two editions of the
+    // same production (2026-10: "Heartbeat Loud" radio + extended, 4 slots apart).
+    const family = recordingFamilyKeyFrom({
+      artist: track.artist,
+      artistCanonical: track.artistCanonical,
+      title: track.title,
+    });
+    if (seenFamilies.has(family)) {
+      errors.push({
+        code: "DUPLICATE_RECORDING_FAMILY",
+        message: `Recording family ${family} appears more than once`,
+        entryId: entry.id,
+        trackId: track.id,
+      });
+    }
+    seenFamilies.add(family);
     if (entry.timelineStartMs < 0) {
       errors.push({
         code: "NEGATIVE_TIMELINE",

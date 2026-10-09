@@ -306,6 +306,15 @@ export type PlanQualityReport = {
     rightOrder: number;
     gap: number;
   }>;
+  /** Interior entries whose body cannot host both join regions — the renderer
+   * rejects these at render time ("no native body"); surfaced at planning so
+   * windows are fixed before audio is cut. Empty when every entry is safe. */
+  entryBodyWarnings: Array<{
+    order: number;
+    title: string | null;
+    bodyMs: number;
+    joinRegionsMs: number;
+  }>;
   partial: boolean;
   partialReasons: string[];
   unsatisfiedRequiredTransitions?: string[];

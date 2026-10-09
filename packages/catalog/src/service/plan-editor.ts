@@ -60,6 +60,39 @@ export type UpdateSetPlanInput = {
   moveEntry?: { entryId: string; toOrder: number };
 };
 
+/**
+ * Recorded grid alignment is provenance for the windows it was measured on.
+ * When a window moves, these pins go stale but the renderer still applies
+ * them verbatim for stored recipe joins (2026-10 listening sessions: stale
+ * offsets surfaced as audible flams). Dropping the keys lets render time
+ * re-derive the alignment for the new windows.
+ */
+const ALIGNMENT_PIN_KEYS = [
+  "downbeatOffsetMs",
+  "alignmentPeriodMs",
+  "alignmentMode",
+  "onsetLockBeats",
+] as const;
+
+type PlanEntryTransition = StoredSetPlan["plan"]["entries"][number]["transitionToNext"];
+
+function stripAlignmentPins(transition: PlanEntryTransition): void {
+  if (!transition) {
+    return;
+  }
+  let touched = false;
+  for (const key of ALIGNMENT_PIN_KEYS) {
+    if (key in transition.parameters) {
+      const { [key]: _removed, ...rest } = transition.parameters as Record<string, unknown>;
+      transition.parameters = rest as typeof transition.parameters;
+      touched = true;
+    }
+  }
+  if (touched) {
+    transition.parameters.alignmentInvalidated = "window-edited";
+  }
+}
+
 export function applySetPlanUpdate(
   service: PlanEditingService,
   input: UpdateSetPlanInput,
@@ -105,8 +138,21 @@ export function applySetPlanUpdate(
     if (!entry) {
       throw new DomainError("INVALID_SET_PLAN", `No entry ${input.setTrim.entryId}`);
     }
+    const startChanged = entry.sourceStartMs !== input.setTrim.sourceStartMs;
+    const endChanged = entry.sourceEndMs !== input.setTrim.sourceEndMs;
     entry.sourceStartMs = input.setTrim.sourceStartMs;
     entry.sourceEndMs = input.setTrim.sourceEndMs;
+    if (startChanged || endChanged) {
+      // A moved window invalidates the recorded grid alignment on both sides
+      // of the entry. The renderer honors pinned offsets verbatim for stored
+      // recipe joins, so a stale pin becomes an audible flam (2026-10
+      // listening sessions); dropping the pins lets render time re-derive.
+      stripAlignmentPins(entry.transitionToNext);
+      const index = entries.indexOf(entry);
+      if (index > 0) {
+        stripAlignmentPins(entries[index - 1]!.transitionToNext);
+      }
+    }
   }
   if (input.setTransition) {
     const entry = entries.find((item) => item.id === input.setTransition!.entryId);
@@ -179,6 +225,11 @@ export function applySetPlanUpdate(
           : outgoing.transitionToNext.incomingCuePointId,
       parameters: input.applyTransition.parameters ?? outgoing.transitionToNext.parameters,
     };
+    if (input.applyTransition.parameters === undefined) {
+      // Caller moved windows without specifying alignment; carried-over pins
+      // describe the OLD windows and the renderer applies them verbatim.
+      stripAlignmentPins(outgoing.transitionToNext);
+    }
   }
   if (input.moveEntry) {
     const from = entries.findIndex((item) => item.id === input.moveEntry!.entryId);

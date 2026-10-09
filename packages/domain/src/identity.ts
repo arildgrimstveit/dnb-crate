@@ -16,6 +16,35 @@ export function stripFeaturing(title: string): string {
 
 const REMIX_TOKEN = /\b(remix|rmx|vip|edit|rework|bootleg|flip)\b/i;
 
+const VARIANT_LABEL =
+  /\s*[([]\s*(?:extended(?:\s+(?:mix|version|edit))?|radio\s+edit|original\s+mix|(?:album|single|radio)\s+version|version|edit|vip)\s*[)\]]/i;
+const VARIANT_DASH_SUFFIX =
+  /\s*[-–]\s*(?:extended(?:\s+(?:mix|version|edit))?|radio\s+edit|original\s+mix)\s*$/i;
+
+/**
+ * Edition labels only (extended/radio/version/vip) — never remix tokens, which
+ * are distinct productions. Lets "Heartbeat Loud" and "Heartbeat Loud
+ * (Extended Version)" share one family so a plan cannot carry both.
+ */
+export function stripVariantLabels(title: string): string {
+  return stripFeaturing(title)
+    .replace(VARIANT_DASH_SUFFIX, "")
+    .replace(VARIANT_LABEL, " ")
+    .replace(/\s*[-–]\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+export function recordingFamilyKeyFrom(input: {
+  artist?: string | null;
+  artistCanonical?: string | null;
+  title: string;
+}): string {
+  const artist = normalizePersonName(input.artistCanonical ?? input.artist ?? "");
+  return `fam:${artist}|${stripVariantLabels(input.title)}`;
+}
+
 export function remixTokens(title: string): Set<string> {
   const tokens = new Set<string>();
   const lower = title.toLowerCase();

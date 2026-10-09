@@ -56,6 +56,13 @@ export const MAX_ENERGY_DEVIATION = 2;
 export const SET_PLAN_LIST_LIMIT_MAX = 50;
 export const COMPATIBLE_TRACKS_LIMIT_MAX = 50;
 export const PLANNER_CANDIDATE_CAP = 500;
+/**
+ * Owner-validated during the 2026-10 listening sessions: every track retired
+ * as unmixable measured below this tempo stability (or flamed both of its
+ * joins) while stored-grid residuals stayed clean. The drifting grid is
+ * audible even when the stored beat labels agree on paper.
+ */
+export const PLANNER_MIN_TEMPO_STABILITY = 0.6;
 
 export const DEFAULT_SCORE_WEIGHTS = {
   mood: 8,

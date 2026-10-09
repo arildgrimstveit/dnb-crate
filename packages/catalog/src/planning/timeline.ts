@@ -74,6 +74,10 @@ export type TimelineAnalysis = {
   sections: TrackSection[];
   downbeatTimesMs: number[];
   downbeatConfidence: number | null;
+  /** Beat-grid steadiness from the DSP analysis; low values (2026-10
+   * listening sessions) mean the stored grid drifts against the audio and
+   * every join the track touches risks audible flams. */
+  tempoStability?: number | null;
   /** Absolute beat grid; beat-profile index 0 is beatTimesMs[0]. */
   beatTimesMs?: number[];
   audioStartMs: number | null;
@@ -897,6 +901,7 @@ export function analysisToTimeline(
     truePeakDb?: number | null;
     downbeatTimesMs?: number[];
     downbeatConfidence?: number | null;
+    tempoStability?: number | null;
     beatTimesMs?: number[];
     descriptors: {
       suggestedEnergy: number | null;
@@ -988,6 +993,7 @@ export function analysisToTimeline(
     sections,
     downbeatTimesMs: analysis.downbeatTimesMs ?? [],
     downbeatConfidence: analysis.downbeatConfidence ?? null,
+    tempoStability: analysis.tempoStability ?? null,
     beatTimesMs: analysis.beatTimesMs ?? [],
     audioStartMs: analysis.descriptors?.audioStartMs ?? null,
     audioEndMs: analysis.descriptors?.audioEndMs ?? null,

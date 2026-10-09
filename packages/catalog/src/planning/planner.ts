@@ -17,6 +17,7 @@ import {
   pairKey,
   harmonicRelation,
   isConservativeHarmonic,
+  recordingFamilyKeyFrom,
   resolveCanonicalKeyConfidence,
   scoreCandidate,
   hashSeed,
@@ -171,9 +172,20 @@ export function draftSetPlan(
   const selected: Track[] = [];
   const used = new Set<string>();
   const usedRecordings = new Set<string>();
+  // 2026-10 listening sessions: radio/extended/album edits carry distinct
+  // recording keys, and one plan picked "Heartbeat Loud" twice through them.
+  // Families deduplicate edition variants of the same production.
+  const familyOf = (track: Track) =>
+    recordingFamilyKeyFrom({
+      artist: track.artist,
+      artistCanonical: track.artistCanonical,
+      title: track.title,
+    });
+  const usedFamilies = new Set<string>();
   const pick = (track: Track) => {
     selected.push(track);
     used.add(track.id);
+    usedFamilies.add(familyOf(track));
     if (track.recordingKey) {
       usedRecordings.add(track.recordingKey);
     }
@@ -437,6 +449,14 @@ export function draftSetPlan(
         rejected.push({ trackId: track.id, title: track.title, reason: "DUPLICATE_RECORDING" });
         return false;
       }
+      if (usedFamilies.has(familyOf(track))) {
+        rejected.push({
+          trackId: track.id,
+          title: track.title,
+          reason: "DUPLICATE_RECORDING_FAMILY",
+        });
+        return false;
+      }
       return true;
     });
     if (candidates.length === 0) {
@@ -634,6 +654,7 @@ export function draftSetPlan(
       const removed = selected.splice(dropIndex, 1)[0];
       if (removed) {
         used.delete(removed.id);
+        usedFamilies.delete(familyOf(removed));
         if (removed.recordingKey) {
           usedRecordings.delete(removed.recordingKey);
         }
@@ -652,6 +673,9 @@ export function draftSetPlan(
         return false;
       }
       if (track.recordingKey && usedRecordings.has(track.recordingKey)) {
+        return false;
+      }
+      if (usedFamilies.has(familyOf(track))) {
         return false;
       }
       if (qualityPolicy === "strict") {
@@ -698,6 +722,7 @@ export function draftSetPlan(
         break;
       }
       used.add(extra.id);
+      usedFamilies.add(familyOf(extra));
       if (extra.recordingKey) {
         usedRecordings.add(extra.recordingKey);
       }
@@ -822,8 +847,10 @@ export function draftSetPlan(
       selected.splice(0, selected.length, ...trial);
       used.clear();
       usedRecordings.clear();
+      usedFamilies.clear();
       for (const track of selected) {
         used.add(track.id);
+        usedFamilies.add(familyOf(track));
         if (track.recordingKey) usedRecordings.add(track.recordingKey);
       }
       entries = rebuildEntries(selected);

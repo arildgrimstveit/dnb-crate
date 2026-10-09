@@ -7,6 +7,7 @@ import type {
 } from "@dnb-crate/domain";
 import {
   PLANNER_MIN_POOL_ESTIMATE,
+  PLANNER_MIN_TEMPO_STABILITY,
   PLANNER_POOL_MIN_TRACKS,
   PLANNER_POOL_RELAX_FACTOR,
   genresMatchFilter,
@@ -108,6 +109,14 @@ export function buildPlanningPool(
       }
       if (input.bpmMax !== undefined && (bpm === null || bpm > input.bpmMax)) {
         rejected.push({ trackId: track.id, title: track.title, reason: "BPM_ABOVE_RANGE" });
+        return false;
+      }
+      // 2026-10 listening sessions: unstable grids (Half Light 0.175, Break
+      // The Cycle 0.131) flamed every join despite clean stored residuals.
+      // Explicit pins (start/end/required) still override this below.
+      const stability = analysis?.tempoStability ?? null;
+      if (stability != null && stability < PLANNER_MIN_TEMPO_STABILITY) {
+        rejected.push({ trackId: track.id, title: track.title, reason: "UNSTABLE_GRID" });
         return false;
       }
       const descriptors = analysis?.descriptors ?? null;

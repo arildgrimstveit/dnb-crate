@@ -419,6 +419,14 @@ export const planQualityReportSchema = z.object({
   artistRepeatSpacingRequested: z.number().int(),
   artistGaps: z.array(artistGapSchema),
   artistSpacingViolations: z.array(artistGapSchema),
+  entryBodyWarnings: z.array(
+    z.object({
+      order: z.number().int(),
+      title: z.string().nullable(),
+      bodyMs: z.number().int(),
+      joinRegionsMs: z.number().int(),
+    }),
+  ),
   partial: z.boolean(),
   partialReasons: z.array(z.string()),
   unsatisfiedRequiredTransitions: z.array(z.string()).optional(),
