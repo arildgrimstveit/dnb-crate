@@ -33,5 +33,8 @@ Hard-won from the October 2026 listening sessions. Full findings also live in `d
 - Club-style pacing: 90–150s tools are good, explicitly endorsed. Do not enforce long plays.
 - Loves phrase_mix 32b joins; bass_swap 16b is the gallop antidote.
 - Hates: drumless-intro entries, energy dips between tracks, tracks that overstay (3:40+ mid-set), galloping overlaps.
-- "Unmixable" verdicts: move the file to `C:\Users\arild\Music\unmixable\`, `library:scan`, add to brief exclusions, and record a `feedback:rate` row with the diagnosis.
+- "Unmixable" verdicts: move the file to `C:\Users\arild\Music\unmixable\`, `library:scan`, add the id + reason to `data/session-offenders.json`, and record a `feedback:rate` row with the diagnosis.
+- **Briefs must merge `data/session-offenders.json` into `excludedTrackIds`** — per-brief lists drift (the night-drive brief had silently lost six offenders).
+- **Never use `minRating` to enforce exclusions**: the pool rejects UNRATED tracks as well, and this crate is otherwise unrated — it would empty the pool.
 - Keeper copies of final mixes: transcode the listen FLAC with ffmpeg to 256k AAC (`.m4a`) named `<mix>-keeper.m4a` in `output/renders/`.
+- After adding test files, run `tsc --noEmit -p <package>/tsconfig.json` (tests are included there) — vitest does not typecheck, and windows-smoke will catch it otherwise.
