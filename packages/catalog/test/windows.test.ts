@@ -453,6 +453,35 @@ describe("phrase windows", () => {
     expect(window.mixInMs).toBe(12_000);
   });
 
+  it("prefers the drop anchor over a stale manual cue at a dead file start", () => {
+    // 2026-10 sessions: stale audition cues at file start placed Pathways and
+    // All Our Yesterdays over near-silent intros ("completely quiet when it
+    // comes in"). The cue must not override drop anchoring when it points at
+    // a dead head.
+    const outgoing = track("out", [section("drop", 16, 80, 0.9)], 80);
+    const incoming = track(
+      "in",
+      [section("intro", 0, 16, 0.02), section("build", 16, 48, 0.5), section("drop", 48, 80, 0.9)],
+      80,
+    );
+    incoming.analysis!.manualMixInMs = 0;
+    const window = planPhraseWindow(outgoing, incoming);
+    expect(window.mixInMs).toBeGreaterThan(16 * BAR_MS);
+    expect(Math.abs(landingErrorMs(window, 1, window.barCount * BAR_MS)!)).toBeLessThan(2);
+  });
+
+  it("keeps a dead manual cue when no drummed fallback exists", () => {
+    const outgoing = track("out", [section("drop", 16, 80, 0.9)], 80);
+    const incoming = track(
+      "in",
+      [section("intro", 0, 32, 0.02), section("build", 32, 48, 0.04), section("drop", 48, 80, 0.9)],
+      80,
+    );
+    incoming.analysis!.manualMixInMs = 5_000;
+    const window = planPhraseWindow(outgoing, incoming);
+    expect(window.mixInMs).toBe(5_000);
+  });
+
   it("does not auto-shorten a kit-on drop landing to 8 bars", () => {
     const outgoing = track("out", [section("drop", 16, 80, 0.9)], 80);
     const incoming = track(

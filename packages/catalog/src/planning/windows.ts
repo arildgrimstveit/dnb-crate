@@ -582,6 +582,37 @@ function relativeWindowBars(track: WindowTrack, startBar: number, count: number)
   };
 }
 
+/**
+ * Manual intro cues are deliberate only where they land on live material.
+ * During the 2026-10 listening sessions, stale cues at file start (written by
+ * earlier audition tooling) placed Pathways and All Our Yesterdays over
+ * near-silent intros — "completely quiet when it comes in" — because the cue
+ * overrode drop anchoring unconditionally. When the cue's head is dead and
+ * the planner's fallback carries drums, the fallback wins.
+ */
+function resolveManualMixIn(
+  incoming: WindowTrack,
+  manualIn: number | null | undefined,
+  fallbackMixIn: number,
+  inBpm: number | null,
+): number {
+  if (manualIn == null || !Number.isFinite(manualIn)) {
+    return fallbackMixIn;
+  }
+  const inStart = incoming.analysis?.audioStartMs ?? 0;
+  const manual = Math.max(inStart, Math.round(manualIn));
+  if (manual === fallbackMixIn) {
+    return manual;
+  }
+  if (incomingHeadRelEnergy(incoming, manual, inBpm) >= INCOMING_HEAD_ENERGY_FLOOR) {
+    return manual;
+  }
+  if (incomingHeadRelEnergy(incoming, fallbackMixIn, inBpm) >= INCOMING_HEAD_ENERGY_FLOOR) {
+    return fallbackMixIn;
+  }
+  return manual;
+}
+
 export function planPhraseWindow(
   outgoing: WindowTrack,
   incoming: WindowTrack,
@@ -621,8 +652,12 @@ export function planPhraseWindow(
     });
     const mixOut = pickOutgoingExit(outgoing, options.maxBars ?? 16, outBpm);
     const manualIn = incoming.analysis?.manualMixInMs;
-    const nonDropMixInMs =
-      manualIn != null && Number.isFinite(manualIn) ? Math.round(manualIn) : mixIn.ms;
+    const nonDropMixInMs = resolveManualMixIn(
+      incoming,
+      manualIn != null && Number.isFinite(manualIn) ? Math.round(manualIn) : null,
+      mixIn.ms,
+      inBpm,
+    );
     return bakeWindowAlignment(
       outgoing,
       incoming,
@@ -833,10 +868,12 @@ export function planPhraseWindow(
       outputToSourceMs(chosen.barCount * barMsFor(options.targetBpm ?? inBpm), incomingRate),
   );
   const manualIn = incoming.analysis?.manualMixInMs;
-  const mixInMs =
-    manualIn != null && Number.isFinite(manualIn)
-      ? Math.max(inStart, Math.round(manualIn))
-      : dropAnchoredMixIn;
+  const mixInMs = resolveManualMixIn(
+    incoming,
+    manualIn != null && Number.isFinite(manualIn) ? Math.round(manualIn) : null,
+    dropAnchoredMixIn,
+    inBpm,
+  );
   return bakeWindowAlignment(
     outgoing,
     incoming,
