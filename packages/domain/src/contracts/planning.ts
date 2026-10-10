@@ -490,6 +490,12 @@ export const planExplanationSchema = z.object({
       repeatedPairs: z.number().int(),
     })
     .optional(),
+  edited: z
+    .object({
+      at: z.string(),
+      changedJoins: z.array(z.string()),
+    })
+    .optional(),
   seed: z.number(),
   selected: z.array(
     z.object({

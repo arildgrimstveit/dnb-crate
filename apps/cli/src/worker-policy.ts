@@ -9,6 +9,7 @@ const JOB_COMMANDS = new Set([
   "enrich:run",
   "render:start",
   "render:preview",
+  "transition:compare",
 ]);
 
 /** Commands that enqueue work. Without --wait they must not claim it. */

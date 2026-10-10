@@ -131,15 +131,10 @@ export async function run(
           "plan:repair requires --plan, --entry, and --with (the replacement track id)",
         );
       }
-      const protectedRaw = option(args, "--protect");
-      const protectedIds = protectedRaw
-        ? protectedRaw.split(",").map((id) => id.trim())
-        : undefined;
       const result = runtime.service.repairSetPlan({
         setPlanId: planId,
         entryId,
         newIncomingTrackId: trackId,
-        protectedTransitionIds: protectedIds,
       });
       printJson({ ok: true, data: result });
       return true;

@@ -93,9 +93,9 @@ export function buildFinalPlan(input: FinalizeInput): {
             referencePlanIds: brief.variety.referencePlanIds,
             strength: exp.varietyStrength,
             historyMode: exp.varietyHistoryMode,
-            ...(exp.varietyHistoryMode === "auto"
-              ? { recentArtistUses: exp.recentArtistUses }
-              : {}),
+            // R7 fix: persist artist-use counts for EVERY mode so replay and
+            // explicit-history plans carry the scoring inputs they consumed.
+            recentArtistUses: exp.recentArtistUses,
             policyVersion: 1,
             trackIds: [...exp.historyIds],
             pairs: exp.varietyPairs,

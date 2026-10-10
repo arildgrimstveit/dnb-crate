@@ -28,7 +28,7 @@ Commands:
   transition:plan --from UUID --to UUID [--type phrase_mix|bass_swap|crossfade|any] [--bars 16|32]
   transition:inspect --plan UUID --transition UUID
   transition:compare --plan UUID --transition UUID [--wait]
-  plan:repair --plan UUID --entry UUID --with TRACK_UUID [--protect ID1,ID2,...]
+  plan:repair --plan UUID --entry UUID --with TRACK_UUID
   transition:validate --from UUID --to UUID --type phrase_mix|bass_swap|crossfade
   plan:create --name TEXT [--duration-min N | --duration-ms N] [--seed N] [--end-query TEXT] [--replay-from UUID]
   plan:create --brief-json FILE

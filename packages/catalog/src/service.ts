@@ -1147,68 +1147,89 @@ export class CatalogService {
   }
 
   /** Surgical repair (batch 9): replace a join's incoming track while
-   *  preserving every other adjacency — protected transitions keep their
-   *  stored treatments exactly (F7 pair identity makes this safe). Returns
-   *  the updated plan plus a diff of what changed. */
-  repairSetPlan(input: {
-    setPlanId: string;
-    entryId: string;
-    newIncomingTrackId: string;
-    protectedTransitionIds?: string[];
-  }): {
+   *  preserving every other adjacency. The F7 pair-aware invalidation IS
+   *  the protection: only the two joins touching the replaced track are
+   *  replanned; every other join keeps its stored treatment exactly. No
+   *  explicit protection flag — the invariant is the guarantee. Returns
+   *  the updated plan plus an honest before/after diff of every join. */
+  repairSetPlan(input: { setPlanId: string; entryId: string; newIncomingTrackId: string }): {
     plan: SetPlanV1;
     diff: {
-      changedJoin: { order: number; fromTitle: string; toTitle: string };
-      protectedJoins: number[];
-      invalidated: string[];
+      replacedTrack: { fromTitle: string; toTitle: string; order: number };
+      changedJoins: Array<{
+        order: number;
+        pair: string;
+        reason: string;
+        beforeType: string | null;
+        afterType: string | null;
+      }>;
+      preservedJoins: Array<{ order: number; pair: string; type: string }>;
     };
     validation: ValidateSetPlanResult;
   } {
     const stored = this.requirePlan(input.setPlanId);
-    const entries = [...stored.plan.entries].sort((a, b) => a.order - b.order);
-    const index = entries.findIndex((item) => item.id === input.entryId);
-    if (index < 0 || index >= entries.length - 1) {
+    const beforeEntries = [...stored.plan.entries].sort((a, b) => a.order - b.order);
+    const index = beforeEntries.findIndex((item) => item.id === input.entryId);
+    if (index < 0 || index >= beforeEntries.length - 1) {
       throw new DomainError(
         "INVALID_SET_PLAN",
         `Entry ${input.entryId} has no transition to repair (last entry or not found)`,
       );
     }
     const newTrack = this.requireTrack(input.newIncomingTrackId);
-    const oldTrack = this.requireTrack(entries[index + 1]!.trackId);
-    const protectedIds = new Set(input.protectedTransitionIds ?? []);
-    const oldTransitionId = entries[index]!.transitionToNext?.id ?? null;
+    const oldTrack = this.requireTrack(beforeEntries[index + 1]!.trackId);
 
     // Apply via updateSetPlan's replaceTrack, which handles adjacency
     // invalidation (F7) correctly: only the changed pair is replanned.
     const result = this.updateSetPlan({
       setPlanId: input.setPlanId,
-      replaceTrack: { entryId: entries[index + 1]!.id, trackId: input.newIncomingTrackId },
+      replaceTrack: { entryId: beforeEntries[index + 1]!.id, trackId: input.newIncomingTrackId },
     });
 
-    // Identify what actually changed vs. what was preserved.
-    const newEntries = [...result.plan.entries].sort((a, b) => a.order - b.order);
-    const invalidated: string[] = [];
-    let protectedCount = 0;
-    for (let i = 0; i < newEntries.length - 1; i += 1) {
-      const transition = newEntries[i]!.transitionToNext;
-      if (!transition) continue;
-      if (protectedIds.has(transition.id)) {
-        protectedCount += 1;
-      } else if (transition.id !== oldTransitionId && i === index) {
-        invalidated.push(`join ${i}: replanned for ${newTrack.title}`);
+    // Honest before/after diff: report EVERY join that changed and every
+    // join that kept its exact treatment. A join "changed" if its
+    // transition ID differs (the old one was invalidated and a new one
+    // was created) or its type changed.
+    const afterEntries = [...result.plan.entries].sort((a, b) => a.order - b.order);
+    const titleOf = new Map(this.repository.listAll().map((track) => [track.id, track.title]));
+    const changedJoins: Array<{
+      order: number;
+      pair: string;
+      reason: string;
+      beforeType: string | null;
+      afterType: string | null;
+    }> = [];
+    const preservedJoins: Array<{ order: number; pair: string; type: string }> = [];
+    for (let i = 0; i < afterEntries.length - 1; i += 1) {
+      const before = beforeEntries[i]?.transitionToNext ?? null;
+      const after = afterEntries[i]?.transitionToNext ?? null;
+      const pair = `${titleOf.get(afterEntries[i]!.trackId) ?? "?"} -> ${titleOf.get(afterEntries[i + 1]!.trackId) ?? "?"}`;
+      const beforeId = before?.id ?? null;
+      const afterId = after?.id ?? null;
+      const beforeType = before?.type ?? null;
+      const afterType = after?.type ?? null;
+      if (beforeId !== afterId || beforeType !== afterType) {
+        const reason =
+          i === index
+            ? `outgoing join of the replaced track (${oldTrack.title} -> ${newTrack.title})`
+            : i === index + 1
+              ? `incoming join of the replaced track (${oldTrack.title} -> ${newTrack.title})`
+              : "unexpected change — this join does not touch the replaced track";
+        changedJoins.push({ order: i, pair, reason, beforeType, afterType });
+      } else if (after) {
+        preservedJoins.push({ order: i, pair, type: after.type });
       }
     }
-    void stored;
     return {
       plan: result.plan,
       diff: {
-        changedJoin: {
-          order: index,
+        replacedTrack: {
           fromTitle: oldTrack.title,
           toTitle: newTrack.title,
+          order: index + 1,
         },
-        protectedJoins: [protectedCount],
-        invalidated,
+        changedJoins,
+        preservedJoins,
       },
       validation: result.validation,
     };

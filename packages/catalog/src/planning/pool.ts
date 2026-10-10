@@ -138,15 +138,29 @@ export function buildPlanningPool(
       // plan and produced corroborated 60-140 ms join misalignments — the
       // stored-grid residual AND the deck-probe verifier agreed). Aligned
       // blends on such grids flammed. Confidence-aware: only exclude when
-      // the catalog is large enough to be selective; a small library (or
-      // one where every track is suspect) admits them rather than refusing
-      // to plan. Explicit pins always pass.
-      if (
-        analysis?.descriptors?.gridPhaseSuspect === true &&
-        catalog.length >= PLANNER_POOL_MIN_TRACKS * 2
-      ) {
-        rejected.push({ trackId: track.id, title: track.title, reason: "GRID_PHASE_SUSPECT" });
-        return false;
+      // there are enough eligible NON-SUSPECT alternatives; a small library
+      // (or one where every track is suspect) admits them rather than
+      // refusing to plan. R11 fix: the threshold counts tracks that pass
+      // the basic eligibility checks (not missing, not excluded, not
+      // unmixable), not the raw catalog size which can be inflated by
+      // unusable rows.
+      if (analysis?.descriptors?.gridPhaseSuspect === true) {
+        const eligibleNonSuspect = catalog.filter(
+          (candidate) =>
+            !candidate.fileMissing &&
+            !excludedIds.has(candidate.id) &&
+            !(candidate.tags ?? []).some((tag) => tag.toLowerCase() === "unmixable") &&
+            candidate.rating !== 1 &&
+            analyses.get(candidate.id)?.descriptors?.gridPhaseSuspect !== true,
+        ).length;
+        if (eligibleNonSuspect >= PLANNER_POOL_MIN_TRACKS) {
+          rejected.push({
+            trackId: track.id,
+            title: track.title,
+            reason: "GRID_PHASE_SUSPECT",
+          });
+          return false;
+        }
       }
       const descriptors = analysis?.descriptors ?? null;
       const descriptorMatch = matchesDescriptorFilters(track, descriptors, filters);

@@ -114,12 +114,11 @@ export function registerPlanningTools(server: McpServer, service: CatalogService
     {
       title: "Repair set plan",
       description:
-        "Surgically replace a join's incoming track while preserving every other adjacency. Protected transitions (by id) keep their stored treatments exactly. Returns the updated plan, a diff of what changed, and validation. Prerequisites for safe repair landed October 2026 (F4 frozen identity, F7 pair-aware invalidation).",
+        "Surgically replace a join's incoming track while preserving every other adjacency. The F7 pair-aware invalidation IS the protection: only the two joins touching the replaced track are replanned; every other join keeps its stored treatment exactly. Returns the updated plan, an honest before/after diff (changedJoins + preservedJoins), and validation.",
       inputSchema: z.object({
         setPlanId: trackIdSchema,
         entryId: trackIdSchema,
         newIncomingTrackId: trackIdSchema,
-        protectedTransitionIds: z.array(trackIdSchema).optional(),
       }),
       outputSchema: toolResultSchema(
         z.object({
@@ -134,13 +133,23 @@ export function registerPlanningTools(server: McpServer, service: CatalogService
             ),
           }),
           diff: z.object({
-            changedJoin: z.object({
-              order: z.number(),
+            replacedTrack: z.object({
               fromTitle: z.string(),
               toTitle: z.string(),
+              order: z.number(),
             }),
-            protectedJoins: z.array(z.number()),
-            invalidated: z.array(z.string()),
+            changedJoins: z.array(
+              z.object({
+                order: z.number(),
+                pair: z.string(),
+                reason: z.string(),
+                beforeType: z.string().nullable(),
+                afterType: z.string().nullable(),
+              }),
+            ),
+            preservedJoins: z.array(
+              z.object({ order: z.number(), pair: z.string(), type: z.string() }),
+            ),
           }),
           validation: z.object({ valid: z.boolean() }),
         }),

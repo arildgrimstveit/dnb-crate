@@ -3141,7 +3141,9 @@ describe("join inspector (batch 9)", () => {
     }
 
     // Surgical repair: replace the incoming track of join 0 with a spare
-    // (not already in the plan) so the plan stays valid.
+    // (not already in the plan) so the plan stays valid. The invariant:
+    // only the joins touching the replaced track change; all others keep
+    // their exact transition IDs and types.
     const planTrackIds = new Set(created.plan.entries.map((entry) => entry.trackId));
     const replacement = catalog.repository.listAll().find((track) => !planTrackIds.has(track.id))!;
     expect(replacement).toBeDefined();
@@ -3150,12 +3152,26 @@ describe("join inspector (batch 9)", () => {
       entryId: created.plan.entries[0]!.id,
       newIncomingTrackId: replacement.id,
     });
-    expect(repaired.diff.changedJoin.toTitle).toBe(replacement.title);
+    expect(repaired.diff.replacedTrack.toTitle).toBe(replacement.title);
     const newEntries = [...repaired.plan.entries].sort((a, b) => a.order - b.order);
     expect(newEntries[1]!.trackId).toBe(replacement.id);
     // Other entries keep their tracks.
     for (let i = 2; i < newEntries.length; i += 1) {
       expect(newEntries[i]!.trackId).toBe(created.plan.entries[i]!.trackId);
+    }
+    // Only the joins touching the replaced track changed. Replacing entry 1
+    // changes join 0 (its outgoing join) and join 1 (its incoming join).
+    const changedOrders = repaired.diff.changedJoins.map((join) => join.order);
+    expect(changedOrders).toEqual([0, 1]);
+    // Every other join kept its exact treatment.
+    for (const preserved of repaired.diff.preservedJoins) {
+      const before = created.plan.entries[preserved.order]?.transitionToNext;
+      expect(before).toBeDefined();
+      expect(before!.type).toBe(preserved.type);
+    }
+    // No unexpected changes outside the replaced pair.
+    for (const changed of repaired.diff.changedJoins) {
+      expect(changed.reason).not.toContain("unexpected");
     }
   });
 });

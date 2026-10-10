@@ -1026,8 +1026,9 @@ export class RenderCoordinator {
             // vocal-heavy material. A 180 Hz low-pass keeps the kick
             // (and the bass it lands on) as the timing authority.
             const kick = lowpass(samples, 22_050, 180);
-            // Source-time onsets mapped to output time within the probe.
-            return onsetTimesMs(kick, 22_050).map((time) => time / rate + probeOffsetMs);
+            // Source-time onsets in PROBE-LOCAL time (not shifted by
+            // probeOffsetMs — the grids are shifted instead; R5 fix).
+            return onsetTimesMs(kick, 22_050).map((time) => time / rate);
           };
           const outgoingOnsets = await decodeDeck(
             path.resolve(outTrack.filePath),
@@ -1056,12 +1057,18 @@ export class RenderCoordinator {
               item.outgoingTrackId === outgoingRow.trackId &&
               item.incomingTrackId === incomingRow.trackId,
           );
+          // R5 fix: use ONE coordinate system — probe-local time — for
+          // grids, onsets, and drift halves. Previously onsets were shifted
+          // by probeOffsetMs into overlap-relative time while grids were
+          // filtered from the overlap start, so fast-mode probes on long
+          // overlaps compared disjoint time ranges (32-bar midpoint probe:
+          // onsets at 17–27 s into the overlap, grids at 0–10.5 s).
           const outGridMs = (evidenceJoin?.outgoingBeatsMs ?? [])
-            .map((time) => (time - outOverlapStartSource) / outRate)
-            .filter((time) => time >= 0 && time < probeMs + 500);
+            .map((time) => (time - outOverlapStartSource) / outRate - probeOffsetMs)
+            .filter((time) => time >= -500 && time < probeMs + 500);
           const inGridMs = (evidenceJoin?.incomingBeatsMs ?? [])
-            .map((time) => (time - incomingRow.sourceStartMs) / inRate)
-            .filter((time) => time >= 0 && time < probeMs + 500);
+            .map((time) => (time - incomingRow.sourceStartMs) / inRate - probeOffsetMs)
+            .filter((time) => time >= -500 && time < probeMs + 500);
           const nearGrid = (onsets: number[], grid: number[]) =>
             onsets.filter((time) => grid.some((beat) => Math.abs(beat - time) <= 100));
           const lockedOut = nearGrid(outgoingOnsets, outGridMs);
