@@ -123,6 +123,19 @@ fails across all renders, accepted-listen joins remain 0-fail (6 review
 the honest direction). Still advisory; promotion needs a labeled corpus
 including true positives.
 
+October 2026 (post R5 recalibration, 10–11 October): the fast probe's
+coordinate bug (onsets in overlap-relative time, grids filtered from the
+overlap start — 32-bar midpoint probes compared disjoint ranges and
+abstained mechanically) is fixed with one probe-local coordinate system.
+Re-run over 8 renders / 98 accepted-listen joins: **0 fails, 39 pass,
+21 review (measured 20–92 ms drift swings the owner accepted by ear),
+38 unmeasured** — coverage partial (sparse kick evidence abstains, the
+honest direction), and the review verdicts are corroborated drift, not
+false positives. Phase-4 verifier scope is now named accurately in
+`render:check` results (`scope: "source-decks"` — catalog source files,
+not the rendered output); status semantics (off / not applicable /
+skipped / decode-failed) are consistent across join rows and warnings.
+
 ## 5. Recipe persistence for hand-tuned joins
 
 Join treatments pinned by hand (`updateSetPlan` + preview + approve, as done for the
@@ -130,13 +143,17 @@ Final Hours → Somewhere glide) live only on that plan's params. The approved-r
 system should carry them to future mixes with the same pair. Workflow exists in
 pieces (`feedback:rate`, approved-recipe repository); needs UX decisions.
 
-## 6. ±2-beat label-swap blind spot (research)
+## 6. Two-beat downbeat label swap (research — distinct from the half-beat case)
 
-If a track's downbeat labels are off by exactly 2 beats (kick↔snare swap), the lock's
-own profiles inherit the swap (its kick-vs-snare penalty then _protects_ the wrong
-answer) and the geometric snap trusts the labels. Detection needs audio ground truth
-(kick-train coincidence at 0 vs ±172 ms in the overlap region), not grid correlation.
-Unproven on real cases; do not build until a labeled instance exists.
+If a track's downbeat labels are off by exactly 2 beats (kick↔snare swap — kick on 1/3, snare on
+2/4), the lock's own profiles inherit the swap (its kick-vs-snare penalty then _protects_ the wrong
+answer) and the geometric snap trusts the labels. Detection needs audio ground truth: kick-train
+coincidence at 0 vs **±2 beats (≈±690 ms at 174 BPM)** in the overlap region — not grid
+correlation. Do not confuse this with the **half-beat (~172 ms)** signature: that is a different,
+smaller offset (off-beat hats / syncopated content) and belongs to the grid-phase detector's
+discrimination work above. Whole-beat phase equivalence also means a genuine 2-beat swap leaves
+beat-phase checks clean by construction — the two hypotheses need separate evidence. Unproven on
+real cases; do not build until a labeled instance exists.
 
 ## 7. Chain tempo lock contradicts the docs — RESOLVED (documented)
 
@@ -255,8 +272,12 @@ Labeled joins from this session (all on 174 BPM material, all verified by ear):
   measures ~90–100ms), half-beat dominance is content. 3.12.3 bounds
   flaggable shifts to 20–110ms: the half-beat cluster is eliminated
   (0 tracks >130ms), leaving 159 suspects in the 40–110ms gray zone where
-  16th-note syncopation (~86ms at 174) overlaps real drift. Advisory-only
-  — no planner path consumes it. Calibration continues opportunistically:
+  16th-note syncopation (~86ms at 174) overlaps real drift. No longer
+  advisory-only: the planning pool excludes grid-phase-suspect tracks when
+  confident non-suspect alternatives exist (confidence-aware exclusion,
+  October 2026 — the raw catalog-size switch was replaced), and suspects
+  surface as diagnostics. Safe intervals in the 40–110ms gray zone remain
+  pending the labeled set. Calibration continues opportunistically:
   each future "slightly off" ear report carries the track's measured
   error, building the labeled set that separates the gray zone (Sakura
   106ms was audibly bad; Starchild's Theme 110ms auditioned clean — the

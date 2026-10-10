@@ -1,5 +1,10 @@
 # Repository review and implementation handoff — 8 October 2026
 
+> **Status: HISTORICAL SNAPSHOT.** Superseded as the active backlog by the
+> [10 October implementation review](implementation-review-2026-10-10.md). Findings F1–F10 landed;
+> see the [implementation ledger](implementation-ledger-2026-10.md) for what shipped. Retain this
+> document as provenance for the original acceptance criteria.
+
 ## Recommendation
 
 Keep the current local-first architecture. The largest quality gains now come from making timing, evidence, and verification agree across the analyzer, planner, renderer, and checker. More threshold tuning should follow that work, not precede it.

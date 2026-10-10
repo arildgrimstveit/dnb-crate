@@ -8,6 +8,17 @@ Point this at a local drum & bass folder. It catalogs the files, measures grids 
 
 An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server. The same services are on the CLI. The model interprets requests; this app owns scanning, storage, search, planning, and rendering.
 
+## Start here
+
+Read in this order:
+
+1. [Architecture](docs/architecture.md) — packages, data flow, where things live.
+2. [Folder to first mix](docs/first-mix.md) — prerequisites (Node, FFmpeg; Rubber Band and KeyFinder optional), config/data locations, and the first end-to-end mix.
+3. [CLI reference](docs/cli.md) — every command, including worker ownership (`--wait` runs work in-process; without it a live worker must exist).
+4. The **active backlog**: [implementation review, 10 October 2026](docs/plans/implementation-review-2026-10-10.md) — findings R1–R14 with acceptance criteria; earlier reviews and the commit ledger under `docs/plans/` are historical snapshots.
+
+Musical policy (template thresholds, triggers, pin overrides) lives in [mixing.md](docs/mixing.md); [scoring.md](docs/scoring.md) explains scoring and refers there. Verification semantics (stored-grid gate, source-deck probes, mix-quality scan, listening approval) live in [rendering.md](docs/rendering.md). Known limits: audio-verifier findings are advisory; safe-test commands are in each package's `package.json` scripts (`pnpm test`, `typecheck`, `lint`, `fix`).
+
 ## Ask for a mix
 
 Talk to the MCP host (Cursor, Codex, Claude Code, OpenCode, etc.). Mood or energy plus a length is enough. The host maps that onto `start_mix_workflow` using `create_set_plan` brief fields. The planner picks the order and joins; it does not write audio. The renderer prints a gapless **24-bit 48 kHz master** and a **16-bit listen** FLAC named from the plan.

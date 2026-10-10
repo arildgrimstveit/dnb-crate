@@ -1,5 +1,9 @@
 # Implementation plan: lean-codebase cleanup and architecture documentation
 
+> **Status: HISTORICAL SNAPSHOT.** Superseded by the
+> [10 October implementation review](implementation-review-2026-10-10.md) as the active
+> backlog; still-open requirements are carried there (architecture/code-quality section).
+
 October 2026 decision: everything currently parked as accepted or deferred debt
 gets fixed. Breaking changes to MCP clients are acceptable (single-user
 deployment), and a one-time full library re-analysis is acceptable. The goal is

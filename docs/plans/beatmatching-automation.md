@@ -1,5 +1,10 @@
 # Implementation plan: beatmatching automation follow-ups
 
+> **Status: HISTORICAL SNAPSHOT.** Superseded by the
+> [10 October implementation review](implementation-review-2026-10-10.md) as the active
+> backlog. Shipped diagnostics (grid-phase suspicion consumed by the planning pool,
+> groove gates, bass-swap trigger) are marked shipped in [`../beatmatching-followups.md`](../beatmatching-followups.md).
+
 Companion to [`../beatmatching-followups.md`](../beatmatching-followups.md), which holds
 the evidence. Every policy change ships behind a preview audition, never straight
 to a full render.

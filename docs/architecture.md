@@ -67,7 +67,7 @@ over-ceiling measurements fail the job rather than ship.
 ## packages/catalog
 
 Persistence is one SQLite database per config (`db.ts` opens, migrations run
-additively on open — `migrations/001..020`). Repositories own SQL, nothing else
+additively on open — `migrations/001..023`). Repositories own SQL, nothing else
 does:
 
 | Module                                                                                            | Owns                                                                                                 |
@@ -106,7 +106,25 @@ pinned expectations in `planning.test.ts`.
 **Render freezing.** A queued render snapshots the plan, selected evidence,
 source fingerprints, engine ids, and the Rubber Band hash. Editing the live
 plan or re-analyzing never changes what an already-queued job renders; an
-incompatible engine or replaced binary fails the job instead.
+incompatible engine or replaced binary fails the job instead. Frozen evidence
+owns its absences (a value recorded null at queue time stays null), and
+execution verifies source content by reading the actual bytes — not the
+queue-time hash cache.
+
+**Worker ownership.** One process owns background work per catalog
+(`worker_owner`, heartbeat-stale takeover). Claims stamp the owner token on
+the job (`claimed_by`); completion writes are fenced to the claiming owner, so
+a deposed worker finishing after takeover cannot overwrite recovery state or
+publish over the winner. In-flight jobs may still finish during a graceful
+close before the token is released.
+
+**Determinism, qualified.** Planning is deterministic for the same brief,
+seed, catalog state, resolved history, policy version, and evidence — not
+unconditionally: current analysis, feedback, approved recipes, and the
+algorithm policy remain live inputs, and variety history is resolved from the
+plan store at planning time. "Exact replay" replans under current policy from
+the referenced plan's frozen history context (tracks, pairs, artist uses,
+seed); it is not a whole-context snapshot replay.
 
 ## Stored data
 

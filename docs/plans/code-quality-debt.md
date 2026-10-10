@@ -1,5 +1,10 @@
 # Implementation plan: code-quality debt
 
+> **Status: HISTORICAL SNAPSHOT.** Superseded by the
+> [10 October implementation review](implementation-review-2026-10-10.md) as the active
+> backlog. Requirements still open from this plan were carried into that review's findings
+> and architecture notes; proven items are closed there.
+
 Companion to the October 2026 full-repo review. Every item here is a **move,
 dedup, delete, or guard** — no behavior changes. The regression oracles are the
 existing suites (494 tests) plus the planner's pinned expectations; anything

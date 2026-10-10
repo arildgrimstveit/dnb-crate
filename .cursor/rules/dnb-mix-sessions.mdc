@@ -9,22 +9,22 @@ Hard-won from the October 2026 listening sessions. Full findings also live in `d
 
 ## Before planning — screen the pool
 
-- Exclude tracks with `tempo_stability` < 0.65 or `bpm_confidence` < 0.85 from `track_analyses`. Every owner-declared "unmixable" track had a drifting grid; paper metrics (residual 0) did not catch it.
+- Screening is built in since 2026-10: the planning pool excludes unstable grids (`PLANNER_MIN_TEMPO_STABILITY = 0.6`, see `packages/domain/src/constants.ts`), grid-phase suspects (confidence-aware), and owner-rated-1 tracks. Manually exclude only for diagnosed cases not covered by those gates — read the constants from code, not from this file, so advice can't drift.
 - Prefer tracks with an early first drop (≤ ~110s) or 2+ drops. Single-late-drop tracks produce source-0 entries ("energy dies") or sub-90s bodies (render fails "no native body").
 - Structure queries: `track_sections` (type/start_ms), stability from the latest `dnb-crate-dsp` analysis row.
 
 ## After planning — audit before rendering
 
 - Reject any join whose incoming starts near source 0 with a drumless head (intro energy < 0.05). Fix by drop-anchoring: mix-in = drop start − overlap, snapped to the incoming's downbeat grid.
-- Gallop signature: 32-bar phrase_mix, aligned grids, low drum coexistence → convert to 16-bar bass_swap before auditioning.
+- Gallop signature: 32-bar phrase_mix between two busy break patterns. **Listening guidance, not an automated rule** — automation swaps only on the decisive kick-placement trigger (`PLANNER_BASS_SWAP_TRIGGER_GROOVE = -0.45`) and crossfades structural conflicts. When the ear confirms gallop, `transition:compare` the 16-bar bass_swap variant before converting.
 - Verify all joins with the beat-train predictor (`storedGridFromEvidence` from `packages/catalog/src/render/check-metrics.ts` fed analysis beats + plan windows). Iterate seeds/exclusions until clean; only then render.
-- After rendering: `render:check`, and read per-join residuals from the manifest — the predictor and checker occasionally disagree; the checker is the authority.
+- After rendering: `render:check`, and read per-join residuals from the manifest — the predictor and checker occasionally disagree; the checker is the authority. Deck-probe findings are advisory (`scope: "source-decks"`); see `docs/rendering.md` for the four verification signals.
 
 ## Editing plans
 
 - Use `updateSetPlan` (`replaceTrack`, `setTransition`, `setTrim`, `applyTransition`) — never raw `buildEntries` (it re-derives windows and can balloon a plan to 76 minutes).
 - `applyTransition` only sets `incomingSourceEndMs` on the LAST entry; trim middle entries with `setTrim` separately.
-- When hand-moving windows, strip pinned `downbeatOffsetMs`, `alignmentMode`, `alignmentPeriodMs`, `onsetLockBeats`, `recipeVersion` from that join's parameters so the renderer re-derives alignment; stale pins become audible flams.
+- Window edits through `updateSetPlan` strip stale alignment pins automatically (and the entry builder no longer re-stamps `recipeVersion` on those joins). Only raw plan-JSON edits must strip `downbeatOffsetMs`/`alignmentMode`/`alignmentPeriodMs`/`onsetLockBeats`/`recipeVersion` by hand.
 - Phase nudges: shift the incoming's start by the measured residual; for drop-anchored incomings prefer shifting the OUTGOING's end so the drop landing stays pinned. Search ±40..160 empirically and re-verify.
 
 ## Owner preferences (Arild)
@@ -33,7 +33,7 @@ Hard-won from the October 2026 listening sessions. Full findings also live in `d
 - Club-style pacing: 90–150s tools are good, explicitly endorsed. Do not enforce long plays.
 - Loves phrase_mix 32b joins; bass_swap 16b is the gallop antidote.
 - Hates: drumless-intro entries, energy dips between tracks, tracks that overstay (3:40+ mid-set), galloping overlaps.
-- "Unmixable" verdicts: move the file to `C:\Users\arild\Music\unmixable\`, `library:scan`, rate the track 1 with the diagnosis in notes (and add the id + reason to `data/session-offenders.json`), and record a `feedback:rate` row.
-- **Briefs no longer need offender exclusion lists**: `minRating: 2` plus the catalog ratings replaces the per-brief merge. The registry file stays as the human-readable record of why each track is rated 1.- **Briefs set `minRating: 2` and rate offenders 1 in the catalog** (see `data/session-offenders.json` for the reason registry). `minRating` is null-safe in the planning pool since 2026-10: unrated tracks pass, only explicitly-rated-bad are excluded. Search's `minRating` stays rated-only browsing — do not "fix" it to match.
+- "Unmixable" verdicts: move the file to `C:\Users\arild\Music\unmixable\`, `library:scan`, rate the track 1 with the diagnosis in notes (and add the id + reason to `data/session-offenders.json`), and record a `feedback:rate` row. That registry file is a local, optional human-readable record — not a setup requirement; the ratings are what the pool reads.
+- **Briefs set `minRating: 2` and rate offenders 1 in the catalog.** `minRating` is null-safe in the planning pool since 2026-10: unrated tracks pass, only explicitly-rated-bad are excluded. Search's `minRating` stays rated-only browsing — do not "fix" it to match.
 - Keeper copies of final mixes: transcode the listen FLAC with ffmpeg to 256k AAC (`.m4a`) named `<mix>-keeper.m4a` in `output/renders/`.
 - After adding test files, run `tsc --noEmit -p <package>/tsconfig.json` (tests are included there) — vitest does not typecheck, and windows-smoke will catch it otherwise.
