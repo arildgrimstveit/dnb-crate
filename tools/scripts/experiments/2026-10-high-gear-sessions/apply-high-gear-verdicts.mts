@@ -3,8 +3,8 @@
 import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
-import { loadConfig } from "../../packages/domain/src/index.ts";
-import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
+import { loadConfig } from "../../../../packages/domain/src/index.ts";
+import { createCatalogRuntime } from "../../../../packages/catalog/src/index.ts";
 
 const PLAN_ID = "6b21e8fa-a597-4ea6-ad89-8a85490d3736";
 

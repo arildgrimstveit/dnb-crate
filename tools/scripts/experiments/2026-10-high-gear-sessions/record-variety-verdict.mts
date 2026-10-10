@@ -1,7 +1,7 @@
 /** Records the high-gear-variety verdict and tags the three unmixable
  *  tracks so the planner stops selecting them. */
-import { loadConfig } from "../../packages/domain/src/index.ts";
-import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
+import { loadConfig } from "../../../../packages/domain/src/index.ts";
+import { createCatalogRuntime } from "../../../../packages/catalog/src/index.ts";
 
 const RENDER_ID = "e1669364-1a1b-42cd-a6ad-3428480bf2ba";
 const UNMIXABLE = [

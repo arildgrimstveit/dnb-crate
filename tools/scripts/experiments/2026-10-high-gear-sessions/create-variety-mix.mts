@@ -1,13 +1,13 @@
 /** Creates "High gear variety": same shape as High gear, variety against it,
  *  replanned until every join is a phrase_mix (no decisive conflicts). */
-import { loadConfig } from "../../packages/domain/src/index.ts";
-import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
+import { loadConfig } from "../../../../packages/domain/src/index.ts";
+import { createCatalogRuntime } from "../../../../packages/catalog/src/index.ts";
 import {
   beatIndexAtOrAfter,
   grooveCompatibility,
   localBeatProfile,
-} from "../../packages/catalog/src/planning/shared.ts";
-import type { TimelineTrack } from "../../packages/catalog/src/planning/timeline.ts";
+} from "../../../../packages/catalog/src/planning/shared.ts";
+import type { TimelineTrack } from "../../../../packages/catalog/src/planning/timeline.ts";
 
 const SOURCE_PLAN_ID = "6b21e8fa-a597-4ea6-ad89-8a85490d3736";
 const NEW_NAME = "High gear variety";

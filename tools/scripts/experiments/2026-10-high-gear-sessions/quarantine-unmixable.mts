@@ -3,8 +3,8 @@
 import { rename, mkdir } from "node:fs/promises";
 import path from "node:path";
 
-import { loadConfig } from "../../packages/domain/src/index.ts";
-import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
+import { loadConfig } from "../../../../packages/domain/src/index.ts";
+import { createCatalogRuntime } from "../../../../packages/catalog/src/index.ts";
 
 const UNMIXABLE = [
   "It's Time (feat. Gene Farris)",

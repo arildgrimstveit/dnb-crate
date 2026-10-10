@@ -1,6 +1,6 @@
 /** Renders "High gear variety" and reports the check. */
-import { loadConfig } from "../../packages/domain/src/index.ts";
-import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
+import { loadConfig } from "../../../../packages/domain/src/index.ts";
+import { createCatalogRuntime } from "../../../../packages/catalog/src/index.ts";
 
 const PLAN_ID = "438a0b94-198c-4b9c-b686-71c45bf00809";
 
