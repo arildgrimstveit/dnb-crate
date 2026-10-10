@@ -113,10 +113,15 @@ export const VARIETY_REPEATED_PAIR_COST = 4;
  * Pendulum appeared in 16/16 recent plans, 178 of 252 library artists
  * in none. */
 export const VARIETY_RECENT_PLAN_WINDOW = 6;
-/** How deep the automatic variety history looks before eligibility
- * filtering (F8): drafts and short plans are skipped first, then the most
- * recent VARIETY_RECENT_PLAN_WINDOW qualifying plans are taken, so a page
- * of discarded drafts cannot hide older qualifying history. */
+/** A plan must have at least this many entries to qualify as variety
+ * history (F8/R7): short drafts and experiments do not represent what the
+ * owner actually listened to. Applied in SQL BEFORE the scan window so a
+ * run of drafts cannot hide older qualifying history. */
+export const VARIETY_HISTORY_MIN_ENTRIES = 8;
+/** How deep the automatic variety history looks through ELIGIBLE plans
+ * (F8/R7): the eligibility filter (VARIETY_HISTORY_MIN_ENTRIES) runs in
+ * the query itself, then the most recent VARIETY_RECENT_PLAN_WINDOW of
+ * those qualifying plans feed the history. */
 export const VARIETY_AUTO_HISTORY_SCAN = 64;
 /** Per-plan penalty for an artist already heard in the recent-plan
  * history. Track-level penalties alone just rotate through a prolific

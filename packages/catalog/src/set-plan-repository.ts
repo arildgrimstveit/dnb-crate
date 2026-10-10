@@ -2,6 +2,7 @@ import type { PlanExplanation, SetPlanEntry, SetPlanSummary, SetPlanV1 } from "@
 import {
   DomainError,
   SET_PLAN_LIST_LIMIT_MAX,
+  VARIETY_AUTO_HISTORY_SCAN,
   planExplanationSchema,
   planningConstraintsSchema,
   setPlanEntrySchema,
@@ -264,6 +265,29 @@ export class SetPlanRepository {
   delete(id: string): boolean {
     const result = this.db.prepare("DELETE FROM set_plans WHERE id = ?").run(id);
     return result.changes > 0;
+  }
+
+  /** R7: the automatic variety history pages by ELIGIBILITY in SQL — the
+   * entry-count filter runs inside the query, so a run of short drafts can
+   * never hide older qualifying plans the way a raw page + filter did. */
+  listEligibleForHistory(minEntryCount: number, limitRaw?: number): SetPlanSummary[] {
+    const limit = Math.min(limitRaw ?? VARIETY_AUTO_HISTORY_SCAN, SET_PLAN_LIST_LIMIT_MAX);
+    const rows = this.db
+      .prepare(
+        `SELECT p.*, (SELECT COUNT(*) FROM set_plan_entries e WHERE e.set_plan_id = p.id) AS entry_count
+         FROM set_plans p
+         WHERE (SELECT COUNT(*) FROM set_plan_entries e WHERE e.set_plan_id = p.id) >= ?
+         ORDER BY p.updated_at DESC, p.id DESC LIMIT ?`,
+      )
+      .all(minEntryCount, limit) as Array<PlanRow & { entry_count: number }>;
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      targetDurationMs: row.target_duration_ms,
+      entryCount: row.entry_count,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
   }
 
   private findRow(id: string): PlanRow | undefined {

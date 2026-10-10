@@ -54,6 +54,7 @@ import {
   toPublicTrack,
   VARIETY_AUTO_HISTORY_SCAN,
   VARIETY_RECENT_PLAN_WINDOW,
+  VARIETY_HISTORY_MIN_ENTRIES,
 } from "@dnb-crate/domain";
 import { ffmpegMixReady } from "@dnb-crate/audio-renderer";
 import type { HourFeedbackRepository } from "./hour-feedback-repository.ts";
@@ -820,9 +821,12 @@ export class CatalogService {
         referencePlanIds = [];
       } else {
         historyMode = "auto";
-        const recent = this.setPlans.list(VARIETY_AUTO_HISTORY_SCAN).plans;
-        referencePlanIds = recent
-          .filter((summary) => summary.entryCount >= 8)
+        // R7: eligibility (>= VARIETY_HISTORY_MIN_ENTRIES entries) is applied
+        // IN the query, then the scan window walks qualifying plans — a run
+        // of short drafts can no longer hide older qualifying history the
+        // way the old raw-page-then-filter did.
+        referencePlanIds = this.setPlans
+          .listEligibleForHistory(VARIETY_HISTORY_MIN_ENTRIES, VARIETY_AUTO_HISTORY_SCAN)
           .slice(0, VARIETY_RECENT_PLAN_WINDOW)
           .map((summary) => summary.id);
       }

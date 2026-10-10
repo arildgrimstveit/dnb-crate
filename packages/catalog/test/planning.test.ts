@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createCatalogRuntime } from "../src/index.ts";
 import {
   DSP_ANALYZER_NAME,
+  VARIETY_AUTO_HISTORY_SCAN,
+  VARIETY_HISTORY_MIN_ENTRIES,
   type AppConfig,
   type CreateSetPlanInput,
   type SonicDescriptors,
@@ -2955,6 +2957,63 @@ describe("replay from frozen context (feature 4)", () => {
       first.plan.entries.map((entry) => entry.trackId),
     );
   });
+
+  it("replay-of-replay carries the same frozen history context (R7)", () => {
+    const catalog = runtime();
+    for (let i = 0; i < 20; i += 1) {
+      seedTrack(catalog, {
+        title: `R7 Replay ${i}`,
+        artist: `R7 Replayer ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    const brief = {
+      name: "R7 replay source",
+      targetDurationMs: 400_000,
+      seed: 17,
+      explorationWeight: 0,
+    };
+    // A prior qualifying plan so the original's auto history is non-empty —
+    // the frozen context that replays must reproduce is real, not vacuous.
+    createPlan(catalog, {
+      ...brief,
+      name: "History seed plan",
+      seed: 3,
+      targetDurationMs: 1_200_000,
+    });
+    const original = createPlan(catalog, { ...brief, name: "Original" });
+    const frozen = original.explanation.variety!;
+    expect(frozen.trackIds.length).toBeGreaterThan(0);
+    expect(Object.keys(frozen.recentArtistUses ?? {}).length).toBeGreaterThan(0);
+
+    const replay1 = createPlan(catalog, {
+      ...brief,
+      name: "Replay 1",
+      replayFromPlanId: original.plan.id,
+    });
+    // Live history changes between the replays; the frozen context must not.
+    createPlan(catalog, { ...brief, name: "Interloper", seed: 99 });
+    const replay2 = createPlan(catalog, {
+      ...brief,
+      name: "Replay of replay",
+      replayFromPlanId: replay1.plan.id,
+    });
+
+    const v1 = replay1.explanation.variety!;
+    const v2 = replay2.explanation.variety!;
+    expect(v2.historyMode).toBe("replay");
+    expect(v2.referencePlanIds).toEqual(frozen.referencePlanIds);
+    expect(v2.trackIds).toEqual(v1.trackIds);
+    expect(v2.pairs).toEqual(v1.pairs);
+    expect(v2.recentArtistUses).toEqual(frozen.recentArtistUses);
+    // Same frozen context, same brief: the selection reproduces.
+    expect(replay2.plan.entries.map((entry) => entry.trackId)).toEqual(
+      original.plan.entries.map((entry) => entry.trackId),
+    );
+  });
 });
 
 describe("resolved planning history is explicit and recorded (F8)", () => {
@@ -3041,6 +3100,52 @@ describe("resolved planning history is explicit and recorded (F8)", () => {
     expect(off.explanation.variety?.trackIds).toEqual([]);
     expect(off.explanation.variety?.recentArtistUses ?? {}).toEqual({});
     void first;
+  });
+
+  it("auto history pages by eligibility so short drafts cannot hide qualifying plans (R7)", () => {
+    const catalog = runtime();
+    for (let i = 0; i < 14; i += 1) {
+      seedTrack(catalog, {
+        title: `R7 Pool ${i}`,
+        artist: `R7 Artist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    // One old QUALIFYING plan (>= VARIETY_HISTORY_MIN_ENTRIES entries).
+    const qualifying = createPlan(catalog, {
+      name: "Qualifying history",
+      targetDurationMs: 1_200_000,
+      seed: 2,
+      explorationWeight: 0,
+    });
+    expect(qualifying.plan.entries.length).toBeGreaterThanOrEqual(VARIETY_HISTORY_MIN_ENTRIES);
+    // More newer short drafts than the scan bound: on the old raw
+    // page-then-filter they filled the entire window and hid the
+    // qualifying plan entirely.
+    for (let i = 0; i < VARIETY_AUTO_HISTORY_SCAN + 6; i += 1) {
+      createPlan(catalog, {
+        name: `Draft ${i}`,
+        targetDurationMs: 120_000,
+        seed: 100 + i,
+        explorationWeight: 0,
+      });
+    }
+    const planned = createPlan(catalog, {
+      name: "After drafts",
+      targetDurationMs: 400_000,
+      seed: 5,
+      explorationWeight: 0,
+    });
+    expect(planned.explanation.variety?.historyMode).toBe("auto");
+    expect(planned.explanation.variety?.referencePlanIds).toContain(qualifying.plan.id);
+    // The drafts themselves never qualify.
+    for (const id of planned.explanation.variety?.referencePlanIds ?? []) {
+      const plan = catalog.service.getSetPlan(id);
+      expect(plan.entries.length).toBeGreaterThanOrEqual(VARIETY_HISTORY_MIN_ENTRIES);
+    }
   });
 });
 
