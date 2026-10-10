@@ -404,3 +404,27 @@ measured drift swings (20-92 ms) on joins the owner accepted by ear, so they
 stay advisory per the gate-promotion rule. Coverage improved versus the
 pre-R5 run (retained grids no longer starve the 32-bar midpoint probe).
 Remaining R6 work is naming/status consistency, not measurement.
+
+## Review follow-up completion - 11 October 2026
+
+Final commits closing the review remainder:
+
+| Item                                                                                                                       | Commit               |
+| -------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| R2 remainder: per-variant lifecycle + partial-success exit (CLI/MCP/service)                                               | `d6af596`            |
+| R6 remainder: source-deck scope naming, per-mode unmeasured reasons, audioVerification block                               | `42d915e`            |
+| R7 remainder: eligibility-aware history paging (SQL), replay-of-replay stability test                                      | `c57ebaf`            |
+| Doc batch 1: scoring/mixing policy ownership, rendering verification semantics                                             | `976c7d9`            |
+| Doc batch 2: README start-here, active-backlog governance, architecture qualifications, agent rules, followups corrections | `e447fc9`, `e1e49a7` |
+| Doc batch 3: cli compare semantics, session-script triage to experiments area                                              | `d53bfbf`            |
+
+CI note: the MCP first-mix integration (`apps/mcp-server/test/first-mix.integration.test.ts`)
+flaked on the Linux lane three times on 10 October (RENDER_WARNINGS + OUTPUT_CHECK_FAILED);
+reruns of the same commits are green and a previously-green commit also re-ran green, so it is an
+intermittent Linux-runner failure, not a regression. The test now dumps the check-stage detail
+(job warnings + full check result) when the workflow does not succeed (`bf7a4a4`), so the next
+occurrence is diagnosable from the log. Follow up if it recurs.
+
+Still open beyond the review: the single frozen comparison-context identity spanning variant
+previews (R14 labeled the context; previews freeze per-variant), and the lint-hotspot
+responsibility extraction the review scopes to "while changing them".
