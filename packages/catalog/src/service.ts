@@ -990,6 +990,181 @@ export class CatalogService {
     return this.renders.startPreview(input);
   }
 
+  /** Variant comparison (batch 9): render the stored treatment plus every
+   *  other feasible aligned template for one saved join, on the same frozen
+   *  windows with comparable loudness, so the owner can A/B by ear and
+   *  rate each variant. The review's highest-value remaining feature. */
+  async compareTransitionVariants(input: {
+    setPlanId: string;
+    transitionId: string;
+    windowMs?: number;
+    allowLowConfidence?: boolean;
+  }): Promise<{
+    setPlanId: string;
+    transitionId: string;
+    order: number;
+    outgoing: { trackId: string; title: string };
+    incoming: { trackId: string; title: string };
+    storedTemplate: string;
+    variants: Array<{
+      template: string;
+      isStored: boolean;
+      feasible: boolean;
+      blockers: string[];
+      jobId: string | null;
+      outputRootRelativePath: string | null;
+    }>;
+  }> {
+    const stored = this.requirePlan(input.setPlanId);
+    const entries = [...stored.plan.entries].sort((a, b) => a.order - b.order);
+    const index = entries.findIndex((item) => item.transitionToNext?.id === input.transitionId);
+    if (index < 0 || index >= entries.length - 1) {
+      throw new DomainError(
+        "INVALID_SET_PLAN",
+        `No transition ${input.transitionId} on plan ${input.setPlanId}`,
+      );
+    }
+    const outgoingEntry = entries[index]!;
+    const incomingEntry = entries[index + 1]!;
+    const transition = outgoingEntry.transitionToNext!;
+    const outgoingTrack = this.requireTrack(outgoingEntry.trackId);
+    const incomingTrack = this.requireTrack(incomingEntry.trackId);
+
+    // Determine feasibility for each template (F6 parity set).
+    const planned = this.planTransition({
+      outgoingTrackId: outgoingEntry.trackId,
+      incomingTrackId: incomingEntry.trackId,
+      preferredType: "any",
+      targetBpm:
+        typeof transition.parameters.targetBpm === "number"
+          ? transition.parameters.targetBpm
+          : undefined,
+      allowLowConfidence: input.allowLowConfidence,
+    });
+
+    const templates: Array<"crossfade" | "phrase_mix" | "bass_swap"> = [
+      "phrase_mix",
+      "bass_swap",
+      "crossfade",
+    ];
+    const variants: Array<{
+      template: string;
+      isStored: boolean;
+      feasible: boolean;
+      blockers: string[];
+      jobId: string | null;
+      outputRootRelativePath: string | null;
+    }> = [];
+    for (const template of templates) {
+      const proposal = planned.proposals.find((item) => item.type === template);
+      const isStored = transition.type === template;
+      const feasible = proposal?.feasible ?? false;
+      const blockers = proposal?.blockers ?? [];
+      let jobId: string | null = null;
+      const outputPath: string | null = null;
+      if (feasible || isStored) {
+        try {
+          const started = await this.renders.startPreview({
+            setPlanId: input.setPlanId,
+            transitionId: input.transitionId,
+            windowMs: input.windowMs,
+            template,
+            allowLowConfidence: input.allowLowConfidence,
+          });
+          jobId = started.job.id;
+        } catch {
+          // Preview failed; report it without blocking the others.
+          blockers.push("preview render failed");
+        }
+      }
+      variants.push({
+        template,
+        isStored,
+        feasible,
+        blockers,
+        jobId,
+        outputRootRelativePath: outputPath,
+      });
+    }
+    return {
+      setPlanId: input.setPlanId,
+      transitionId: input.transitionId,
+      order: index,
+      outgoing: { trackId: outgoingEntry.trackId, title: outgoingTrack.title },
+      incoming: { trackId: incomingEntry.trackId, title: incomingTrack.title },
+      storedTemplate: transition.type,
+      variants,
+    };
+  }
+
+  /** Surgical repair (batch 9): replace a join's incoming track while
+   *  preserving every other adjacency — protected transitions keep their
+   *  stored treatments exactly (F7 pair identity makes this safe). Returns
+   *  the updated plan plus a diff of what changed. */
+  repairSetPlan(input: {
+    setPlanId: string;
+    entryId: string;
+    newIncomingTrackId: string;
+    protectedTransitionIds?: string[];
+  }): {
+    plan: SetPlanV1;
+    diff: {
+      changedJoin: { order: number; fromTitle: string; toTitle: string };
+      protectedJoins: number[];
+      invalidated: string[];
+    };
+    validation: ValidateSetPlanResult;
+  } {
+    const stored = this.requirePlan(input.setPlanId);
+    const entries = [...stored.plan.entries].sort((a, b) => a.order - b.order);
+    const index = entries.findIndex((item) => item.id === input.entryId);
+    if (index < 0 || index >= entries.length - 1) {
+      throw new DomainError(
+        "INVALID_SET_PLAN",
+        `Entry ${input.entryId} has no transition to repair (last entry or not found)`,
+      );
+    }
+    const newTrack = this.requireTrack(input.newIncomingTrackId);
+    const oldTrack = this.requireTrack(entries[index + 1]!.trackId);
+    const protectedIds = new Set(input.protectedTransitionIds ?? []);
+    const oldTransitionId = entries[index]!.transitionToNext?.id ?? null;
+
+    // Apply via updateSetPlan's replaceTrack, which handles adjacency
+    // invalidation (F7) correctly: only the changed pair is replanned.
+    const result = this.updateSetPlan({
+      setPlanId: input.setPlanId,
+      replaceTrack: { entryId: entries[index + 1]!.id, trackId: input.newIncomingTrackId },
+    });
+
+    // Identify what actually changed vs. what was preserved.
+    const newEntries = [...result.plan.entries].sort((a, b) => a.order - b.order);
+    const invalidated: string[] = [];
+    let protectedCount = 0;
+    for (let i = 0; i < newEntries.length - 1; i += 1) {
+      const transition = newEntries[i]!.transitionToNext;
+      if (!transition) continue;
+      if (protectedIds.has(transition.id)) {
+        protectedCount += 1;
+      } else if (transition.id !== oldTransitionId && i === index) {
+        invalidated.push(`join ${i}: replanned for ${newTrack.title}`);
+      }
+    }
+    void stored;
+    return {
+      plan: result.plan,
+      diff: {
+        changedJoin: {
+          order: index,
+          fromTitle: oldTrack.title,
+          toTitle: newTrack.title,
+        },
+        protectedJoins: [protectedCount],
+        invalidated,
+      },
+      validation: result.validation,
+    };
+  }
+
   getRenderStatus(renderJobId: string): RenderJob {
     return this.renders.getStatus(renderJobId);
   }

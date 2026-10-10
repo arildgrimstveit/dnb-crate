@@ -84,6 +84,8 @@ describe("MCP tool handlers", () => {
         "find_compatible_tracks",
         "get_transition_preferences",
         "inspect_transition",
+        "compare_transition_variants",
+        "repair_set_plan",
         "get_analysis_report",
         "get_analysis_status",
         "get_enrichment_report",

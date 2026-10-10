@@ -202,20 +202,27 @@ describe("minRating excludes rated-bad, never unrated (2026-10 sessions)", () =>
     const unrated = plainTrack("unrated", "Unrated");
     const bad = { ...plainTrack("bad", "Rated Bad"), rating: 1 as number | null };
     const good = { ...plainTrack("good", "Rated Good"), rating: 4 as number | null };
-    const pool = buildPlanningPool([unrated, bad, good], { name: "brief", minRating: 2 }, {
-      analyses: new Map(),
-      requiredIds: [],
-      targetDurationMs: 60_000,
-    });
+    const pool = buildPlanningPool(
+      [unrated, bad, good],
+      { name: "brief", minRating: 2 },
+      {
+        analyses: new Map(),
+        requiredIds: [],
+        targetDurationMs: 60_000,
+      },
+    );
     const ids = new Set(pool.pool.map((track) => track.id));
     expect(ids.has("unrated")).toBe(true);
     expect(ids.has("good")).toBe(true);
     expect(ids.has("bad")).toBe(false);
-    expect(pool.rejected.some((row) => row.trackId === "bad" && row.reason === "BELOW_MIN_RATING")).toBe(true);
+    expect(
+      pool.rejected.some((row) => row.trackId === "bad" && row.reason === "BELOW_MIN_RATING"),
+    ).toBe(true);
   });
 });
 
-describe("pool rejects unstable grids (2026-10 sessions)", () => {  it("drops tracks below the stability floor and keeps stable ones", () => {
+describe("pool rejects unstable grids (2026-10 sessions)", () => {
+  it("drops tracks below the stability floor and keeps stable ones", () => {
     const stable = Array.from({ length: 13 }, (_, i) => plainTrack(`s${i}`, `Stable ${i}`));
     const wobbly = plainTrack("wob", "Wobbly Grid");
     const analyses = new Map<string, TimelineAnalysis>();

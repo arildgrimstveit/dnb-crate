@@ -62,6 +62,8 @@ Config comes from `dnb-crate.config.json` (see `.env.example` and the README for
 | -------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | `transition:plan --from UUID --to UUID [--type T] [--bars 16\|32]`                     | Ranked transition proposals for a pair          |
 | `transition:inspect --plan UUID --transition UUID`                                     | Evidence view for one saved join                |
+| `transition:compare --plan UUID --transition UUID [--wait]`                            | A/B render all feasible treatments              |
+| `plan:repair --plan UUID --entry UUID --with TRACK_UUID [--protect ID1,ID2]`           | Replace a join's track, preserve the rest       |
 | `transition:validate --from UUID --to UUID --type T`                                   | Feasibility check for one transition            |
 | `feedback:rate --json FILE`                                                            | Record a listen rating for a pair/recipe        |
 | `feedback:list [--from UUID] [--to UUID] [--fingerprint F]`                            | List transition ratings                         |

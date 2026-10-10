@@ -22,6 +22,8 @@ import {
   validateTransitionDataSchema,
   validateTransitionInputSchema,
 } from "@dnb-crate/domain";
+import { z } from "zod/v4";
+import { trackIdSchema } from "@dnb-crate/domain";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { toolFailure, toolSuccess } from "../map-result.ts";
 export function registerPlanningTools(server: McpServer, service: CatalogService): void {
@@ -57,6 +59,98 @@ export function registerPlanningTools(server: McpServer, service: CatalogService
     (input) => {
       try {
         return toolSuccess(service.inspectTransition(input));
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "compare_transition_variants",
+    {
+      title: "Compare transition variants",
+      description:
+        "Render the stored treatment plus every other feasible aligned template for one saved join on the same frozen windows with comparable loudness. Returns per-variant feasibility, blockers, and preview job ids. Queue the previews, wait for them, present the listen files to the owner, then record the owner's verdict with rate_transition per variant.",
+      inputSchema: z.object({
+        setPlanId: trackIdSchema,
+        transitionId: trackIdSchema,
+        windowMs: z.number().int().min(30_000).max(60_000).optional(),
+        allowLowConfidence: z.boolean().optional(),
+      }),
+      outputSchema: toolResultSchema(
+        z.object({
+          setPlanId: z.string(),
+          transitionId: z.string(),
+          order: z.number().int(),
+          outgoing: z.object({ trackId: z.string(), title: z.string() }),
+          incoming: z.object({ trackId: z.string(), title: z.string() }),
+          storedTemplate: z.string(),
+          variants: z.array(
+            z.object({
+              template: z.string(),
+              isStored: z.boolean(),
+              feasible: z.boolean(),
+              blockers: z.array(z.string()),
+              jobId: z.string().nullable(),
+              outputRootRelativePath: z.string().nullable().optional(),
+            }),
+          ),
+        }),
+      ),
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    async (input) => {
+      try {
+        const result = await service.compareTransitionVariants(input);
+        return toolSuccess(result);
+      } catch (error) {
+        return toolFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "repair_set_plan",
+    {
+      title: "Repair set plan",
+      description:
+        "Surgically replace a join's incoming track while preserving every other adjacency. Protected transitions (by id) keep their stored treatments exactly. Returns the updated plan, a diff of what changed, and validation. Prerequisites for safe repair landed October 2026 (F4 frozen identity, F7 pair-aware invalidation).",
+      inputSchema: z.object({
+        setPlanId: trackIdSchema,
+        entryId: trackIdSchema,
+        newIncomingTrackId: trackIdSchema,
+        protectedTransitionIds: z.array(trackIdSchema).optional(),
+      }),
+      outputSchema: toolResultSchema(
+        z.object({
+          plan: z.object({
+            id: z.string(),
+            entries: z.array(
+              z.object({
+                trackId: z.string(),
+                order: z.number(),
+                transitionToNext: z.object({ type: z.string() }).nullable(),
+              }),
+            ),
+          }),
+          diff: z.object({
+            changedJoin: z.object({
+              order: z.number(),
+              fromTitle: z.string(),
+              toTitle: z.string(),
+            }),
+            protectedJoins: z.array(z.number()),
+            invalidated: z.array(z.string()),
+          }),
+          validation: z.object({ valid: z.boolean() }),
+        }),
+      ),
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    (input: Parameters<CatalogService["repairSetPlan"]>[0]) => {
+      try {
+        const result = service.repairSetPlan(input);
+        return toolSuccess(result);
       } catch (error) {
         return toolFailure(error);
       }

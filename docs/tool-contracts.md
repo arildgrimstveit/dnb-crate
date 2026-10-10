@@ -114,6 +114,16 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 - Input: `{ setPlanId, transitionId }`
 - Output: one structured evidence view for a saved join — stored treatment (type, duration, bars, target BPM, selection reason, F7 pair stamp, applied recipe), placed source windows for both sides (start/end, playback rate, the outgoing's overlap start in source coordinates), alignment provenance (offset, period, mode, onset-lock beats), the groove-gate numbers recorded at selection (gap, per-side means and measured bars, window positions, abstention reason), what the planner would choose for the pair today, and per-template alternatives with F6-eligibility blockers. Read-only diagnostic surface; the CLI equivalent is `transition:inspect --plan UUID --transition UUID`.
 
+## `compare_transition_variants`
+
+- Input: `{ setPlanId, transitionId, windowMs?, allowLowConfidence? }`
+- Output: the stored treatment plus every other feasible aligned template for one saved join, each with a queued preview render on the same frozen windows (comparable loudness). Per-variant: template, isStored, feasibility (F6 parity), blockers, preview job id. After the previews finish, present the listen files; record the owner's verdict per variant with `rate_transition`. The CLI is `transition:compare --plan UUID --transition UUID [--wait]`.
+
+## `repair_set_plan`
+
+- Input: `{ setPlanId, entryId, newIncomingTrackId, protectedTransitionIds? }`
+- Output: the updated plan plus a surgical diff — which join changed (from/to track titles), how many protected transitions survived untouched, and what was replanned. Built on F7 pair-aware invalidation: only the changed adjacency is replanned; every other join keeps its stored treatment exactly, including approved recipes. The CLI is `plan:repair --plan UUID --entry UUID --with TRACK_UUID [--protect ID1,ID2]`.
+
 ## `validate_transition`
 
 - Input: type plus optional duration/rates/overrides

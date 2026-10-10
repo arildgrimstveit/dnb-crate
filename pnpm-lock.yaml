@@ -62,6 +62,9 @@ importers:
       pino:
         specifier: ^9.9.0
         version: 9.14.0
+      zod:
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@modelcontextprotocol/client':
         specifier: ^2.0.0

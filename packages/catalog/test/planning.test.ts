@@ -3054,4 +3054,57 @@ describe("join inspector (batch 9)", () => {
       }),
     ).toThrow(/No transition/);
   });
+
+  it("compares transition variants and repairs plans surgically", async () => {
+    const catalog = runtime();
+    for (let i = 0; i < 12; i += 1) {
+      seedTrack(catalog, {
+        title: `Compare ${i}`,
+        artist: `Comparator ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    const created = createPlan(catalog, {
+      name: "Compare fixture",
+      targetDurationMs: 400_000,
+      seed: 7,
+      explorationWeight: 0,
+    });
+    expect(created.plan.entries.length).toBeGreaterThanOrEqual(3);
+    const transition = created.plan.entries[0]!.transitionToNext!;
+
+    // Variant comparison: stored + alternatives, each with feasibility.
+    const compared = await catalog.service.compareTransitionVariants({
+      setPlanId: created.plan.id,
+      transitionId: transition.id,
+    });
+    expect(compared.storedTemplate).toBe(transition.type);
+    expect(compared.variants.length).toBe(3);
+    const templates = compared.variants.map((variant) => variant.template);
+    expect(templates).toContain("phrase_mix");
+    expect(templates).toContain("bass_swap");
+    expect(templates).toContain("crossfade");
+    for (const variant of compared.variants) {
+      expect(typeof variant.feasible).toBe("boolean");
+      expect(Array.isArray(variant.blockers)).toBe(true);
+    }
+
+    // Surgical repair: replace the incoming track of join 0.
+    const replacement = catalog.repository.listAll().find((track) => track.title === "Compare 11")!;
+    const repaired = catalog.service.repairSetPlan({
+      setPlanId: created.plan.id,
+      entryId: created.plan.entries[0]!.id,
+      newIncomingTrackId: replacement.id,
+    });
+    expect(repaired.diff.changedJoin.toTitle).toBe("Compare 11");
+    const newEntries = [...repaired.plan.entries].sort((a, b) => a.order - b.order);
+    expect(newEntries[1]!.trackId).toBe(replacement.id);
+    // Other entries keep their tracks.
+    for (let i = 2; i < newEntries.length; i += 1) {
+      expect(newEntries[i]!.trackId).toBe(created.plan.entries[i]!.trackId);
+    }
+  });
 });

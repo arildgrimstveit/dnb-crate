@@ -7,7 +7,11 @@ import { option, printJson } from "../args.ts";
 
 /** Synchronous command group (no waits); kept dispatch-compatible with the
  * async groups. */
-export function run(command: string, args: string[], runtime: CatalogRuntime): boolean {
+export async function run(
+  command: string,
+  args: string[],
+  runtime: CatalogRuntime,
+): Promise<boolean> {
   switch (command) {
     case "transition:plan": {
       const from = option(args, "--from");
@@ -95,6 +99,49 @@ export function run(command: string, args: string[], runtime: CatalogRuntime): b
         throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
       }
       printJson({ ok: true, data: runtime.service.listTransitionFeedback(parsed.data) });
+      return true;
+    }
+    case "transition:compare": {
+      const planId = option(args, "--plan");
+      const transitionId = option(args, "--transition");
+      if (!planId || !transitionId) {
+        throw new Error("transition:compare requires --plan and --transition");
+      }
+      const result = await runtime.service.compareTransitionVariants({
+        setPlanId: planId,
+        transitionId,
+      });
+      if (args.includes("--wait")) {
+        for (const variant of result.variants) {
+          if (variant.jobId) {
+            const done = await runtime.service.waitForRenderJob(variant.jobId, 600_000);
+            variant.outputRootRelativePath = done.outputRootRelativePath;
+          }
+        }
+      }
+      printJson({ ok: true, data: result });
+      return true;
+    }
+    case "plan:repair": {
+      const planId = option(args, "--plan");
+      const entryId = option(args, "--entry");
+      const trackId = option(args, "--with");
+      if (!planId || !entryId || !trackId) {
+        throw new Error(
+          "plan:repair requires --plan, --entry, and --with (the replacement track id)",
+        );
+      }
+      const protectedRaw = option(args, "--protect");
+      const protectedIds = protectedRaw
+        ? protectedRaw.split(",").map((id) => id.trim())
+        : undefined;
+      const result = runtime.service.repairSetPlan({
+        setPlanId: planId,
+        entryId,
+        newIncomingTrackId: trackId,
+        protectedTransitionIds: protectedIds,
+      });
+      printJson({ ok: true, data: result });
       return true;
     }
     default:
