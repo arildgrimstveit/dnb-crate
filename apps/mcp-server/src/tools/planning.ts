@@ -105,6 +105,12 @@ export function registerPlanningTools(server: McpServer, service: CatalogService
               blockers: z.array(z.string()),
               jobId: z.string().nullable(),
               outputRootRelativePath: z.string().nullable().optional(),
+              /** Lifecycle at response time (R2): queued/failed at enqueue,
+               * not-started when infeasible; waiting callers overwrite with
+               * the terminal job state. */
+              status: z.string(),
+              errorCode: z.string().nullable(),
+              errorMessage: z.string().nullable(),
             }),
           ),
         }),

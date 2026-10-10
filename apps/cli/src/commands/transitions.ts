@@ -112,12 +112,33 @@ export async function run(
         transitionId,
       });
       if (args.includes("--wait")) {
+        // R2: wait for every variant and surface each job's terminal state.
+        // A failed or cancelled variant is a partial-success (exit 1) with
+        // the full data still on stdout; a timeout is recorded per variant
+        // instead of aborting the others.
         for (const variant of result.variants) {
-          if (variant.jobId) {
+          if (!variant.jobId) continue;
+          try {
             const done = await runtime.service.waitForRenderJob(variant.jobId, 600_000);
             variant.outputRootRelativePath = done.outputRootRelativePath;
+            variant.status = done.status;
+            variant.errorCode = done.errorCode ?? null;
+            variant.errorMessage = done.errorMessage ?? null;
+          } catch (error) {
+            variant.status = "timeout";
+            variant.errorCode = "RENDER_FAILED";
+            variant.errorMessage =
+              error instanceof Error ? error.message : "Timed out waiting for preview render";
           }
         }
+      }
+      const started = result.variants.filter((variant) => variant.jobId != null);
+      const allSucceeded = started.every((variant) => variant.status === "succeeded");
+      const partial = started.length > 0 && !allSucceeded;
+      if (args.includes("--wait") && partial) {
+        printJson({ ok: false, data: result });
+        process.exitCode = 1;
+        return true;
       }
       printJson({ ok: true, data: result });
       return true;

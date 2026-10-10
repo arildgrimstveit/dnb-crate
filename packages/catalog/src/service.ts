@@ -42,6 +42,7 @@ import {
   recordHourFeedbackSchema,
   APP_VERSION,
   DomainError,
+  isDomainError,
   RESOURCE_LIST_LIMIT,
   resolveBpmHint,
   recipeFingerprint,
@@ -1080,6 +1081,12 @@ export class CatalogService {
       blockers: string[];
       jobId: string | null;
       outputRootRelativePath: string | null;
+      /** Lifecycle at response time (R2): queued/failed at enqueue, or
+       * not-started for infeasible variants. Waiting callers overwrite
+       * with the terminal job state. */
+      status: string;
+      errorCode: string | null;
+      errorMessage: string | null;
     }>;
   }> {
     const stored = this.requirePlan(input.setPlanId);
@@ -1148,6 +1155,9 @@ export class CatalogService {
       blockers: string[];
       jobId: string | null;
       outputRootRelativePath: string | null;
+      status: string;
+      errorCode: string | null;
+      errorMessage: string | null;
     }> = [];
     for (const template of templates) {
       const proposal = planned.proposals.find((item) => item.type === template);
@@ -1156,6 +1166,7 @@ export class CatalogService {
       const blockers = proposal?.blockers ?? [];
       let jobId: string | null = null;
       const outputPath: string | null = null;
+      let enqueueError: { code: string; message: string } | null = null;
       if (feasible || isStored) {
         try {
           const started = await this.renders.startPreview({
@@ -1166,9 +1177,18 @@ export class CatalogService {
             allowLowConfidence: input.allowLowConfidence,
           });
           jobId = started.job.id;
-        } catch {
-          // Preview failed; report it without blocking the others.
-          blockers.push("preview render failed");
+        } catch (error) {
+          // Preview enqueue failed; report it without blocking the others.
+          // Preserve the actionable domain error (R2) — a bare "preview
+          // render failed" hides the real precondition (missing worker,
+          // unreadable source, invalid plan state).
+          enqueueError = isDomainError(error)
+            ? { code: error.code, message: error.message }
+            : {
+                code: "RENDER_FAILED",
+                message: error instanceof Error ? error.message : "Preview render failed",
+              };
+          blockers.push(`preview render failed: ${enqueueError.message}`);
         }
       }
       variants.push({
@@ -1178,6 +1198,11 @@ export class CatalogService {
         blockers,
         jobId,
         outputRootRelativePath: outputPath,
+        // Lifecycle at enqueue time (R2): callers that wait overwrite
+        // these with the terminal state from waitForRenderJob.
+        status: jobId != null ? "queued" : enqueueError ? "failed" : "not-started",
+        errorCode: enqueueError?.code ?? null,
+        errorMessage: enqueueError?.message ?? null,
       });
     }
     return {

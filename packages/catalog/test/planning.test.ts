@@ -3176,6 +3176,52 @@ describe("join inspector (batch 9)", () => {
     }
   });
 
+  it("reports per-variant lifecycle and preserves enqueue failure detail (R2)", async () => {
+    const catalog = runtime();
+    // Virtual tracks: no real audio files exist, so preview ENQUEUE fails
+    // during readiness for every renderable variant. The comparison must
+    // report that as per-variant lifecycle with the actionable domain error
+    // preserved — not a bare "preview render failed".
+    for (let i = 0; i < 12; i += 1) {
+      seedTrack(catalog, {
+        title: `Lifecycle ${i}`,
+        artist: `Lifecycler ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    const created = createPlan(catalog, {
+      name: "Lifecycle fixture",
+      targetDurationMs: 400_000,
+      seed: 11,
+      explorationWeight: 0,
+    });
+    const transition = created.plan.entries[0]!.transitionToNext!;
+    const compared = await catalog.service.compareTransitionVariants({
+      setPlanId: created.plan.id,
+      transitionId: transition.id,
+    });
+    expect(compared.variants.length).toBe(3);
+    for (const variant of compared.variants) {
+      expect(["queued", "failed", "not-started"]).toContain(variant.status);
+      if (variant.status === "failed") {
+        // The domain error code survived (readiness/file access), and the
+        // blocker text carries the detail.
+        expect(variant.errorCode).not.toBeNull();
+        expect(variant.errorMessage).not.toBeNull();
+        expect(variant.blockers.join(" ")).toMatch(/preview render failed: .+/);
+      }
+      if (variant.status === "not-started") {
+        // Infeasible variants never enqueue and carry no error.
+        expect(variant.jobId).toBeNull();
+        expect(variant.errorCode).toBeNull();
+        expect(variant.errorMessage).toBeNull();
+      }
+    }
+  });
+
   it("evaluates variant feasibility on the saved join's windows, not fresh proposals (R14)", async () => {
     const catalog = runtime();
     // The structural gate compares the two sides' LOCAL syncopation at the
