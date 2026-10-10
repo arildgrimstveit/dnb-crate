@@ -381,6 +381,7 @@ describe("durable mix workflows", () => {
         failures: [],
         warnings: [],
         ok: failure !== "bad-check",
+        audioVerification: { mode: "fast", scope: "source-decks", probedJoins: [] },
       });
       vi.spyOn(runtime.workflows.preflight, "verifyOutput").mockResolvedValue(
         failure !== "bad-file",

@@ -306,6 +306,40 @@ describe("render jobs", () => {
     expect(legacy.status).toBe("succeeded");
   });
 
+  it("labels audio verification scope and per-mode unmeasured reasons accurately (R6)", async () => {
+    const { catalog, plan } = await seededLibrary();
+    const started = await catalog.service.startSetRender({ setPlanId: plan.id });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
+
+    const fast = await catalog.service.checkRender(done.id);
+    // The scope block names what the verifier actually measures (R6).
+    expect(fast.audioVerification).toEqual({
+      mode: "fast",
+      scope: "source-decks",
+      probedJoins: [],
+    });
+    // A crossfade join has no aligned decks to probe: the reason says so
+    // instead of the stale "not implemented" default.
+    const join = fast.joins[0]!;
+    expect(join.audioStatus).toBe("unmeasured");
+    expect(join.audioUnmeasuredReason).toBe("source-deck probe not applicable: no aligned decks");
+    expect(fast.warnings.join("\n")).toMatch(/source-deck audio unmeasured/);
+
+    const off = await catalog.service.checkRender(done.id, undefined, {
+      audioVerification: "off",
+    });
+    // With the mode disabled, that is the reason — for every join.
+    expect(off.audioVerification).toEqual({
+      mode: "off",
+      scope: "source-decks",
+      probedJoins: [],
+    });
+    expect(off.joins[0]!.audioUnmeasuredReason).toBe(
+      "source-deck probe off (audioVerification=off)",
+    );
+  });
+
   it("returns a cached preview for an identical second request", async () => {
     const { catalog, plan } = await seededLibrary();
     const transitionId = plan.entries[0]!.transitionToNext!.id;

@@ -178,6 +178,16 @@ export type RenderCheckResult = {
   failures: string[];
   warnings: string[];
   ok: boolean;
+  /** R6 scope statement: the deck verifier decodes the CATALOG SOURCE FILES
+   * behind each deck (kick-band onsets against the stored grids). It does
+   * not inspect the renderer's Rubber Band output, join-only rate regions,
+   * or the final blend — those stay with the mixed-decode scan and
+   * listening approval. Findings are advisory. */
+  audioVerification: {
+    mode: "off" | "fast" | "full";
+    scope: "source-decks";
+    probedJoins: number[];
+  };
 };
 
 export type PreparedSegment = MixSegment & {
@@ -864,8 +874,11 @@ export class RenderCoordinator {
         residualKind: storedGrid.kind,
         evidenceSource: storedGrid.source,
         audioStatus: "unmeasured",
-        audioUnmeasuredReason:
-          "independent deck-probe verification not implemented; the mixed-decode scan measures mix quality only",
+        // R6: the initial reason is null; the post-probe reconciliation
+        // below fills every still-unmeasured join with an accurate reason
+        // for its actual state (off / not applicable / skipped) instead of
+        // the stale "not implemented" default from before the probe existed.
+        audioUnmeasuredReason: null,
         audioFindings: [],
         plannedLevelStepLu: plannedLevelStepLu(
           outgoing.outgoingLufs ?? null,
@@ -998,7 +1011,7 @@ export class RenderCoordinator {
         const outTrack = this.tracks.findById(outgoingRow.trackId);
         const inTrack = this.tracks.findById(incomingRow.trackId);
         if (!outTrack || !inTrack) {
-          join.audioUnmeasuredReason = "deck probe skipped: source track missing";
+          join.audioUnmeasuredReason = "source-deck probe skipped: source track missing";
           continue;
         }
         const overlapOutMs = outgoingRow.overlapToNextMs ?? 0;
@@ -1074,7 +1087,7 @@ export class RenderCoordinator {
             inRate,
           );
           if (outgoingOnsets == null || incomingOnsets == null) {
-            join.audioUnmeasuredReason = "deck probe decode failed";
+            join.audioUnmeasuredReason = "source-deck probe decode failed";
             continue;
           }
           // Beat-lock each train to its own deck's PROJECTED grid before
@@ -1133,13 +1146,34 @@ export class RenderCoordinator {
           }
         } catch (error) {
           deckProbed.add(join.order);
-          join.audioUnmeasuredReason = `deck probe failed: ${
+          join.audioUnmeasuredReason = `source-deck probe failed: ${
             error instanceof Error ? error.message : String(error)
           }`;
         } finally {
           await unlink(outPcm).catch(() => undefined);
           await unlink(inPcm).catch(() => undefined);
         }
+      }
+    }
+    // R6: every still-unmeasured join that the probe did not touch gets an
+    // accurate reason for its actual state — off, not applicable, or no
+    // eligible overlap. Joins the probe measured carry the verifier's own
+    // reasons; the mixed-decode scan wrote its specific skip/decode reasons
+    // earlier and those stay untouched. "off" wins over template
+    // applicability: when the mode is disabled, that is why nothing ran.
+    for (const join of joins) {
+      if (join.audioStatus !== "unmeasured" || deckProbed.has(join.order)) {
+        continue;
+      }
+      if (join.audioUnmeasuredReason != null) {
+        continue;
+      }
+      if (audioMode === "off") {
+        join.audioUnmeasuredReason = "source-deck probe off (audioVerification=off)";
+      } else if (join.template !== "phrase_mix" && join.template !== "bass_swap") {
+        join.audioUnmeasuredReason = "source-deck probe not applicable: no aligned decks";
+      } else {
+        join.audioUnmeasuredReason = "source-deck probe skipped: no eligible overlap window";
       }
     }
     // The stored-grid residual stands unless the user overrides it. An
@@ -1187,7 +1221,7 @@ export class RenderCoordinator {
         .filter((join) => join.audioUnmeasuredReason != null && !deckProbed.has(join.order))
         .map(
           (join) =>
-            `join ${join.order} independent audio unmeasured: ${join.audioUnmeasuredReason}`,
+            `join ${join.order} source-deck audio unmeasured: ${join.audioUnmeasuredReason}`,
         ),
       // Deck-probe advisories (review/fail/unmeasured) intentionally stay on
       // the join rows only: uncalibrated verdicts must not gate first-mix
@@ -1218,6 +1252,11 @@ export class RenderCoordinator {
         !residualFail &&
         !levelFail &&
         duration.status !== "fail",
+      audioVerification: {
+        mode: audioMode,
+        scope: "source-decks" as const,
+        probedJoins: [...deckProbed].sort((a, b) => a - b),
+      },
     };
   }
 
