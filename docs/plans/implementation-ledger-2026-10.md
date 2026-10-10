@@ -428,3 +428,16 @@ occurrence is diagnosable from the log. Follow up if it recurs.
 Still open beyond the review: the single frozen comparison-context identity spanning variant
 previews (R14 labeled the context; previews freeze per-variant), and the lint-hotspot
 responsibility extraction the review scopes to "while changing them".
+
+### Final engineering items - 11 October 2026
+
+| Item                                                                                                                                                                                                      | Commit    |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| Single frozen comparison-context identity across variant previews (R14 completion; tolerant freeze preserves per-variant readiness failures; CLI --wait reports measured loudness per variant)            | `4266403` |
+| Lint-hotspot extraction: render/deck-probe.ts (coordinator 2,366 -> 2,211) and service/inspection.ts (service 1,534 -> 1,239), both behind the existing suites; DSP 3.13 files left to the parallel agent | `4266403` |
+
+Both CI lanes green on `4266403`. The Linux MCP first-mix flake did not recur;
+its in-test diagnostics remain armed. Nothing from the 10 October review or its
+remainder list is open; future work returns to the feature shortlist (similar
+approved treatments, vocal-overlap awareness) and opportunistic gray-zone
+calibration.
