@@ -91,7 +91,11 @@ import type { RenderCoordinator } from "./render/coordinator.ts";
 import type { AnalysisCoordinator } from "./analysis/coordinator.ts";
 import type { AnalysisRepository } from "./analysis-repository.ts";
 import type { EnrichmentCoordinator } from "./enrichment/coordinator.ts";
-import { planTransition, validateTransition } from "./planning/transition-planner.ts";
+import {
+  planTransition,
+  validateTransition,
+  type PlanTransitionInput,
+} from "./planning/transition-planner.ts";
 import type { FeedbackRepository } from "./feedback-repository.ts";
 import type { ApprovedRecipeRepository } from "./approved-recipe-repository.ts";
 import type { TrackEvidenceSelection } from "./analysis-repository.ts";
@@ -486,6 +490,7 @@ export class CatalogService {
     allowExcessiveTempo?: boolean;
     allowLowConfidence?: boolean;
     allowDropIn?: boolean;
+    savedWindow?: Parameters<typeof planTransition>[2]["savedWindow"];
   }): {
     outgoingTrackId: string;
     incomingTrackId: string;
@@ -1055,6 +1060,19 @@ export class CatalogService {
     outgoing: { trackId: string; title: string };
     incoming: { trackId: string; title: string };
     storedTemplate: string;
+    /** Which join coordinates the feasibility verdicts describe (R14):
+     * saved-join windows/rates when the stored transition carries them,
+     * fresh proposals otherwise. Preview artifacts always render the
+     * saved join. */
+    context: {
+      source: "saved-join" | "fresh-proposal";
+      outgoingMixOutMs: number | null;
+      incomingMixInMs: number | null;
+      barCount: number | null;
+      durationMs: number;
+      targetBpm: number | null;
+      rates: { outgoing: number; incoming: number };
+    };
     variants: Array<{
       template: string;
       isStored: boolean;
@@ -1079,16 +1097,43 @@ export class CatalogService {
     const outgoingTrack = this.requireTrack(outgoingEntry.trackId);
     const incomingTrack = this.requireTrack(incomingEntry.trackId);
 
-    // Determine feasibility for each template (F6 parity set).
+    // R14 (review 2026-10-10): eligibility is evaluated on the SAVED join's
+    // coordinates — the windows, rates, and bar count the previews actually
+    // render. Fresh proposals would test a different interval than the one
+    // being compared, accepting/rejecting the wrong treatment. Legacy
+    // transitions without stored barCount (crossfade-only plans) fall back
+    // to fresh proposals, labeled as such below instead of mixing window
+    // identities silently.
+    const params = transition.parameters;
+    const paramNumber = (key: string): number | null =>
+      typeof params[key] === "number" ? params[key] : null;
+    const savedBarCountRaw = paramNumber("barCount");
+    const savedBarCount =
+      savedBarCountRaw === 8 || savedBarCountRaw === 16 || savedBarCountRaw === 32
+        ? savedBarCountRaw
+        : null;
+    const outRate = outgoingEntry.playbackRate > 0 ? outgoingEntry.playbackRate : 1;
+    const inRate = incomingEntry.playbackRate > 0 ? incomingEntry.playbackRate : 1;
+    const savedTargetBpm = paramNumber("targetBpm");
+    const savedWindow: PlanTransitionInput["savedWindow"] =
+      savedBarCount != null
+        ? {
+            outgoingMixOutMs: paramNumber("mixOutMs") ?? outgoingEntry.sourceEndMs,
+            incomingMixInMs: paramNumber("mixInMs") ?? incomingEntry.sourceStartMs,
+            barCount: savedBarCount,
+            outgoingRate: outRate,
+            incomingRate: inRate,
+          }
+        : undefined;
+
+    // Feasibility per template against the saved-join context (F6 parity).
     const planned = this.planTransition({
       outgoingTrackId: outgoingEntry.trackId,
       incomingTrackId: incomingEntry.trackId,
       preferredType: "any",
-      targetBpm:
-        typeof transition.parameters.targetBpm === "number"
-          ? transition.parameters.targetBpm
-          : undefined,
+      targetBpm: savedTargetBpm ?? undefined,
       allowLowConfidence: input.allowLowConfidence,
+      ...(savedWindow ? { savedWindow } : {}),
     });
 
     const templates: Array<"crossfade" | "phrase_mix" | "bass_swap"> = [
@@ -1142,6 +1187,15 @@ export class CatalogService {
       outgoing: { trackId: outgoingEntry.trackId, title: outgoingTrack.title },
       incoming: { trackId: incomingEntry.trackId, title: incomingTrack.title },
       storedTemplate: transition.type,
+      context: {
+        source: savedWindow ? "saved-join" : "fresh-proposal",
+        outgoingMixOutMs: savedWindow ? savedWindow.outgoingMixOutMs : null,
+        incomingMixInMs: savedWindow ? savedWindow.incomingMixInMs : null,
+        barCount: savedBarCount,
+        durationMs: transition.durationMs,
+        targetBpm: savedTargetBpm,
+        rates: { outgoing: outRate, incoming: inRate },
+      },
       variants,
     };
   }

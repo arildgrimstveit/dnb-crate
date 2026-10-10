@@ -85,6 +85,18 @@ export function registerPlanningTools(server: McpServer, service: CatalogService
           outgoing: z.object({ trackId: z.string(), title: z.string() }),
           incoming: z.object({ trackId: z.string(), title: z.string() }),
           storedTemplate: z.string(),
+          /** Which join coordinates the feasibility verdicts describe
+           * (R14): saved-join windows/rates when stored, fresh proposals
+           * otherwise. Preview artifacts always render the saved join. */
+          context: z.object({
+            source: z.enum(["saved-join", "fresh-proposal"]),
+            outgoingMixOutMs: z.number().nullable(),
+            incomingMixInMs: z.number().nullable(),
+            barCount: z.number().int().nullable(),
+            durationMs: z.number(),
+            targetBpm: z.number().nullable(),
+            rates: z.object({ outgoing: z.number(), incoming: z.number() }),
+          }),
           variants: z.array(
             z.object({
               template: z.string(),

@@ -25,7 +25,7 @@ import type { StoredTrackAnalysis } from "../analysis-repository.ts";
 import { audioBounds, constrainMixOut, pickMixIn, pickMixOut, snapMixMs } from "./cues.ts";
 import { structuralGrooveConflict } from "./shared.ts";
 import { analysisToTimeline, chooseTransition, type TimelineTrack } from "./timeline.ts";
-import { planPhraseWindow } from "./windows.ts";
+import { planPhraseWindow, type PhraseWindow } from "./windows.ts";
 
 export type PlanTransitionInput = {
   outgoingTrackId: string;
@@ -36,6 +36,19 @@ export type PlanTransitionInput = {
   allowExcessiveTempo?: boolean;
   allowLowConfidence?: boolean;
   allowDropIn?: boolean;
+  /** Saved-join evaluation context (R14, review 2026-10-10): evaluate
+   * eligibility on these STORED coordinates — the windows and rates the
+   * saved plan actually renders — instead of a freshly proposed window.
+   * Variant comparison passes this so feasibility describes the saved
+   * join the previews render, not a different interval the planner would
+   * choose today. */
+  savedWindow?: {
+    outgoingMixOutMs: number;
+    incomingMixInMs: number;
+    barCount: 8 | 16 | 32;
+    outgoingRate?: number;
+    incomingRate?: number;
+  };
 };
 
 export type ValidateTransitionInput = {
@@ -67,6 +80,31 @@ function toTimeline(bundle: TrackBundle): TimelineTrack {
     bpm: bundle.track.bpm,
     camelotKey: bundle.track.camelotKey,
     analysis: analysisToTimeline(bundle.analysis, canon.bpm, bundle.cues, bundle.track.durationMs),
+  };
+}
+
+/**
+ * Saved-join coordinates as a window-shaped object (R14): eligibility and
+ * window-fit blockers evaluate the stored mix-out/mix-in positions and bar
+ * count. Provenance fields are neutral — alignment pins live in the saved
+ * transition's parameters, not in a fresh proposal — and the render itself
+ * uses the stored plan's automation, never this object's.
+ */
+function savedPhraseWindow(saved: NonNullable<PlanTransitionInput["savedWindow"]>): PhraseWindow {
+  return {
+    mixInMs: saved.incomingMixInMs,
+    mixOutMs: saved.outgoingMixOutMs,
+    mixInBar: null,
+    mixOutBar: null,
+    barCount: saved.barCount,
+    exitKind: null,
+    phraseShape: "complementary",
+    incomingDropMs: null,
+    dropAnchored: false,
+    alignmentOffsetMs: 0,
+    alignmentPeriodMs: null,
+    alignmentMode: null,
+    onsetLockBeats: null,
   };
 }
 
@@ -107,6 +145,9 @@ function propose(
     allowDropIn?: boolean;
     /** Explicit window cap. Null follows the planner's window policy. */
     maxBars?: 8 | 16 | 32 | null;
+    /** Saved-join context (R14): eligibility uses these stored windows and
+     * rates instead of a fresh proposal. */
+    savedWindow?: PlanTransitionInput["savedWindow"];
   },
 ): TransitionProposal {
   const reasons: string[] = [];
@@ -136,15 +177,21 @@ function propose(
 
   const outTl = toTimeline(outgoing);
   const inTl = toTimeline(incoming);
+  const saved = type === "crossfade" ? null : (options.savedWindow ?? null);
   const shared =
-    type === "crossfade"
+    saved || type === "crossfade"
       ? null
       : chooseTransition(outTl, inTl, {
           dropAnchored: true,
           chainTargetBpm: targetBpm,
           ...(options.maxBars ? { maxBars: options.maxBars } : {}),
         });
-  if (
+  if (saved) {
+    // Saved-join context (R14): the stored rates govern — the planner does
+    // not re-derive rates for coordinates that already exist on the plan.
+    if (saved.outgoingRate != null) outgoingRate = saved.outgoingRate;
+    if (saved.incomingRate != null) incomingRate = saved.incomingRate;
+  } else if (
     shared &&
     (shared.outgoingRate !== 1 || shared.incomingRate !== 1 || shared.targetBpm != null)
   ) {
@@ -155,16 +202,18 @@ function propose(
     }
   }
   const window =
-    type === "crossfade"
-      ? null
-      : (shared?.window ??
-        planPhraseWindow(outTl, inTl, {
-          dropAnchored: true,
-          targetBpm,
-          outgoingRate,
-          incomingRate,
-          ...(options.maxBars ? { maxBars: options.maxBars } : {}),
-        }));
+    saved != null
+      ? savedPhraseWindow(saved)
+      : type === "crossfade"
+        ? null
+        : (shared?.window ??
+          planPhraseWindow(outTl, inTl, {
+            dropAnchored: true,
+            targetBpm,
+            outgoingRate,
+            incomingRate,
+            ...(options.maxBars ? { maxBars: options.maxBars } : {}),
+          }));
   // Template ELIGIBILITY versus preference (F6, repository review
   // 2026-10-08): the structural groove gate is evaluated on this proposal's
   // resolved window with the same shared function the set planner uses, so
@@ -355,6 +404,7 @@ export function planTransition(
     // Only an explicit request caps the window; the default follows the same
     // window policy as set-plan joins so the two paths stay consistent.
     maxBars: input.barCount ?? null,
+    savedWindow: input.savedWindow,
   };
   const energyUp = (incoming.track.energy ?? 0) > (outgoing.track.energy ?? 0);
   const bothHot = (outgoing.track.energy ?? 0) >= 7 && (incoming.track.energy ?? 0) >= 7;

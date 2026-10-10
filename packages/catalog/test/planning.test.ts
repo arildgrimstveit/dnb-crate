@@ -130,6 +130,7 @@ function testSonicDescriptors(
     tempoEvidence: null,
     audioStartMs: descriptors.audioStartMs,
     audioEndMs: descriptors.audioEndMs,
+    bars: descriptors.bars ?? null,
   };
 }
 
@@ -3173,5 +3174,113 @@ describe("join inspector (batch 9)", () => {
     for (const changed of repaired.diff.changedJoins) {
       expect(changed.reason).not.toContain("unexpected");
     }
+  });
+
+  it("evaluates variant feasibility on the saved join's windows, not fresh proposals (R14)", async () => {
+    const catalog = runtime();
+    // The structural gate compares the two sides' LOCAL syncopation at the
+    // join coordinates. Low tracks are straight everywhere (0.05); High
+    // tracks carry one heavily-syncopated region at bars 52-67 (0.95, gap
+    // 0.90 > PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP 0.58). A fresh proposal
+    // finds a clean early window for any pair; a SAVED join at bars 52-67
+    // structurally conflicts. The region sits late enough that a join there
+    // still leaves every entry its 90 s minimum playable span on 200 s
+    // tracks.
+    const barMs = (4 * 60_000) / 174;
+    const straight = Array.from({ length: 144 }, () => 0.05);
+    const regional = Array.from({ length: 144 }, (_, bar) => (bar >= 52 && bar < 68 ? 0.95 : 0.05));
+    const lowIds = new Set<string>();
+    const highIds = new Set<string>();
+    for (let i = 0; i < 12; i += 1) {
+      const high = i % 2 === 1;
+      const id = seedTrack(catalog, {
+        title: `${high ? "HighCtx" : "LowCtx"} ${i}`,
+        artist: `Saver ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: high ? 7 : 3,
+        durationMs: 200_000,
+      });
+      (high ? highIds : lowIds).add(id);
+      stubDescriptors(catalog, id, {
+        bars: {
+          rms: Array.from({ length: 144 }, () => 0.5),
+          syncopation: high ? regional : straight,
+        },
+      });
+    }
+    const created = createPlan(catalog, {
+      name: "R14 saved-context fixture",
+      targetDurationMs: 400_000,
+      seed: 3,
+      explorationWeight: 0,
+    });
+    const sorted = [...created.plan.entries].sort((a, b) => a.order - b.order);
+    const joinIndex = sorted.findIndex(
+      (entry, i) =>
+        entry.transitionToNext != null &&
+        (entry.transitionToNext.type === "phrase_mix" ||
+          entry.transitionToNext.type === "bass_swap") &&
+        i + 1 < sorted.length &&
+        lowIds.has(entry.trackId) &&
+        highIds.has(sorted[i + 1]!.trackId),
+    );
+    // An ascending-energy plan over this pool contains a Low→High aligned
+    // join; its windows were chosen OUTSIDE the conflicting region, so the
+    // aligned templates are feasible there.
+    expect(joinIndex).toBeGreaterThanOrEqual(0);
+    const outgoing = sorted[joinIndex]!;
+    const transition = outgoing.transitionToNext!;
+
+    const before = await catalog.service.compareTransitionVariants({
+      setPlanId: created.plan.id,
+      transitionId: transition.id,
+    });
+    expect(before.context.source).toBe("saved-join");
+    const beforePhrase = before.variants.find((v) => v.template === "phrase_mix")!;
+    expect(beforePhrase.feasible).toBe(true);
+
+    // Manually move the saved join into the conflicting region (R14
+    // acceptance: "a manually edited join"). applyTransition preserves the
+    // stored windows through buildEntries' prior-entry honors.
+    const overlapMs = Math.round(16 * barMs); // 16 bars at 174
+    const conflictStart = Math.round(52 * barMs); // bar 52: region start
+    catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      applyTransition: {
+        entryId: outgoing.id,
+        type: "phrase_mix",
+        durationMs: overlapMs,
+        outgoingPlaybackRate: 1,
+        incomingPlaybackRate: 1,
+        outgoingSourceStartMs: 0,
+        outgoingSourceEndMs: conflictStart + overlapMs,
+        incomingSourceStartMs: conflictStart,
+        incomingSourceEndMs: 200_000,
+        parameters: { barCount: 16, targetBpm: 174 },
+      },
+    });
+
+    const after = await catalog.service.compareTransitionVariants({
+      setPlanId: created.plan.id,
+      transitionId: transition.id,
+    });
+    // The comparison context is the saved join, labeled with its exact
+    // coordinates: overlap start at bar 52 on both sides, 16 bars.
+    expect(after.context.source).toBe("saved-join");
+    expect(after.context.outgoingMixOutMs).toBeCloseTo(conflictStart, -2);
+    expect(after.context.incomingMixInMs).toBeCloseTo(conflictStart, -2);
+    expect(after.context.barCount).toBe(16);
+    expect(after.context.rates).toEqual({ outgoing: 1, incoming: 1 });
+    // Feasibility follows the SAVED windows: both aligned templates now
+    // carry the structural blocker a fresh proposal would have dodged.
+    const afterPhrase = after.variants.find((v) => v.template === "phrase_mix")!;
+    expect(afterPhrase.feasible).toBe(false);
+    expect(afterPhrase.blockers.join(" ")).toMatch(/Structural groove conflict/);
+    const afterBass = after.variants.find((v) => v.template === "bass_swap")!;
+    expect(afterBass.feasible).toBe(false);
+    // Crossfade has no groove gate and stays feasible on the same join.
+    const afterFade = after.variants.find((v) => v.template === "crossfade")!;
+    expect(afterFade.feasible).toBe(true);
   });
 });
