@@ -11,7 +11,7 @@
 
 The implementation substantially improves the repository, but several advertised guarantees stop at a helper or service boundary. Prioritize five integration failures: protected repair does not enforce protection; final entry construction undoes the dead-intro fix; edited windows are not realigned as promised; fast deck verification mixes two time origins; and the comparison CLI never starts a worker. Then finish frozen evidence, replay, freshness, and worker publication semantics before expanding automatic musical policy.
 
-This document is the next implementation backlog. It reconciles the [8 October review](docs/plans/repository-review-2026-10-08.md) with the [implementation ledger](docs/plans/implementation-ledger-2026-10.md). It does not authorize implementing every feature at once. Land small changes with the acceptance checks below; preserve the owner’s listening decisions and the existing fidelity safeguards.
+This document is the next implementation backlog. It reconciles the [8 October review](../plans/repository-review-2026-10-08.md) with the [implementation ledger](../plans/implementation-ledger-2026-10.md). It does not authorize implementing every feature at once. Land small changes with the acceptance checks below; preserve the owner’s listening decisions and the existing fidelity safeguards.
 
 ## Snapshot and validation
 
@@ -43,7 +43,7 @@ The new inspector, comparison, repair, and replay surfaces are useful foundation
 
 ### R1 — P1, reproduced: protected repair changes protected joins and underreports the diff
 
-In [repairSetPlan](packages/catalog/src/service.ts:1153), `protectedTransitionIds` is consulted only after `updateSetPlan` has saved the replacement. It counts surviving IDs; it never prevents changing a protected transition. Replacing B in A→B→C necessarily changes both neighboring pairs, whereas the comment and returned invalidation list describe only A→B. `protectedJoins: [protectedCount]` returns a one-element count array rather than identifying preserved joins.
+In [repairSetPlan](../../packages/catalog/src/service.ts), `protectedTransitionIds` is consulted only after `updateSetPlan` has saved the replacement. It counts surviving IDs; it never prevents changing a protected transition. Replacing B in A→B→C necessarily changes both neighboring pairs, whereas the comment and returned invalidation list describe only A→B. `protectedJoins: [protectedCount]` returns a one-element count array rather than identifying preserved joins.
 
 An in-memory four-entry plan with all three transitions protected lost **two protected transition IDs**, reported only **one invalidated join**, and returned `protectedJoins: [1]`. Its explanation had no `edited` marker: replacement clears transitions before the later changed-adjacency loop can observe them.
 
@@ -53,7 +53,7 @@ An in-memory four-entry plan with all three transitions protected lost **two pro
 
 ### R2 — P2, reproduced: `transition:compare --wait` queues work without a worker
 
-[CLI worker policy](apps/cli/src/worker-policy.ts:4) omits `transition:compare`. Both waiting and non-waiting comparisons resolve to `none`; ordinary `render:preview --wait` resolves to `process`. The [command](apps/cli/src/commands/transitions.ts:104) nevertheless queues previews and waits up to 600,000 ms per job. In a standalone CLI session with no MCP worker, jobs remain queued until the wait times out. Without `--wait`, it also bypasses the normal missing-worker guidance.
+[CLI worker policy](../../apps/cli/src/worker-policy.ts) omits `transition:compare`. Both waiting and non-waiting comparisons resolve to `none`; ordinary `render:preview --wait` resolves to `process`. The [command](../../apps/cli/src/commands/transitions.ts) nevertheless queues previews and waits up to 600,000 ms per job. In a standalone CLI session with no MCP worker, jobs remain queued until the wait times out. Without `--wait`, it also bypasses the normal missing-worker guidance.
 
 The waiting branch copies an output path and then prints `ok: true` without exposing each terminal job’s failed/cancelled state. The service also reduces enqueue failures to “preview render failed,” losing the actionable domain error.
 
@@ -63,7 +63,7 @@ The waiting branch copies an output path and then prints `ok: true` without expo
 
 ### R3 — P1, reproduced: final timeline construction undoes resolved cue placement
 
-[resolveManualMixIn](packages/catalog/src/planning/windows.ts:593) correctly ignores a manual zero cue in a quiet introduction when there is a better musical entry. But [buildEntries](packages/catalog/src/planning/timeline.ts:709) prioritizes `manualMixInMs` over the resolved previous pair window, both in `plannedStart` and the final `musicalWindow` call. It then rewrites transition `mixInMs` from the resulting source start.
+[resolveManualMixIn](../../packages/catalog/src/planning/windows.ts) correctly ignores a manual zero cue in a quiet introduction when there is a better musical entry. But [buildEntries](../../packages/catalog/src/planning/timeline.ts) prioritizes `manualMixInMs` over the resolved previous pair window, both in `plannedStart` and the final `musicalWindow` call. It then rewrites transition `mixInMs` from the resulting source start.
 
 A synthetic 174 BPM incoming track with quiet bars 0–16, a build at 16–48, a drop from bar 48, and manual cue zero produced **22,069 ms** from both the window helper and chooser. `buildEntries` changed the incoming source start and final transition parameter back to **0 ms**. The selected template remained `phrase_mix`.
 
@@ -75,7 +75,7 @@ The outgoing side has the same precedence problem. With a manual mix-out at bar 
 
 ### R4 — P1, code-traced: edited windows lose alignment pins but do not regain valid placement
 
-[The editor](packages/catalog/src/service/plan-editor.ts:62) claims that stripping alignment pins lets rendering rederive alignment. It removes offsets/mode/period/onset lock but retains `recipeVersion`. [Entry construction](packages/catalog/src/planning/timeline.ts:801) stamps `recipeVersion: 1` again regardless. The [renderer](packages/catalog/src/render/coordinator.ts:1435) computes alignment metadata but skips applying the result when that version is present. A changed window can consequently acquire new provenance without the matching source placement.
+[The editor](../../packages/catalog/src/service/plan-editor.ts) claims that stripping alignment pins lets rendering rederive alignment. It removes offsets/mode/period/onset lock but retains `recipeVersion`. [Entry construction](../../packages/catalog/src/planning/timeline.ts) stamps `recipeVersion: 1` again regardless. The [renderer](../../packages/catalog/src/render/coordinator.ts) computes alignment metadata but skips applying the result when that version is present. A changed window can consequently acquire new provenance without the matching source placement.
 
 Structural edits also retain prior playback rates. The ledger acknowledges this, but it was part of the original downstream consistency requirement. Source trims, overlap duration, playback rate, and neighboring joins form a dependency chain; deleting a few parameter keys is not enough.
 
@@ -85,7 +85,7 @@ Structural edits also retain prior playback rates. The ledger acknowledges this,
 
 ### R5 — P1, reproduced: fast verification compares midpoint onsets with start-of-overlap grids
 
-In [the deck-probe integration](packages/catalog/src/render/coordinator.ts:980), fast mode decodes a 10-second midpoint probe. Onsets are shifted by `probeOffsetMs` into overlap-relative time, but grids are filtered to `[0, probeMs + 500)` from the overlap start. `verifyDeckAlignment` receives `overlapMs: probeMs`, so its half-window drift calculation also uses the wrong origin.
+In [the deck-probe integration](../../packages/catalog/src/render/coordinator.ts), fast mode decodes a 10-second midpoint probe. Onsets are shifted by `probeOffsetMs` into overlap-relative time, but grids are filtered to `[0, probeMs + 500)` from the overlap start. `verifyDeckAlignment` receives `overlapMs: probeMs`, so its half-window drift calculation also uses the wrong origin.
 
 A dense aligned 174 BPM probe retained 29 onsets per deck for 8 bars, only 13 for 16 bars with the first half unavailable, and **zero for 32 bars**. The 32-bar midpoint starts about **17,069 ms** into the overlap, beyond the retained grids. Normalizing both streams to probe-local time made the same control pass. This explains some abstention mechanically; historical “unmeasured” results cannot all be attributed to sparse music.
 
@@ -105,17 +105,17 @@ Beat-locking within ±100 ms of each stored grid is a sensible way to reject irr
 
 ### R7 — P2, reproduced/code-traced: replay drops artist history and does not freeze a full planning context
 
-[History resolution](packages/catalog/src/service.ts:774) can replay stored track IDs, pairs, artist counts, and seed. However, [finalization](packages/catalog/src/planning/finalize.ts:94) persists `recentArtistUses` **only in auto mode**. Explicit-history plans use counts without storing them; a replay consumes counts but omits them from its own saved context. An in-memory probe carried six artist-history keys into replay and saved zero. The fixture happened to select the same tracks; a changed selection was not needed to demonstrate lost scoring inputs.
+[History resolution](../../packages/catalog/src/service.ts) can replay stored track IDs, pairs, artist counts, and seed. However, [finalization](../../packages/catalog/src/planning/finalize.ts) persists `recentArtistUses` **only in auto mode**. Explicit-history plans use counts without storing them; a replay consumes counts but omits them from its own saved context. An in-memory probe carried six artist-history keys into replay and saved zero. The fixture happened to select the same tracks; a changed selection was not needed to demonstrate lost scoring inputs.
 
 “Exact replay” also leaves the caller responsible for supplying the same brief. Strength/descriptor normalization, recording identities, current analysis, feedback/approved recipes, and algorithm policy remain live; recorded `policyVersion` is not an execution selector. State that scope clearly rather than implying snapshot replay. Separately, fetching 64 plans before filtering eligibility still allows enough short drafts to hide older qualifying history.
 
 **Implement:** persist every actually used history field for every mode, and make replay-of-replay stable. Choose and document two distinct operations: replan using frozen history under current policy, and true context replay. The latter needs the normalized brief, policy/evidence identities, resolved recording/pair/artist history and applicable recipe/feedback context, or an explicit unsupported-version result. Define whether history means generated drafts, rendered plans, or accepted listens; do not imply one while using another. Query/page by eligibility before applying the history window.
 
-**Acceptance:** nonempty eligible history, non-default strength, explicit references, replay-of-replay, more than 64 short drafts, deleted/edited references, and changed policy/evidence. The current [replay test](packages/catalog/test/planning.test.ts:2911) produces short plans below the eight-entry auto-history threshold; its “interloper changes history” comment is not exercised. Assert the history changed before asserting replay immunity.
+**Acceptance:** nonempty eligible history, non-default strength, explicit references, replay-of-replay, more than 64 short drafts, deleted/edited references, and changed policy/evidence. The current [replay test](../../packages/catalog/test/planning.test.ts) produces short plans below the eight-entry auto-history threshold; its “interloper changes history” comment is not exercised. Assert the history changed before asserting replay immunity.
 
 ### R8 — P2, reproduced: the execution SHA check can reuse a stale enqueue hash
 
-[sourceHashForTrack](packages/catalog/src/render/coordinator.ts:628) caches SHA-256 by path, size, mtime, and the cheap head/tail fingerprint. Queueing and execution call the same cache. A same-size interior edit that preserves/restores mtime therefore reuses the old full hash. A disposable 256 KiB file with one middle byte changed reproduced `cachedHashUnchanged: true` while a fresh SHA confirmed different bytes. The existing interior-edit test changes ordinary metadata and misses this case.
+[sourceHashForTrack](../../packages/catalog/src/render/coordinator.ts) caches SHA-256 by path, size, mtime, and the cheap head/tail fingerprint. Queueing and execution call the same cache. A same-size interior edit that preserves/restores mtime therefore reuses the old full hash. A disposable 256 KiB file with one middle byte changed reproduced `cachedHashUnchanged: true` while a fresh SHA confirmed different bytes. The existing interior-edit test changes ordinary metadata and misses this case.
 
 Hash errors also return null, allowing a newly frozen request to fall back silently to the weaker legacy identity behavior.
 
@@ -125,7 +125,7 @@ Hash errors also return null, allowing a newly frozen request to fall back silen
 
 ### R9 — P2, code-traced: frozen absence still falls through to live evidence
 
-[qualityForPlan](packages/catalog/src/service/quality-evidence.ts:65) initializes maps from the live catalog and overwrites only numeric/present frozen values. A frozen absent audio end/drop/energy can therefore acquire later live analysis. Expressions such as `canonical?.musicalKey ?? row.musicalKey ?? track?.musicalKey` treat a deliberately frozen null as permission to use current metadata. Validation and parts of quality reporting still receive live `Track` records.
+[qualityForPlan](../../packages/catalog/src/service/quality-evidence.ts) initializes maps from the live catalog and overwrites only numeric/present frozen values. A frozen absent audio end/drop/energy can therefore acquire later live analysis. Expressions such as `canonical?.musicalKey ?? row.musicalKey ?? track?.musicalKey` treat a deliberately frozen null as permission to use current metadata. Validation and parts of quality reporting still receive live `Track` records.
 
 **Implement:** branch on snapshot version/presence, not value truthiness. A present canonical block owns its nulls. Remove live map entries when the snapshot records absence. Freeze the metadata actually needed for musical validation, and separate live execution preconditions such as file availability from frozen musical judgment. Specify whether later recipe approval/revocation can intentionally change a queued job; capture applicable context if the contract promises immutability. Include individual analyzer identities where reproducibility depends on them.
 
@@ -133,9 +133,9 @@ Hash errors also return null, allowing a newly frozen request to fall back silen
 
 ### R10 — P2, code-traced: workflow freshness still uses the old identity rules
 
-The coordinator and repository gained `dspInputIdentity`, but [needsMixAnalysis](packages/catalog/src/mix-workflow.ts:215) still compares stage identity with bare `DSP_ANALYZER_VERSION` and does not compare reference-BPM inputs. Changing configured tempo bounds can leave a default-identity row apparently current to the workflow; an already current custom identity can cause redundant analysis scheduling. The coordinator may then skip the unnecessary job, so this is not necessarily an infinite loop.
+The coordinator and repository gained `dspInputIdentity`, but [needsMixAnalysis](../../packages/catalog/src/mix-workflow.ts) still compares stage identity with bare `DSP_ANALYZER_VERSION` and does not compare reference-BPM inputs. Changing configured tempo bounds can leave a default-identity row apparently current to the workflow; an already current custom identity can cause redundant analysis scheduling. The coordinator may then skip the unnecessary job, so this is not necessarily an infinite loop.
 
-[Stale-scope selection](packages/catalog/src/analysis-repository.ts:541) returns false for a missing stage and checks failed, but not pending, analysis status. A rescan/legacy row can retain an analysis row while losing its stage and escape the stale selection that should refresh it.
+[Stale-scope selection](../../packages/catalog/src/analysis-repository.ts) returns false for a missing stage and checks failed, but not pending, analysis status. A rescan/legacy row can retain an analysis row while losing its stage and escape the stale selection that should refresh it.
 
 **Implement:** one freshness decision shared by scope selection, coordinator, and first-mix workflow. Include source fingerprint, status, stage/version, tempo configuration, manual anchor, and canonical reference lock. Give legacy missing-stage rows an explicit migration/freshness policy. Keep force behavior separate from freshness.
 
@@ -143,7 +143,7 @@ The coordinator and repository gained `dspInputIdentity`, but [needsMixAnalysis]
 
 ### R11 — P2, code-traced: suspect filtering depends on unrelated catalog size
 
-[The pool](packages/catalog/src/planning/pool.ts) excludes `gridPhaseSuspect` tracks when the raw catalog has at least 24 rows. Missing/excluded/unusable rows count toward that threshold. Adding one irrelevant row can change eligibility of otherwise identical candidates. Contrary to the comment, a sufficiently large all-suspect library does not get a deliberate fallback; it can lose the whole pool. This is a size switch, not local confidence assessment.
+[The pool](../../packages/catalog/src/planning/pool.ts) excludes `gridPhaseSuspect` tracks when the raw catalog has at least 24 rows. Missing/excluded/unusable rows count toward that threshold. Adding one irrelevant row can change eligibility of otherwise identical candidates. Contrary to the comment, a sufficiently large all-suspect library does not get a deliberate fallback; it can lose the whole pool. This is a size switch, not local confidence assessment.
 
 The supposedly unconditional `unmixable` exclusion is also bypassed by pin readmission. An explicit pin may reasonably override a default, but that needs an explicit product contract and visible reason. DSP phase zero currently also covers cases outside the trusted offset/confidence range; unknown and measured zero should not be treated interchangeably.
 
@@ -153,9 +153,9 @@ The supposedly unconditional `unmixable` exclusion is also bypassed by pin readm
 
 ### R12 — P2, code-traced: takeover stops claims, but does not fence completion or all scratch
 
-[WorkerOwner](packages/catalog/src/worker-owner.ts:80) detects loss on heartbeat, but `stillOwned` is unused by production callers. Existing jobs continue. A new owner recovers running jobs as interrupted, while [markSucceeded](packages/catalog/src/render-job-repository.ts:230) updates by job ID without a status/owner-generation condition. A late old owner can overwrite recovery state and publish output. SQLite’s serialization of writes does not establish ownership of those writes. The current tests cover ownership-row replacement, not competing in-flight completion.
+[WorkerOwner](../../packages/catalog/src/worker-owner.ts) detects loss on heartbeat, but `stillOwned` is unused by production callers. Existing jobs continue. A new owner recovers running jobs as interrupted, while [markSucceeded](../../packages/catalog/src/render-job-repository.ts) updates by job ID without a status/owner-generation condition. A late old owner can overwrite recovery state and publish output. SQLite’s serialization of writes does not establish ownership of those writes. The current tests cover ownership-row replacement, not competing in-flight completion.
 
-Scratch ownership is wired into analysis decode, while rendering/checker files and marker-less legacy `dnb-*` roots still rely substantially on age/patterns. Several [planning](packages/catalog/test/planning.test.ts:45) and [render](packages/catalog/test/render.test.ts:36) fixtures register runtime close without deleting their roots. The original large FFmpeg cleanup fix remains valid; these are residual lifecycle gaps.
+Scratch ownership is wired into analysis decode, while rendering/checker files and marker-less legacy `dnb-*` roots still rely substantially on age/patterns. Several [planning](../../packages/catalog/test/planning.test.ts) and [render](../../packages/catalog/test/render.test.ts) fixtures register runtime close without deleting their roots. The original large FFmpeg cleanup fix remains valid; these are residual lifecycle gaps.
 
 **Implement:** carry a claim generation/token into job state transitions and final publication. Abort deposed work where possible and reject stale writes regardless. Own active output scratch as well as analysis scratch, and clean test roots in `finally`/teardown after handles close. Preserve strict resolved-path containment for every recursive cleanup; do not broaden deletion to solve leaks.
 
@@ -163,11 +163,11 @@ Scratch ownership is wired into analysis decode, while rendering/checker files a
 
 ### R13 — P2, code-traced: new public contracts repeat the schema drift problem
 
-`PlanExplanation.edited` exists in [the type](packages/domain/src/planning.ts:179) but is absent from [planExplanationSchema](packages/domain/src/contracts/planning.ts:476). Schema parsing strips the new provenance field. Repository validation currently returns the raw parsed object after checking, which masks this for database reads but does not fix schema-driven clients.
+`PlanExplanation.edited` exists in [the type](../../packages/domain/src/planning.ts) but is absent from [planExplanationSchema](../../packages/domain/src/contracts/planning.ts). Schema parsing strips the new provenance field. Repository validation currently returns the raw parsed object after checking, which masks this for database reads but does not fix schema-driven clients.
 
-The new [repair tool schema](apps/mcp-server/src/tools/planning.ts:113) describes only a small projection of its returned plan and validation: entry/transition IDs, source windows, and validation detail are not represented. Inline schemas in the MCP layer introduce another source of truth. Handler-name coverage does not prove payload round trips.
+The new [repair tool schema](../../apps/mcp-server/src/tools/planning.ts) describes only a small projection of its returned plan and validation: entry/transition IDs, source windows, and validation detail are not represented. Inline schemas in the MCP layer introduce another source of truth. Handler-name coverage does not prove payload round trips.
 
-The improved [persisted-shape error](packages/catalog/src/set-plan-repository.ts:61) suggests cloning/replanning a malformed plan, but cloning first calls the same failing `requirePlan`. Its remediation can be impossible through the public API.
+The improved [persisted-shape error](../../packages/catalog/src/set-plan-repository.ts) suggests cloning/replanning a malformed plan, but cloning first calls the same failing `requirePlan`. Its remediation can be impossible through the public API.
 
 **Implement:** shared domain contracts for inspector/comparison/repair/replay and complete explanation provenance. Add focused type/key/round-trip guards at these public boundaries. Return a full declared plan or intentionally versioned summary with enough IDs for follow-up actions. Provide a narrowly validated recovery route for corrupt explanation data, or replace the misleading recovery instruction. Do not silently accept malformed executable plan fields.
 
@@ -175,7 +175,7 @@ The improved [persisted-shape error](packages/catalog/src/set-plan-repository.ts
 
 ### R14 — P2, code-traced: comparison feasibility is evaluated on newly chosen windows
 
-[compareTransitionVariants](packages/catalog/src/service.ts:1035) asks `planTransition` for current proposals using the pair and target BPM, without supplying the saved source windows, rates, or bar count. It uses those proposals’ feasibility to decide which variants to render against the saved join. Thus F6’s shared gate can correctly reject/accept the proposed window while the comparison renders a different interval. Each preview also freezes separately, so there is no single comparison-context identity spanning the variants.
+[compareTransitionVariants](../../packages/catalog/src/service.ts) asks `planTransition` for current proposals using the pair and target BPM, without supplying the saved source windows, rates, or bar count. It uses those proposals’ feasibility to decide which variants to render against the saved join. Thus F6’s shared gate can correctly reject/accept the proposed window while the comparison renders a different interval. Each preview also freezes separately, so there is no single comparison-context identity spanning the variants.
 
 **Implement:** resolve a saved-join comparison context once: source hashes, evidence, coordinates, rates, overlap, gain reference, and variant-specific treatment. Evaluate each treatment against that same context. Clearly separate “change treatment on this window” from “propose a different window.” The inspector can show both stored and current recommendations, but must label their evidence/window identities. Preserve failures rather than silently dropping alternatives.
 
