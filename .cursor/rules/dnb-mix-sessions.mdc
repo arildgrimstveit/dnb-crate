@@ -33,8 +33,7 @@ Hard-won from the October 2026 listening sessions. Full findings also live in `d
 - Club-style pacing: 90–150s tools are good, explicitly endorsed. Do not enforce long plays.
 - Loves phrase_mix 32b joins; bass_swap 16b is the gallop antidote.
 - Hates: drumless-intro entries, energy dips between tracks, tracks that overstay (3:40+ mid-set), galloping overlaps.
-- "Unmixable" verdicts: move the file to `C:\Users\arild\Music\unmixable\`, `library:scan`, add the id + reason to `data/session-offenders.json`, and record a `feedback:rate` row with the diagnosis.
-- **Briefs must merge `data/session-offenders.json` into `excludedTrackIds`** — per-brief lists drift (the night-drive brief had silently lost six offenders).
-- **Never use `minRating` to enforce exclusions**: the pool rejects UNRATED tracks as well, and this crate is otherwise unrated — it would empty the pool.
+- "Unmixable" verdicts: move the file to `C:\Users\arild\Music\unmixable\`, `library:scan`, rate the track 1 with the diagnosis in notes (and add the id + reason to `data/session-offenders.json`), and record a `feedback:rate` row.
+- **Briefs no longer need offender exclusion lists**: `minRating: 2` plus the catalog ratings replaces the per-brief merge. The registry file stays as the human-readable record of why each track is rated 1.- **Briefs set `minRating: 2` and rate offenders 1 in the catalog** (see `data/session-offenders.json` for the reason registry). `minRating` is null-safe in the planning pool since 2026-10: unrated tracks pass, only explicitly-rated-bad are excluded. Search's `minRating` stays rated-only browsing — do not "fix" it to match.
 - Keeper copies of final mixes: transcode the listen FLAC with ffmpeg to 256k AAC (`.m4a`) named `<mix>-keeper.m4a` in `output/renders/`.
 - After adding test files, run `tsc --noEmit -p <package>/tsconfig.json` (tests are included there) — vitest does not typecheck, and windows-smoke will catch it otherwise.

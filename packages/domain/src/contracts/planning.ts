@@ -209,7 +209,15 @@ export const createSetPlanInputSchema = z.object({
   preferredSubgenres: stringListSchema.optional(),
   preferredTags: stringListSchema.optional(),
   preferredArtists: z.array(z.string().min(1).max(200)).max(20).optional(),
-  minRating: z.number().int().min(1).max(5).optional(),
+  minRating: z
+    .number()
+    .int()
+    .min(1)
+    .max(5)
+    .optional()
+    .describe(
+      "Exclude tracks explicitly rated below this (1-5). Unrated tracks are NOT excluded — use this to keep known-bad material out, not to require ratings.",
+    ),
   artistRepeatSpacing: z
     .number()
     .int()

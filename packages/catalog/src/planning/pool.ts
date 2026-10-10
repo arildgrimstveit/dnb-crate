@@ -94,11 +94,23 @@ export function buildPlanningPool(
         rejected.push({ trackId: track.id, title: track.title, reason: "EXCLUDED_ARTIST" });
         return false;
       }
+      // minRating excludes explicitly-rated-bad material; UNRATED tracks pass.
+      // The 2026-10 sessions showed the old null-rejecting semantics was a
+      // footgun: a mostly-unrated crate emptied the pool on any minRating.
+      // Search keeps rated-only browsing; the pool wants "exclude known bad".
       if (
         input.minRating !== undefined &&
-        (track.rating === null || track.rating < input.minRating)
+        track.rating !== null &&
+        track.rating < input.minRating
       ) {
         rejected.push({ trackId: track.id, title: track.title, reason: "BELOW_MIN_RATING" });
+        return false;
+      }
+      // The owner's explicit "unmixable" verdict (rated after audition:
+      // joins fine, song doesn't work in mixes). Unconditional — no brief
+      // should have to opt out of a verdict the owner recorded by ear.
+      if ((track.tags ?? []).some((tag) => tag.toLowerCase() === "unmixable")) {
+        rejected.push({ trackId: track.id, title: track.title, reason: "UNMIXABLE_TAG" });
         return false;
       }
       const analysis = analyses.get(track.id);
