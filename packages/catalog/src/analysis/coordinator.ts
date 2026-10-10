@@ -65,6 +65,9 @@ export function stripGridIndexedFeatures(row: StoredTrackAnalysis): StoredTrackA
 
 export class AnalysisCoordinator {
   canRun: () => boolean = () => true;
+  /** R12: current worker-owner claim token (null when deposed); claims and
+   * completion writes are fenced against it. */
+  ownerToken: () => string | null = () => null;
   private readonly active = new Set<Promise<void>>();
   private running = 0;
   private abort = new AbortController();
@@ -193,7 +196,7 @@ export class AnalysisCoordinator {
     if (this.stopped || !this.canRun() || this.running > 0) {
       return;
     }
-    const claimed = this.jobs.claimNextQueued();
+    const claimed = this.jobs.claimNextQueued(this.ownerToken());
     if (!claimed) {
       return;
     }
@@ -261,6 +264,7 @@ export class AnalysisCoordinator {
             },
             completed,
             failed,
+            this.ownerToken(),
           );
           return;
         }
@@ -301,7 +305,16 @@ export class AnalysisCoordinator {
           );
         }
       }
-      this.jobs.markSucceeded(job.id, completed, failed);
+      // R12: a deposed owner discards its result instead of writing over
+      // takeover recovery; the repository fence covers the write race.
+      if (this.ownerToken() == null) {
+        this.logger.warn(
+          { jobId: job.id },
+          "Analysis finished after worker ownership was lost; discarding result",
+        );
+        return;
+      }
+      this.jobs.markSucceeded(job.id, completed, failed, this.ownerToken());
     } catch (error) {
       const mapped = isDomainError(error)
         ? error
@@ -315,6 +328,7 @@ export class AnalysisCoordinator {
         { code: mapped.code, message: mapped.message, retryable: mapped.retryable },
         completed,
         failed,
+        this.ownerToken(),
       );
     } finally {
       // Pending decodes own temporary files and must settle before shutdown completes.

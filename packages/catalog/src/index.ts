@@ -122,7 +122,9 @@ export function createCatalogRuntime(
   renders.canRun = canRun;
   renders.ownerToken = () => (ownsWorker && !closing ? owner.currentToken() : null);
   analysis.canRun = canRun;
+  analysis.ownerToken = () => (ownsWorker && !closing ? owner.currentToken() : null);
   enrichment.canRun = canRun;
+  enrichment.ownerToken = () => (ownsWorker && !closing ? owner.currentToken() : null);
   const feedback = new FeedbackRepository(db);
   const recipes = new ApprovedRecipeRepository(db);
   const service = new CatalogService(

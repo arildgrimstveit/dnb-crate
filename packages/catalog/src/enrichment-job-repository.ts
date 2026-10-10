@@ -70,7 +70,7 @@ export class EnrichmentJobRepository {
     return job;
   }
 
-  claimNextQueued(): EnrichmentJob | null {
+  claimNextQueued(ownerToken?: string | null): EnrichmentJob | null {
     const row = this.db
       .prepare(
         `SELECT * FROM enrichment_jobs WHERE status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1`,
@@ -81,12 +81,12 @@ export class EnrichmentJobRepository {
     }
     const result = this.db
       .prepare(
-        `UPDATE enrichment_jobs SET status = 'running', started_at = ?, progress = 0
+        `UPDATE enrichment_jobs SET status = 'running', started_at = ?, progress = 0, claimed_by = ?
          WHERE id = ? AND status = 'queued'`,
       )
-      .run(nowIso(), row.id);
+      .run(nowIso(), ownerToken ?? null, row.id);
     if (result.changes === 0) {
-      return this.claimNextQueued();
+      return this.claimNextQueued(ownerToken);
     }
     return this.require(row.id);
   }
@@ -112,15 +112,38 @@ export class EnrichmentJobRepository {
       );
   }
 
-  markSucceeded(id: string, completedTrackIds: string[], failedTrackIds: string[]): EnrichmentJob {
-    this.db
+  markSucceeded(
+    id: string,
+    completedTrackIds: string[],
+    failedTrackIds: string[],
+    ownerToken?: string | null,
+  ): EnrichmentJob {
+    // R12 fencing: only the owner that claimed the job completes it.
+    const result = this.db
       .prepare(
         `UPDATE enrichment_jobs SET
           status = 'succeeded', progress = 1, completed_ids_json = ?, failed_ids_json = ?,
           error_code = NULL, error_message = NULL, retryable = 0, completed_at = ?
-         WHERE id = ?`,
+         WHERE id = ? AND status = 'running' AND claimed_by IS ?`,
       )
-      .run(JSON.stringify(completedTrackIds), JSON.stringify(failedTrackIds), nowIso(), id);
+      .run(
+        JSON.stringify(completedTrackIds),
+        JSON.stringify(failedTrackIds),
+        nowIso(),
+        id,
+        ownerToken ?? null,
+      );
+    if (result.changes === 0) {
+      const current = this.require(id);
+      if (current.status === "succeeded") {
+        return current;
+      }
+      throw new DomainError(
+        "ENRICHMENT_FAILED",
+        `Enrichment job ${id} was interrupted or taken over by another worker; result discarded`,
+        { retryable: true, details: { jobId: id, status: current.status } },
+      );
+    }
     return this.require(id);
   }
 
@@ -129,13 +152,15 @@ export class EnrichmentJobRepository {
     error: { code: string; message: string; retryable: boolean },
     completedTrackIds: string[],
     failedTrackIds: string[],
+    ownerToken?: string | null,
   ): EnrichmentJob {
+    // R12 fencing, best-effort like the render repository.
     this.db
       .prepare(
         `UPDATE enrichment_jobs SET
           status = 'failed', error_code = ?, error_message = ?, retryable = ?,
           completed_ids_json = ?, failed_ids_json = ?, completed_at = ?
-         WHERE id = ? AND status IN ('queued', 'running')`,
+         WHERE id = ? AND status IN ('queued', 'running') AND claimed_by IS ?`,
       )
       .run(
         error.code,
@@ -145,6 +170,7 @@ export class EnrichmentJobRepository {
         JSON.stringify(failedTrackIds),
         nowIso(),
         id,
+        ownerToken ?? null,
       );
     return this.require(id);
   }

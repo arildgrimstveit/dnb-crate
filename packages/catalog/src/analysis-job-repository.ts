@@ -83,7 +83,7 @@ export class AnalysisJobRepository {
     return job;
   }
 
-  claimNextQueued(): AnalysisJob | null {
+  claimNextQueued(ownerToken?: string | null): AnalysisJob | null {
     const row = this.db
       .prepare(
         `SELECT * FROM analysis_jobs WHERE status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1`,
@@ -94,12 +94,12 @@ export class AnalysisJobRepository {
     }
     const result = this.db
       .prepare(
-        `UPDATE analysis_jobs SET status = 'running', started_at = ?, progress = 0
+        `UPDATE analysis_jobs SET status = 'running', started_at = ?, progress = 0, claimed_by = ?
          WHERE id = ? AND status = 'queued'`,
       )
-      .run(nowIso(), row.id);
+      .run(nowIso(), ownerToken ?? null, row.id);
     if (result.changes === 0) {
-      return this.claimNextQueued();
+      return this.claimNextQueued(ownerToken);
     }
     return this.require(row.id);
   }
@@ -123,15 +123,38 @@ export class AnalysisJobRepository {
       );
   }
 
-  markSucceeded(id: string, completedTrackIds: string[], failedTrackIds: string[]): AnalysisJob {
-    this.db
+  markSucceeded(
+    id: string,
+    completedTrackIds: string[],
+    failedTrackIds: string[],
+    ownerToken?: string | null,
+  ): AnalysisJob {
+    // R12 fencing: only the owner that claimed the job completes it.
+    const result = this.db
       .prepare(
         `UPDATE analysis_jobs SET
           status = 'succeeded', progress = 1, completed_ids_json = ?, failed_ids_json = ?,
           error_code = NULL, error_message = NULL, retryable = 0, completed_at = ?
-         WHERE id = ? AND status = 'running'`,
+         WHERE id = ? AND status = 'running' AND claimed_by IS ?`,
       )
-      .run(JSON.stringify(completedTrackIds), JSON.stringify(failedTrackIds), nowIso(), id);
+      .run(
+        JSON.stringify(completedTrackIds),
+        JSON.stringify(failedTrackIds),
+        nowIso(),
+        id,
+        ownerToken ?? null,
+      );
+    if (result.changes === 0) {
+      const current = this.require(id);
+      if (current.status === "succeeded") {
+        return current;
+      }
+      throw new DomainError(
+        "ANALYSIS_FAILED",
+        `Analysis job ${id} was interrupted or taken over by another worker; result discarded`,
+        { retryable: true, details: { jobId: id, status: current.status } },
+      );
+    }
     return this.require(id);
   }
 
@@ -140,13 +163,16 @@ export class AnalysisJobRepository {
     error: { code: string; message: string; retryable: boolean },
     completedTrackIds: string[],
     failedTrackIds: string[],
+    ownerToken?: string | null,
   ): AnalysisJob {
+    // R12 fencing, best-effort like the render repository: a stale write
+    // leaves takeover recovery state in place.
     this.db
       .prepare(
         `UPDATE analysis_jobs SET
           status = 'failed', error_code = ?, error_message = ?, retryable = ?,
           completed_ids_json = ?, failed_ids_json = ?, completed_at = ?
-         WHERE id = ? AND status IN ('queued', 'running')`,
+         WHERE id = ? AND status IN ('queued', 'running') AND claimed_by IS ?`,
       )
       .run(
         error.code,
@@ -156,6 +182,7 @@ export class AnalysisJobRepository {
         JSON.stringify(failedTrackIds),
         nowIso(),
         id,
+        ownerToken ?? null,
       );
     return this.require(id);
   }

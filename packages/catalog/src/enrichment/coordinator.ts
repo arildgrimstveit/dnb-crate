@@ -53,6 +53,9 @@ function foldDeezerBpm(bpm: number, isDnb: boolean): number {
 
 export class EnrichmentCoordinator {
   canRun: () => boolean = () => true;
+  /** R12: current worker-owner claim token (null when deposed); claims and
+   * completion writes are fenced against it. */
+  ownerToken: () => string | null = () => null;
   private readonly active = new Set<Promise<void>>();
   private running = 0;
   private stopped = false;
@@ -181,7 +184,7 @@ export class EnrichmentCoordinator {
     if (this.stopped || !this.canRun() || this.running > 0) {
       return;
     }
-    const claimed = this.jobs.claimNextQueued();
+    const claimed = this.jobs.claimNextQueued(this.ownerToken());
     if (!claimed) {
       return;
     }
@@ -214,6 +217,7 @@ export class EnrichmentCoordinator {
             { code: "ENRICHMENT_FAILED", message: "Enrichment job stopped", retryable: true },
             completed,
             failed,
+            this.ownerToken(),
           );
           return;
         }
@@ -227,7 +231,16 @@ export class EnrichmentCoordinator {
         }
         this.jobs.updateProgress(job.id, (i + 1) / job.trackIds.length, completed, failed, null);
       }
-      this.jobs.markSucceeded(job.id, completed, failed);
+      // R12: a deposed owner discards its result instead of writing over
+      // takeover recovery; the repository fence covers the write race.
+      if (this.ownerToken() == null) {
+        this.logger.warn(
+          { jobId: job.id },
+          "Enrichment finished after worker ownership was lost; discarding result",
+        );
+        return;
+      }
+      this.jobs.markSucceeded(job.id, completed, failed, this.ownerToken());
     } catch (error) {
       const mapped = isDomainError(error)
         ? error
@@ -241,6 +254,7 @@ export class EnrichmentCoordinator {
         { code: mapped.code, message: mapped.message, retryable: mapped.retryable },
         completed,
         failed,
+        this.ownerToken(),
       );
     }
   }
