@@ -3388,6 +3388,16 @@ describe("join inspector (batch 9)", () => {
       transitionId: transition.id,
     });
     expect(before.context.source).toBe("saved-join");
+    expect(before.context.loudness).toBe("identical-gain-staging");
+    // R14: one frozen comparison context identity spans every variant —
+    // stable across a second comparison of the same join under an
+    // unchanged plan, and distinct per join.
+    expect(before.context.identity).toMatch(/^[0-9a-f]{64}$/);
+    const again = await catalog.service.compareTransitionVariants({
+      setPlanId: created.plan.id,
+      transitionId: transition.id,
+    });
+    expect(again.context.identity).toBe(before.context.identity);
     const beforePhrase = before.variants.find((v) => v.template === "phrase_mix")!;
     expect(beforePhrase.feasible).toBe(true);
 

@@ -124,6 +124,18 @@ export async function run(
             variant.status = done.status;
             variant.errorCode = done.errorCode ?? null;
             variant.errorMessage = done.errorMessage ?? null;
+            if (done.status === "succeeded") {
+              // R14: measured loudness per finished variant — comparable
+              // loudness is identical gain staging, so differences in the
+              // measurement are the treatments, not gain changes.
+              try {
+                const manifest = runtime.service.getRenderManifest(variant.jobId);
+                variant.integratedLufs = manifest.integratedLufs;
+                variant.truePeakDb = manifest.truePeakDb;
+              } catch {
+                // Manifest unavailable (cached clone); lifecycle still reported.
+              }
+            }
           } catch (error) {
             variant.status = "timeout";
             variant.errorCode = "RENDER_FAILED";

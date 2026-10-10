@@ -79,6 +79,7 @@ import {
 } from "@dnb-crate/audio-renderer";
 
 import { assertFrozenAudioIdentity, hashRubberbandCli } from "./engine-identity.ts";
+import { runSourceDeckProbes } from "./deck-probe.ts";
 import {
   evaluateDurationError,
   firstDropMs,
@@ -111,12 +112,7 @@ import type { FrozenRenderRequest } from "../render-job-repository.ts";
 import type { SetPlanRepository } from "../set-plan-repository.ts";
 import type { RenderJobRepository, StoredRenderJob } from "../render-job-repository.ts";
 import type { AnalysisRepository } from "../analysis-repository.ts";
-import {
-  diagnoseRenderedMix,
-  lowpass,
-  onsetTimesMs,
-  verifyDeckAlignment,
-} from "./audio-diagnostics.ts";
+import { diagnoseRenderedMix } from "./audio-diagnostics.ts";
 
 export type RenderCheckJoin = {
   order: number;
@@ -338,6 +334,18 @@ function previewCacheIdentity(
   return sha256Json({ kind: "preview" as const, request, ...extras });
 }
 
+/** R14: identity of ONE comparison context — the frozen request (evidence,
+ * source hashes, settings) plus the join and listening window, WITHOUT the
+ * variant-specific treatment. Every variant preview rendered from the same
+ * shared request reports this same identity, so artifacts and blockers are
+ * attributable to one common context. */
+export function comparisonContextIdentity(
+  request: FrozenRenderRequest,
+  extras: { transitionId: string; windowMs: number | null },
+): string {
+  return sha256Json({ kind: "comparison-context" as const, request, ...extras });
+}
+
 export class RenderCoordinator {
   canRun: () => boolean = () => true;
   /** R12: the current worker-owner claim token, or null when this runtime
@@ -544,6 +552,38 @@ export class RenderCoordinator {
     return { job: toPublicJob(job), warnings };
   }
 
+  /** Freeze the render request for a plan once (R14): callers rendering
+   * several variants of the same join share this single comparison context —
+   * same evidence, source hashes, and settings — instead of freezing (and
+   * re-hashing every source file) per variant. With
+   * tolerateUnreadableSources, an unreadable source skips its content hash
+   * instead of failing the whole freeze: variant previews report the exact
+   * readiness failure per variant (R2), and nothing weakened ever reaches
+   * execution because enqueue fails first. */
+  async freezeRequest(
+    setPlanId: string,
+    options?: { tolerateUnreadableSources?: boolean },
+  ): Promise<FrozenRenderRequest> {
+    const stored = this.requirePlan(setPlanId);
+    const hashForTrack = async (trackId: string): Promise<string | null> => {
+      if (options?.tolerateUnreadableSources !== true) {
+        return this.sourceHashForTrack(trackId);
+      }
+      try {
+        return await this.sourceHashForTrack(trackId);
+      } catch {
+        return null;
+      }
+    };
+    return freezeRenderRequest(
+      stored.plan,
+      this.analyses,
+      this.tracks,
+      this.settings,
+      hashForTrack,
+    );
+  }
+
   async startPreview(input: {
     setPlanId: string;
     transitionId: string;
@@ -551,6 +591,8 @@ export class RenderCoordinator {
     template?: "crossfade" | "phrase_mix" | "bass_swap";
     barCount?: 8 | 16 | 32;
     allowLowConfidence?: boolean;
+    /** Shared frozen request from freezeRequest(setPlanId); see R14. */
+    request?: FrozenRenderRequest;
   }): Promise<{ job: RenderJob; warnings: string[] }> {
     const stored = this.requirePlan(input.setPlanId);
     const pair = findTransitionPair(stored.plan, input.transitionId);
@@ -589,13 +631,20 @@ export class RenderCoordinator {
       );
     }
     const windowMs = input.windowMs ?? this.settings.previewWindowMs;
-    const request = await freezeRenderRequest(
-      stored.plan,
-      this.analyses,
-      this.tracks,
-      this.settings,
-      (trackId) => this.sourceHashForTrack(trackId),
-    );
+    // R14: a caller may supply ONE frozen request so a set of related
+    // previews (variant comparison) shares a single comparison-context
+    // identity instead of re-freezing — and re-hashing every source file —
+    // per variant. The supplied request must be for this plan; it is the
+    // caller's responsibility to freeze via freezeRequest(setPlanId).
+    const request =
+      input.request ??
+      (await freezeRenderRequest(
+        stored.plan,
+        this.analyses,
+        this.tracks,
+        this.settings,
+        (trackId) => this.sourceHashForTrack(trackId),
+      ));
     const cacheKey = previewCacheIdentity(request, {
       windowMs,
       template: input.template ?? pair.outgoing.transitionToNext?.type ?? "crossfade",
@@ -980,202 +1029,20 @@ export class RenderCoordinator {
         }
       }
     }
-    // Independent deck alignment (batch 7, F2 step 2): decode each deck's OWN
-    // placed source window and compare the measured onset trains in output
-    // time. Each train is deck-attributed by construction, so inter-deck
-    // phase errors — including whole-beat kick/snare offsets — are visible
-    // where a mixed-waveform scan cannot attribute anything. "fast" probes a
-    // 10 s window at the overlap midpoint (2 decodes per aligned join);
-    // "full" covers the whole overlap and also reports start/end-half drift.
-    // Findings stay ADVISORY until calibrated on the labeled corpus; a
-    // measured result never clears the geometric residual yet. They are
-    // reported on the join rows (audioStatus/audioFindings) and deliberately
-    // NOT in the top-level warnings list: that channel gates first-mix
-    // workflows, and uncalibrated deck verdicts must not fail them — nor
-    // vary with the local ffmpeg build.
-    const deckProbed = new Set<number>();
+    // Independent deck alignment (batch 7, F2 step 2) — extracted to
+    // render/deck-probe.ts. Findings stay ADVISORY: reported on the join
+    // rows only, never in the top-level warnings list that gates first-mix
+    // workflows; a measured result never clears the geometric residual.
     const audioMode = options?.audioVerification ?? "fast";
-    if (audioMode !== "off") {
-      for (const join of joins) {
-        if (
-          (join.template !== "phrase_mix" && join.template !== "bass_swap") ||
-          join.overlapAtMs == null
-        ) {
-          continue;
-        }
-        const outgoingRow = manifest.tracks[join.order];
-        const incomingRow = manifest.tracks[join.order + 1];
-        if (!outgoingRow || !incomingRow) {
-          continue;
-        }
-        const outTrack = this.tracks.findById(outgoingRow.trackId);
-        const inTrack = this.tracks.findById(incomingRow.trackId);
-        if (!outTrack || !inTrack) {
-          join.audioUnmeasuredReason = "source-deck probe skipped: source track missing";
-          continue;
-        }
-        const overlapOutMs = outgoingRow.overlapToNextMs ?? 0;
-        if (overlapOutMs <= 0) {
-          continue;
-        }
-        const outRate = outgoingRow.playbackRate > 0 ? outgoingRow.playbackRate : 1;
-        const inRate = incomingRow.playbackRate > 0 ? incomingRow.playbackRate : 1;
-        const outOverlapStartSource =
-          outgoingRow.sourceEndMs - outputToSourceMs(overlapOutMs, outRate);
-        const probeMs = audioMode === "fast" ? Math.min(10_000, overlapOutMs) : overlapOutMs;
-        const probeOffsetMs = audioMode === "fast" ? Math.max(0, (overlapOutMs - probeMs) / 2) : 0;
-        const outProbeSourceStart =
-          outOverlapStartSource + outputToSourceMs(probeOffsetMs, outRate);
-        const inProbeSourceStart =
-          incomingRow.sourceStartMs + outputToSourceMs(probeOffsetMs, inRate);
-        const token = crypto.randomUUID().slice(0, 8);
-        const outPcm = `${outputPath}.deck-out-${join.order}-${token}.pcm`;
-        const inPcm = `${outputPath}.deck-in-${join.order}-${token}.pcm`;
-        try {
-          const decodeDeck = async (filePath: string, startSourceMs: number, rate: number) => {
-            const temp = filePath === outTrack.filePath ? outPcm : inPcm;
-            const run = await runner.run({
-              executable: binaries.ffmpegPath,
-              args: [
-                "-nostdin",
-                "-hide_banner",
-                "-y",
-                "-ss",
-                (Math.max(0, startSourceMs) / 1000).toFixed(3),
-                "-t",
-                ((probeMs * rate) / 1000).toFixed(3),
-                "-i",
-                filePath,
-                "-f",
-                "f32le",
-                "-ac",
-                "1",
-                "-ar",
-                "22050",
-                temp,
-              ],
-            });
-            if (run.exitCode !== 0) {
-              return null;
-            }
-            const buffer = await readFile(temp);
-            const samples = new Float32Array(buffer.length / 4);
-            for (let i = 0; i < samples.length; i += 1) {
-              samples[i] = buffer.readFloatLE(i * 4);
-            }
-            if (samples.length < 22_050) {
-              return [];
-            }
-            // Kick-band onsets (calibration 9 October 2026): full-band
-            // trains timed vocals and pads — the verifier's first two
-            // candidate catches were auditioned false positives on
-            // vocal-heavy material. A 180 Hz low-pass keeps the kick
-            // (and the bass it lands on) as the timing authority.
-            const kick = lowpass(samples, 22_050, 180);
-            // Source-time onsets in PROBE-LOCAL time (not shifted by
-            // probeOffsetMs — the grids are shifted instead; R5 fix).
-            return onsetTimesMs(kick, 22_050).map((time) => time / rate);
-          };
-          const outgoingOnsets = await decodeDeck(
-            path.resolve(outTrack.filePath),
-            outProbeSourceStart,
-            outRate,
-          );
-          const incomingOnsets = await decodeDeck(
-            path.resolve(inTrack.filePath),
-            inProbeSourceStart,
-            inRate,
-          );
-          if (outgoingOnsets == null || incomingOnsets == null) {
-            join.audioUnmeasuredReason = "source-deck probe decode failed";
-            continue;
-          }
-          // Beat-lock each train to its own deck's PROJECTED grid before
-          // comparing: raw full-band onset clouds pair musical content
-          // (hats, vocals, snares), not beats, and drown the phase
-          // measurement (measured on the first calibration run). Locking to
-          // the own-deck grid keeps the measurement about PLACEMENT between
-          // the decks; a stored grid that disagrees with its own audio
-          // leaves too few locked onsets and the join abstains instead of
-          // guessing.
-          const evidenceJoin = manifest.joinEvidence?.find(
-            (item) =>
-              item.outgoingTrackId === outgoingRow.trackId &&
-              item.incomingTrackId === incomingRow.trackId,
-          );
-          // R5 fix: use ONE coordinate system — probe-local time — for
-          // grids, onsets, and drift halves. Previously onsets were shifted
-          // by probeOffsetMs into overlap-relative time while grids were
-          // filtered from the overlap start, so fast-mode probes on long
-          // overlaps compared disjoint time ranges (32-bar midpoint probe:
-          // onsets at 17–27 s into the overlap, grids at 0–10.5 s).
-          const outGridMs = (evidenceJoin?.outgoingBeatsMs ?? [])
-            .map((time) => (time - outOverlapStartSource) / outRate - probeOffsetMs)
-            .filter((time) => time >= -500 && time < probeMs + 500);
-          const inGridMs = (evidenceJoin?.incomingBeatsMs ?? [])
-            .map((time) => (time - incomingRow.sourceStartMs) / inRate - probeOffsetMs)
-            .filter((time) => time >= -500 && time < probeMs + 500);
-          const nearGrid = (onsets: number[], grid: number[]) =>
-            onsets.filter((time) => grid.some((beat) => Math.abs(beat - time) <= 100));
-          const lockedOut = nearGrid(outgoingOnsets, outGridMs);
-          const lockedIn = nearGrid(incomingOnsets, inGridMs);
-          // True beat period from the frozen grid (the alignment period can
-          // be a bar or a whole phrase, which would disable bar wrapping).
-          const beatDeltas = outGridMs
-            .slice(1)
-            .map((time, i) => time - (outGridMs[i] ?? 0))
-            .filter((delta) => delta > 100 && delta < 1000)
-            .sort((a, b) => a - b);
-          const beatPeriodMs =
-            beatDeltas.length > 0 ? beatDeltas[Math.floor(beatDeltas.length / 2)]! : 345;
-          const verification = verifyDeckAlignment({
-            outgoingOnsetsMs: lockedOut,
-            incomingOnsetsMs: lockedIn,
-            overlapMs: probeMs,
-            beatPeriodMs,
-          });
-          deckProbed.add(join.order);
-          join.audioStatus = verification.status;
-          join.audioUnmeasuredReason =
-            verification.status === "unmeasured" ? (verification.reasons[0] ?? null) : null;
-          if (verification.status !== "pass") {
-            join.audioFindings = [
-              ...join.audioFindings,
-              ...verification.reasons.map((reason) => `deck alignment: ${reason}`),
-            ];
-          }
-        } catch (error) {
-          deckProbed.add(join.order);
-          join.audioUnmeasuredReason = `source-deck probe failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`;
-        } finally {
-          await unlink(outPcm).catch(() => undefined);
-          await unlink(inPcm).catch(() => undefined);
-        }
-      }
-    }
-    // R6: every still-unmeasured join that the probe did not touch gets an
-    // accurate reason for its actual state — off, not applicable, or no
-    // eligible overlap. Joins the probe measured carry the verifier's own
-    // reasons; the mixed-decode scan wrote its specific skip/decode reasons
-    // earlier and those stay untouched. "off" wins over template
-    // applicability: when the mode is disabled, that is why nothing ran.
-    for (const join of joins) {
-      if (join.audioStatus !== "unmeasured" || deckProbed.has(join.order)) {
-        continue;
-      }
-      if (join.audioUnmeasuredReason != null) {
-        continue;
-      }
-      if (audioMode === "off") {
-        join.audioUnmeasuredReason = "source-deck probe off (audioVerification=off)";
-      } else if (join.template !== "phrase_mix" && join.template !== "bass_swap") {
-        join.audioUnmeasuredReason = "source-deck probe not applicable: no aligned decks";
-      } else {
-        join.audioUnmeasuredReason = "source-deck probe skipped: no eligible overlap window";
-      }
-    }
+    const deckProbed = await runSourceDeckProbes({
+      joins,
+      manifest,
+      outputPath,
+      audioMode,
+      runner,
+      binaries,
+      trackById: (trackId) => this.tracks.findById(trackId) ?? undefined,
+    });
     // The stored-grid residual stands unless the user overrides it. An
     // inconclusive audio scan is absence of evidence and must not act as
     // proof of corrected alignment; the deck verifier is advisory until its

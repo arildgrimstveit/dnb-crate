@@ -96,6 +96,10 @@ export function registerPlanningTools(server: McpServer, service: CatalogService
             durationMs: z.number(),
             targetBpm: z.number().nullable(),
             rates: z.object({ outgoing: z.number(), incoming: z.number() }),
+            /** One frozen comparison context spans every variant preview
+             * (R14): shared request, join, and window — treatment-free. */
+            identity: z.string(),
+            loudness: z.literal("identical-gain-staging"),
           }),
           variants: z.array(
             z.object({
@@ -111,6 +115,8 @@ export function registerPlanningTools(server: McpServer, service: CatalogService
               status: z.string(),
               errorCode: z.string().nullable(),
               errorMessage: z.string().nullable(),
+              integratedLufs: z.number().nullable().optional(),
+              truePeakDb: z.number().nullable().optional(),
             }),
           ),
         }),

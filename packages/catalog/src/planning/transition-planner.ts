@@ -65,7 +65,7 @@ export type ValidateTransitionInput = {
   maxTempoDeviation?: number;
 };
 
-type TrackBundle = {
+export type TrackBundle = {
   track: Track;
   analysis: StoredTrackAnalysis | null;
   cues: CuePoint[];
