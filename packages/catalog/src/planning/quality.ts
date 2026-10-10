@@ -55,12 +55,25 @@ function keyEvidence(
   track: Track | undefined,
   evidence: TrackQualityEvidence | undefined,
 ): JoinKeyEvidence {
+  // R9: a present evidence row owns its nulls. Queued quality must not
+  // resurrect live metadata for values the frozen snapshot recorded as
+  // unknown; the live track fallback applies only when no evidence row
+  // exists for the track at all.
+  if (evidence) {
+    return {
+      musicalKey: evidence.musicalKey,
+      camelotKey: evidence.camelotKey,
+      source: evidence.keySource,
+      confidence: evidence.keyConfidence,
+      analyzerName: evidence.keyAnalyzerName,
+    };
+  }
   return {
-    musicalKey: evidence?.musicalKey ?? track?.musicalKey ?? null,
-    camelotKey: evidence?.camelotKey ?? track?.camelotKey ?? null,
-    source: evidence?.keySource ?? track?.keySource ?? null,
-    confidence: evidence?.keyConfidence ?? 0,
-    analyzerName: evidence?.keyAnalyzerName ?? null,
+    musicalKey: track?.musicalKey ?? null,
+    camelotKey: track?.camelotKey ?? null,
+    source: track?.keySource ?? null,
+    confidence: 0,
+    analyzerName: null,
   };
 }
 

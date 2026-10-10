@@ -72,41 +72,76 @@ export function qualityForPlan(
   const keyConfidence = keyConfidenceByTrackId(ctx);
   const firstDropStart = firstDropStartMsByTrackId(ctx);
   const evidenceByTrackId = qualityEvidenceByTrackId(ctx);
-  const effectiveEnergy = effectiveEnergyByTrackId(ctx);
+  // R9: null-capable so a frozen "absent" can be recorded distinctly from
+  // "no information" — validation treats a recorded null as unknown energy
+  // instead of falling back to live metadata.
+  const effectiveEnergy = new Map<string, number | null>(effectiveEnergyByTrackId(ctx));
+  // Frozen camelot keys/sources for the clash check: only populated from
+  // snapshot rows, so the live path is untouched.
+  const camelotKey = new Map<string, string | null>();
+  const keySource = new Map<string, string | null>();
   if (evidence) {
     for (const [trackId, row] of Object.entries(evidence)) {
       if (!isFrozenSnapshot(row)) {
         continue;
       }
+      // Absent stays absent (R9): a frozen null is RECORDED absence, not
+      // permission to fall through to later live analysis. Number values
+      // override live; null values delete the live entry so validation's
+      // optional lookups see "unknown", matching what the queue-time
+      // snapshot actually knew.
       if (typeof row.audioEndMs === "number") {
         audioEnd.set(trackId, row.audioEndMs);
+      } else {
+        audioEnd.delete(trackId);
       }
-      if (typeof row.canonical?.keyConfidence === "number") {
-        keyConfidence.set(trackId, row.canonical.keyConfidence);
-      } else if (typeof row.keyConfidence === "number") {
-        keyConfidence.set(trackId, row.keyConfidence);
+      const frozenKeyConfidence =
+        typeof row.canonical?.keyConfidence === "number"
+          ? row.canonical.keyConfidence
+          : typeof row.keyConfidence === "number"
+            ? row.keyConfidence
+            : null;
+      if (frozenKeyConfidence != null) {
+        keyConfidence.set(trackId, frozenKeyConfidence);
+      } else {
+        keyConfidence.delete(trackId);
       }
       if (typeof row.canonical?.effectiveEnergy === "number") {
         effectiveEnergy.set(trackId, row.canonical.effectiveEnergy);
+      } else if (row.canonical != null) {
+        effectiveEnergy.set(trackId, null);
       }
       const drops = row.sections.filter((section) => section.type === "drop");
       const drop = drops[0];
       if (drop && Number.isFinite(drop.startMs)) {
         firstDropStart.set(trackId, drop.startMs);
+      } else {
+        firstDropStart.delete(trackId);
       }
+      // F4b/R9: the frozen CANONICAL block governs queued quality when
+      // present — including its nulls. A canonical musicalKey of null means
+      // "unknown at queue time" and must not resurrect later live metadata.
+      // Legacy requests without the block keep the previous row-derived
+      // values.
+      const canonical = row.canonical ?? null;
       const track = tracksById.get(trackId);
-      // F4b: the frozen CANONICAL block governs queued quality — manual/
-      // published keys and BPM keep their precedence over the analyzed row,
-      // and later catalog edits cannot change a queued plan's result.
-      // Legacy requests without it keep the previous row-derived values.
-      const canonical = row.canonical;
+      // The clash check reads the same frozen values: a canonical block
+      // (present) owns camelot/source including nulls; legacy rows fall
+      // back to the row, then to the live track as before.
+      camelotKey.set(
+        trackId,
+        canonical != null ? canonical.camelotKey : (row.camelotKey ?? track?.camelotKey ?? null),
+      );
+      keySource.set(trackId, canonical != null ? canonical.keySource : (track?.keySource ?? null));
       evidenceByTrackId.set(trackId, {
-        musicalKey: canonical?.musicalKey ?? row.musicalKey ?? track?.musicalKey ?? null,
-        camelotKey: canonical?.camelotKey ?? row.camelotKey ?? track?.camelotKey ?? null,
-        keySource: canonical?.keySource ?? track?.keySource ?? null,
-        keyConfidence: canonical?.keyConfidence ?? row.keyConfidence ?? 0,
+        musicalKey:
+          canonical != null ? canonical.musicalKey : (row.musicalKey ?? track?.musicalKey ?? null),
+        camelotKey:
+          canonical != null ? canonical.camelotKey : (row.camelotKey ?? track?.camelotKey ?? null),
+        keySource: canonical != null ? canonical.keySource : (track?.keySource ?? null),
+        keyConfidence: frozenKeyConfidence ?? 0,
         keyAnalyzerName: canonical?.keyAnalyzerName ?? row.keyEngine ?? null,
-        nativeBpm: canonical?.nativeBpm ?? row.bpm,
+        nativeBpm: canonical != null ? canonical.nativeBpm : row.bpm,
         gridOk: row.present && !row.gridRejected,
         gridEngine: canonical?.gridEngine ?? row.rhythmEngine ?? null,
       });
@@ -118,6 +153,8 @@ export function qualityForPlan(
     effectiveEnergyByTrackId: effectiveEnergy,
     keyConfidenceByTrackId: keyConfidence,
     firstDropStartMsByTrackId: firstDropStart,
+    camelotKeyByTrackId: camelotKey,
+    keySourceByTrackId: keySource,
   });
   return qualityFor(ctx, plan, { validation, evidenceByTrackId });
 }

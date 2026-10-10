@@ -4,7 +4,12 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DSP_ANALYZER_NAME, DSP_ANALYZER_VERSION, type AppConfig } from "@dnb-crate/domain";
+import {
+  DSP_ANALYZER_NAME,
+  DSP_ANALYZER_VERSION,
+  type AppConfig,
+  type SetPlanV1,
+} from "@dnb-crate/domain";
 
 import { createCatalogRuntime, writeSineWav } from "../src/index.ts";
 import {
@@ -12,6 +17,7 @@ import {
   resolveFrozenEvidence,
   snapshotTrackEvidence,
 } from "../src/evidence.ts";
+import { validateSetPlan } from "../src/planning/validate.ts";
 
 function testConfig(root: string): AppConfig {
   return {
@@ -304,5 +310,165 @@ describe("frozen canonical evidence (F4b)", () => {
     // The frozen snapshot still describes queue-time canonical metadata.
     expect(frozen.canonical?.musicalKey).toBe("Gm");
     expect(frozen.canonical?.keyConfidence).toBe(1);
+  });
+
+  it("frozen absence stays absent when live metadata and analysis appear later (R9)", async () => {
+    const root = path.join(os.tmpdir(), `dnb-r9-${crypto.randomUUID()}`);
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
+    cleanups.push(() => catalog.close());
+    await writeSineWav(path.join(library, "a.wav"), { title: "FrozenUnknown", durationMs: 1000 });
+    await writeSineWav(path.join(library, "b.wav"), { title: "FrozenKnown", durationMs: 1000 });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 10 }).tracks;
+    const unknown = tracks.find((item) => item.title === "FrozenUnknown")!;
+    const known = tracks.find((item) => item.title === "FrozenKnown")!;
+    catalog.service.updateTrackMetadata(known.id, { musicalKey: "Gm" });
+
+    // Queue-time state: the unknown track has no key, no energy, no
+    // analysis. The snapshot RECORDS that absence.
+    const freshUnknown = catalog.repository.findById(unknown.id)!;
+    const freshKnown = catalog.repository.findById(known.id)!;
+    const frozenUnknown = snapshotTrackEvidence(
+      catalog.analyses,
+      unknown.id,
+      freshUnknown.fileFingerprint,
+      freshUnknown,
+    );
+    const frozenKnown = snapshotTrackEvidence(
+      catalog.analyses,
+      known.id,
+      freshKnown.fileFingerprint,
+      freshKnown,
+    );
+    expect(frozenUnknown.present).toBe(false);
+    expect(frozenUnknown.canonical?.musicalKey).toBeNull();
+    expect(frozenUnknown.canonical?.effectiveEnergy).toBeNull();
+    expect(frozenUnknown.audioEndMs).toBeNull();
+    expect(frozenUnknown.sections).toEqual([]);
+
+    const evidence = { [unknown.id]: frozenUnknown, [known.id]: frozenKnown };
+    const plan: SetPlanV1 = {
+      schemaVersion: 1,
+      id: crypto.randomUUID(),
+      name: "R9 fixture",
+      targetDurationMs: 1000,
+      targetBpm: 174,
+      requestedArc: [
+        { atFraction: 0, targetEnergy: 3 },
+        { atFraction: 1, targetEnergy: 6 },
+      ],
+      entries: [
+        {
+          id: crypto.randomUUID(),
+          trackId: unknown.id,
+          order: 0,
+          sourceStartMs: 0,
+          sourceEndMs: freshUnknown.durationMs,
+          timelineStartMs: 0,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: {
+            id: crypto.randomUUID(),
+            type: "crossfade",
+            durationMs: 500,
+            outgoingCuePointId: null,
+            incomingCuePointId: null,
+            parameters: { purpose: "fixture" },
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          trackId: known.id,
+          order: 1,
+          sourceStartMs: 0,
+          sourceEndMs: freshKnown.durationMs,
+          timelineStartMs: freshUnknown.durationMs - 500,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: null,
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const before = catalog.service.qualityForPlan(plan, evidence);
+    expect(before.harmonicCounts.unknown).toBe(1);
+
+    // Later: the live catalog gains a key, energy, a first drop, and an
+    // audio end for the track whose queue-time snapshot recorded none.
+    catalog.analyses.upsert({
+      ...analysisBase,
+      trackId: unknown.id,
+      analyzerName: DSP_ANALYZER_NAME,
+      gridSource: "analyzed",
+      sections: [
+        {
+          type: "drop" as const,
+          startMs: 20_000,
+          endMs: 40_000,
+          startBar: null,
+          endBar: null,
+          confidence: 0.9,
+          sectionEnergy: 0.9,
+        },
+      ],
+      descriptors: {
+        integratedLufs: null,
+        shortTermRmsDbfsMean: null,
+        shortTermRmsDbfsMax: null,
+        truePeakDb: null,
+        subBassRatio: 0.5,
+        brightness: 0.1,
+        onsetDensity: null,
+        dynamicRange: null,
+        dropIntensity: null,
+        suggestedEnergy: 8,
+        waveformSummary: [],
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        audioStartMs: 0,
+        audioEndMs: 95_000,
+      },
+    });
+    catalog.service.updateTrackMetadata(unknown.id, { energy: 8, musicalKey: "Fm" });
+
+    // Queued musical quality is stable: the frozen snapshot recorded
+    // absence, and absence stays absent instead of adopting the later live
+    // evidence (R9). On the pre-fix code the live key leaked through the
+    // canonical ??-chains and this join left the "unknown" bucket.
+    const after = catalog.service.qualityForPlan(plan, evidence);
+    expect(after.harmonicCounts.unknown).toBe(1);
+    expect(after).toEqual(before);
+
+    // The same contract at the validation layer: recorded-null frozen
+    // values are unknown, not permission to read live metadata. The track
+    // now has live energy 8 and a manual key, but the frozen maps still
+    // report both as absent.
+    const liveUnknown = catalog.repository.findById(unknown.id)!;
+    expect(liveUnknown.energy).toBe(8);
+    expect(liveUnknown.musicalKey).toBe("Fm");
+    const tracksById = new Map([
+      [unknown.id, liveUnknown],
+      [known.id, catalog.repository.findById(known.id)!],
+    ]);
+    const frozenOptions = {
+      effectiveEnergyByTrackId: new Map([[unknown.id, null]]),
+      camelotKeyByTrackId: new Map([[unknown.id, null]]),
+      keySourceByTrackId: new Map([[unknown.id, null]]),
+      keyConfidenceByTrackId: new Map<string, number>(),
+      audioEndMsByTrackId: new Map<string, number>(),
+      firstDropStartMsByTrackId: new Map<string, number>(),
+    };
+    const validated = validateSetPlan(plan, tracksById, frozenOptions);
+    expect(
+      validated.warnings.some(
+        (issue) => issue.code === "MISSING_METADATA" && issue.message.includes("energy"),
+      ),
+    ).toBe(true);
+    expect(validated.warnings.some((issue) => issue.code === "KEY_CLASH")).toBe(false);
   });
 });

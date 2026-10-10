@@ -23,9 +23,17 @@ export function validateSetPlan(
   options?: {
     artistRepeatSpacing?: number;
     audioEndMsByTrackId?: Map<string, number>;
-    effectiveEnergyByTrackId?: Map<string, number>;
+    /** Null entries are RECORDED absence (frozen unknown energy, R9):
+     * validation treats them as unknown instead of falling back to live
+     * track metadata. Live builders only ever set numbers. */
+    effectiveEnergyByTrackId?: Map<string, number | null>;
     keyConfidenceByTrackId?: Map<string, number>;
     firstDropStartMsByTrackId?: Map<string, number>;
+    /** Frozen camelot keys/sources (R9): when an entry is present it owns
+     * the null too, so a later-added live key cannot change a queued plan's
+     * clash verdict. Absent entries keep the live track value. */
+    camelotKeyByTrackId?: Map<string, string | null>;
+    keySourceByTrackId?: Map<string, string | null>;
   },
 ): ValidateSetPlanResult {
   const errors: ValidationIssue[] = [];
@@ -140,7 +148,11 @@ export function validateSetPlan(
         trackId: track.id,
       });
     }
-    const energy = options?.effectiveEnergyByTrackId?.get(track.id) ?? track.energy;
+    // R9: a recorded null (frozen unknown energy) stays unknown; only a
+    // missing entry falls back to live metadata.
+    const energy = options?.effectiveEnergyByTrackId?.has(track.id)
+      ? (options.effectiveEnergyByTrackId.get(track.id) ?? null)
+      : track.energy;
     const missing: string[] = [];
     if (track.bpm === null) {
       missing.push("BPM");
@@ -189,8 +201,9 @@ export function validateSetPlan(
     const fraction = plan.entries.length <= 1 ? 0 : index / (plan.entries.length - 1);
     const targetEnergy = interpolateEnergy(plan.requestedArc, fraction);
     const track = tracksById.get(entry.trackId);
-    const actualEnergy =
-      options?.effectiveEnergyByTrackId?.get(entry.trackId) ?? track?.energy ?? null;
+    const actualEnergy = options?.effectiveEnergyByTrackId?.has(entry.trackId)
+      ? (options.effectiveEnergyByTrackId.get(entry.trackId) ?? null)
+      : (track?.energy ?? null);
     const deviation = actualEnergy === null ? null : actualEnergy - targetEnergy;
     return {
       entryId: entry.id,
@@ -249,23 +262,38 @@ export function validateSetPlan(
         trackId: a.id,
       });
     }
+    // R9: frozen evidence owns its nulls. When camelotKeyByTrackId has an
+    // entry for the track, that value (even null = unknown at queue time)
+    // governs the clash check; the key-source fallback for confidence uses
+    // the frozen source too, so a later-added live key cannot change a
+    // queued plan's verdict.
+    const frozenKey = (track: Track): string | null =>
+      options?.camelotKeyByTrackId?.has(track.id)
+        ? (options.camelotKeyByTrackId.get(track.id) ?? null)
+        : track.camelotKey;
+    const frozenSource = (track: Track): string | null =>
+      options?.keySourceByTrackId?.has(track.id)
+        ? (options.keySourceByTrackId.get(track.id) ?? null)
+        : track.keySource;
+    const leftKey = frozenKey(a);
+    const rightKey = frozenKey(b);
     const leftConfidence =
       options?.keyConfidenceByTrackId?.get(a.id) ??
-      (a.keySource === "manual" || a.keySource === "published" ? 1 : 0);
+      (frozenSource(a) === "manual" || frozenSource(a) === "published" ? 1 : 0);
     const rightConfidence =
       options?.keyConfidenceByTrackId?.get(b.id) ??
-      (b.keySource === "manual" || b.keySource === "published" ? 1 : 0);
+      (frozenSource(b) === "manual" || frozenSource(b) === "published" ? 1 : 0);
     if (
       isConfidentKeyClash({
-        leftKey: a.camelotKey,
-        rightKey: b.camelotKey,
+        leftKey,
+        rightKey,
         leftConfidence,
         rightConfidence,
       })
     ) {
       warnings.push({
         code: "KEY_CLASH",
-        message: `Camelot ${a.camelotKey} → ${b.camelotKey} between ${a.title} and ${b.title}`,
+        message: `Camelot ${leftKey} → ${rightKey} between ${a.title} and ${b.title}`,
         entryId: plan.entries[i]!.id,
         trackId: a.id,
       });
