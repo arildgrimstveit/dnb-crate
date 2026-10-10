@@ -71,7 +71,9 @@ try {
   const byTitleCandidates = (needle: string) => {
     const lower = needle.toLowerCase().trim();
     const exact = tracks.filter((track) => track.title.toLowerCase().trim() === lower);
-    return exact.length > 0 ? exact : tracks.filter((track) => track.title.toLowerCase().includes(lower));
+    return exact.length > 0
+      ? exact
+      : tracks.filter((track) => track.title.toLowerCase().includes(lower));
   };
 
   const summaries = runtime.setPlans.list(50).plans;
@@ -89,9 +91,7 @@ try {
     // Prefer the pinned plan when given; otherwise the most recent stored
     // adjacency wins.
     let hit: JoinHit | null = null;
-    const planIds: string[] = spec.planId
-      ? [spec.planId]
-      : summaries.map((summary) => summary.id);
+    const planIds: string[] = spec.planId ? [spec.planId] : summaries.map((summary) => summary.id);
     for (const planId of planIds) {
       let stored: ReturnType<typeof runtime.setPlans.findById>;
       try {
