@@ -19,7 +19,30 @@ export const ACOUSTIC_RAW_LO = 0.02;
 export const ACOUSTIC_RAW_HI = 0.4;
 export const ACOUSTIC_OUT_LO = 0.05;
 export const ACOUSTIC_OUT_HI = 0.85;
-/** Melodicness stays on keyConfidence: chromaClarity is inverted on noise vs crate (WP5). */
+/**
+ * Melodicness reference ranges, re-derived 2026-10 from a live crate probe
+ * (liquid/vocal vs heavy/dancefloor DnB, 150s each):
+ *
+ *   chromaClarity — liquid mean 0.18 (Pathways 0.31, Roseland 0.15),
+ *                   heavy mean 0.06 (Slam 0.01, Tour 0.03); correct ordering
+ *                   at both tails. Entropy-clarity over 12 chroma bins never
+ *                   approaches the old 0.45 key gate on real DnB, which
+ *                   crushed keyConfidence to 0.001-0.02 and pinned
+ *                   melodicness at a constant ~0.013 across 642 tracks.
+ *   strongPeakRatio — liquid mean 0.49 vs heavy 0.37; ceiling ~0.62.
+ *   tonalStability / tonalPeakRatio — measured NO discrimination on this
+ *                   crate (liquid vs heavy within noise); deliberately unused.
+ */
+export const MELODIC_CLARITY_LO = 0.07;
+export const MELODIC_CLARITY_HI = 0.33;
+export const MELODIC_PEAK_HI = 0.65;
+export const MELODIC_OUT_LO = 0.05;
+export const MELODIC_OUT_HI = 0.95;
+/** Known limitation (2026-10): the synthetic drums-only fixture is harmonically
+ * pitched percussion — a fixed-fundamental kick every beat concentrates chroma
+ * exactly like a pad, so entropy clarity cannot separate it from keyed
+ * material. Real-crate drums live in a dense mix and measure low clarity; the
+ * liquid/heavy discrimination is validated there, not on synthetic kits. */
 
 export type DescriptorChromaStats = {
   chromaClarity: number;
@@ -260,14 +283,20 @@ export function computeDescriptorPack(input: DescriptorPackInput): DescriptorPac
   const strongPeak = clamp(input.chroma.strongPeakRatio, 0, 1);
   const clarity = clamp(input.chroma.chromaClarity, 0, 1);
   const sub = clamp(input.subBassRatio, 0, 1);
-  const keyConf = clamp(input.chroma.keyConfidence, 0, 1);
-  const keyWeight = clarity >= 0.45 ? 2.2 : 0.2;
-  const peakTerm = clarity >= 0.45 ? 0.15 * strongPeak * strongPeak : 0.04 * strongPeak;
-  const melodicness = clamp(
-    keyWeight * keyConf + peakTerm * (1 - clamp(input.onsetDensity, 0, 1)),
-    0,
-    1,
+  const clarityTerm = stretch(
+    clarity,
+    MELODIC_CLARITY_LO,
+    MELODIC_CLARITY_HI,
+    MELODIC_OUT_LO,
+    MELODIC_OUT_HI,
   );
+  // keyConfidence is deliberately unused: the chroma key estimate crushes it
+  // through a clarity gate real DnB never passes (see MELODIC_* provenance).
+  // The peak term keeps the WP5 onset suppression: transient spikes (drums
+  // alone, noise) produce strong peaks without sustained pitched content.
+  const onset = clamp(input.onsetDensity, 0, 1);
+  const peakTerm = clamp(strongPeak / MELODIC_PEAK_HI, 0, 1) * (1 - onset);
+  const melodicness = clamp(0.75 * clarityTerm + 0.25 * peakTerm, 0, 1);
   const valence = clamp(
     0.35 * clamp(input.chroma.majorness, 0, 1) +
       0.25 * brightnessNorm +
