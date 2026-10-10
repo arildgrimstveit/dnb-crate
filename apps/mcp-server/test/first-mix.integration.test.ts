@@ -79,7 +79,22 @@ it("MCP completes scan through verified master/listen from untagged MP3s", async
       });
       row = mixWorkflowDataSchema.parse((response.structuredContent as { data: unknown }).data);
     }
-    expect(row.status, JSON.stringify(row.issues)).toBe("succeeded");
+    // Diagnostics on failure (temporary, CI triage): the check-stage detail
+    // behind a non-succeeded workflow, so remote failures are actionable.
+    let failureDetail = "";
+    if (row.status !== "succeeded" && row.renderJobId) {
+      const check = await runtime.service.checkRender(row.renderJobId).catch((error: unknown) => ({
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      const job = runtime.renderJobs.findById(row.renderJobId);
+      failureDetail = JSON.stringify({
+        issues: row.issues,
+        result: row.result,
+        jobWarnings: job?.warnings ?? null,
+        check,
+      });
+    }
+    expect(row.status, failureDetail || JSON.stringify(row.issues)).toBe("succeeded");
     expect(row.result?.verified).toBe(true);
     expect(row.result?.trackCount).toBeGreaterThanOrEqual(2);
     expect(row.completedStages).toHaveLength(7);
