@@ -197,7 +197,7 @@ export class RenderJobRepository {
     return row ? mapJob(row) : null;
   }
 
-  claimNextQueued(): StoredRenderJob | null {
+  claimNextQueued(ownerToken?: string | null): StoredRenderJob | null {
     const row = this.db
       .prepare(
         `SELECT * FROM render_jobs WHERE status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1`,
@@ -209,12 +209,12 @@ export class RenderJobRepository {
     const started = nowIso();
     const result = this.db
       .prepare(
-        `UPDATE render_jobs SET status = 'running', started_at = ?, progress = 0, progress_message = 'starting'
+        `UPDATE render_jobs SET status = 'running', started_at = ?, progress = 0, progress_message = 'starting', claimed_by = ?
          WHERE id = ? AND status = 'queued'`,
       )
-      .run(started, row.id);
+      .run(started, ownerToken ?? null, row.id);
     if (result.changes === 0) {
-      return this.claimNextQueued();
+      return this.claimNextQueued(ownerToken);
     }
     return this.require(row.id);
   }
@@ -235,14 +235,20 @@ export class RenderJobRepository {
       manifest: RenderManifestV1;
       warnings: string[];
     },
+    ownerToken?: string | null,
   ): StoredRenderJob {
-    this.db
+    // R12 fencing: only the owner that CLAIMED the job may complete it,
+    // and only while it is still running. A deposed worker finishing after
+    // takeover recovery (status no longer 'running') or after a new owner
+    // re-claimed the job (claimed_by differs) must not overwrite recovery
+    // state or the winner's artifact.
+    const result = this.db
       .prepare(
         `UPDATE render_jobs SET
           status = 'succeeded', progress = 1, output_format = ?, output_relpath = ?,
           output_checksum = ?, manifest_json = ?, warnings_json = ?, progress_message = 'complete',
           error_code = NULL, error_message = NULL, retryable = 0, completed_at = ?
-         WHERE id = ?`,
+         WHERE id = ? AND status = 'running' AND claimed_by IS ?`,
       )
       .run(
         input.manifest.outputFormat,
@@ -252,7 +258,19 @@ export class RenderJobRepository {
         JSON.stringify(input.warnings),
         nowIso(),
         id,
+        ownerToken ?? null,
       );
+    if (result.changes === 0) {
+      const current = this.require(id);
+      if (current.status === "succeeded") {
+        return current;
+      }
+      throw new DomainError(
+        "RENDER_FAILED",
+        `Render job ${id} was interrupted or taken over by another worker; result discarded`,
+        { retryable: true, details: { jobId: id, status: current.status } },
+      );
+    }
     return this.require(id);
   }
 
@@ -265,7 +283,11 @@ export class RenderJobRepository {
       manifest?: RenderManifestV1;
       warnings?: string[];
     },
+    ownerToken?: string | null,
   ): StoredRenderJob {
+    // Fenced like markSucceeded (R12): a deposed owner's failure must not
+    // overwrite takeover recovery state either. Best-effort — a stale
+    // no-op leaves the recovered status in place.
     this.db
       .prepare(
         `UPDATE render_jobs SET
@@ -275,7 +297,7 @@ export class RenderJobRepository {
           output_checksum = COALESCE(?, output_checksum),
           manifest_json = COALESCE(?, manifest_json),
           warnings_json = COALESCE(?, warnings_json)
-         WHERE id = ? AND status IN ('queued', 'running')`,
+         WHERE id = ? AND status IN ('queued', 'running') AND claimed_by IS ?`,
       )
       .run(
         error.code,
@@ -287,6 +309,7 @@ export class RenderJobRepository {
         extras?.manifest ? JSON.stringify(extras.manifest) : null,
         extras?.warnings ? JSON.stringify(extras.warnings) : null,
         id,
+        ownerToken ?? null,
       );
     return this.require(id);
   }

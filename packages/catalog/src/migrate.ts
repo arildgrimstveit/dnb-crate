@@ -23,6 +23,7 @@ import { migration018WorkerOwnerHeartbeat } from "./migrations/018_worker_owner_
 import { migration019DoubleDropRetired } from "./migrations/019_double_drop_retired.ts";
 import { migration020DescriptorKeysRenamed } from "./migrations/020_descriptor_keys_renamed.ts";
 import { migration021AnalysisForceDsp } from "./migrations/021_analysis_force_dsp.ts";
+import { migration022RenderJobClaimFencing } from "./migrations/022_render_job_claim_fencing.ts";
 
 export type Migration = {
   id: number;
@@ -53,6 +54,7 @@ const MIGRATIONS: Migration[] = [
   migration019DoubleDropRetired,
   migration020DescriptorKeysRenamed,
   migration021AnalysisForceDsp,
+  migration022RenderJobClaimFencing,
 ];
 
 export function runMigrations(db: SqliteDatabase): void {

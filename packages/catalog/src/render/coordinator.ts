@@ -330,6 +330,10 @@ function previewCacheIdentity(
 
 export class RenderCoordinator {
   canRun: () => boolean = () => true;
+  /** R12: the current worker-owner claim token, or null when this runtime
+   * does not hold ownership. Claims stamp it; completion writes are fenced
+   * against it so a deposed owner cannot overwrite takeover recovery. */
+  ownerToken: () => string | null = () => null;
   private readonly active = new Set<Promise<void>>();
   /**
    * Full-content SHA-256 per source file, cached by path+size+mtime+cheap
@@ -1254,8 +1258,9 @@ export class RenderCoordinator {
     if (this.stopped || !this.canRun()) {
       return;
     }
+    const token = this.ownerToken();
     while (this.running < this.settings.workerLimit && !this.stopped) {
-      const claimed = this.jobs.claimNextQueued();
+      const claimed = this.jobs.claimNextQueued(token);
       if (!claimed) {
         return;
       }
@@ -1642,6 +1647,7 @@ export class RenderCoordinator {
             job.id,
             { code: "RENDER_FAILED", message: durationFailure, retryable: false },
             { outputRelpath: posixRel, checksum, manifest, warnings },
+            this.ownerToken(),
           );
           return;
         }
@@ -1697,12 +1703,28 @@ export class RenderCoordinator {
       if (still?.status === "cancelled") {
         return;
       }
-      this.jobs.markSucceeded(job.id, {
-        outputRelpath: posixRel,
-        checksum,
-        manifest,
-        warnings,
-      });
+      // R12 fencing: a deposed owner must not publish over takeover
+      // recovery. Ownership loss is normally detected by the heartbeat
+      // before this point; the repository's claimed_by condition fences the
+      // narrow race between this check and the write.
+      const token = this.ownerToken();
+      if (token == null) {
+        this.logger.warn(
+          { jobId: job.id },
+          "Render finished after worker ownership was lost; discarding result",
+        );
+        return;
+      }
+      this.jobs.markSucceeded(
+        job.id,
+        {
+          outputRelpath: posixRel,
+          checksum,
+          manifest,
+          warnings,
+        },
+        token,
+      );
     } catch (error) {
       if (this.jobs.findById(job.id)?.status === "cancelled" || isAbortError(error)) {
         if (this.jobs.findById(job.id)?.status !== "cancelled") {
@@ -1720,11 +1742,16 @@ export class RenderCoordinator {
               cause: error,
             },
           );
-      this.jobs.markFailed(job.id, {
-        code: mapped.code,
-        message: mapped.message,
-        retryable: mapped.retryable,
-      });
+      this.jobs.markFailed(
+        job.id,
+        {
+          code: mapped.code,
+          message: mapped.message,
+          retryable: mapped.retryable,
+        },
+        undefined,
+        this.ownerToken(),
+      );
     }
   }
 

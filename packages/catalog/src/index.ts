@@ -120,6 +120,7 @@ export function createCatalogRuntime(
   let closing: Promise<void> | undefined;
   const canRun = () => ownsWorker && !closing;
   renders.canRun = canRun;
+  renders.ownerToken = () => (ownsWorker && !closing ? owner.currentToken() : null);
   analysis.canRun = canRun;
   enrichment.canRun = canRun;
   const feedback = new FeedbackRepository(db);

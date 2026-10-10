@@ -106,6 +106,14 @@ export class WorkerOwner {
     return true;
   }
 
+  /** This owner's claim token while it still holds the row, null once
+   * deposed (R12): job repositories stamp it on claim and fence completion
+   * writes against it, so a late old owner cannot publish over takeover
+   * recovery. */
+  currentToken(): string | null {
+    return this.owned ? this.token : null;
+  }
+
   release(): void {
     if (!this.owned) return;
     this.db.prepare("DELETE FROM worker_owner WHERE id = 1 AND token = ?").run(this.token);
