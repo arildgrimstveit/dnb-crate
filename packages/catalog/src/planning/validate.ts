@@ -192,14 +192,6 @@ export function validateSetPlan(
     const actualEnergy =
       options?.effectiveEnergyByTrackId?.get(entry.trackId) ?? track?.energy ?? null;
     const deviation = actualEnergy === null ? null : actualEnergy - targetEnergy;
-    if (deviation !== null && Math.abs(deviation) > MAX_ENERGY_DEVIATION) {
-      warnings.push({
-        code: "ENERGY_ARC_DEVIATION",
-        message: `${track?.title ?? entry.trackId} energy ${actualEnergy} vs target ${targetEnergy.toFixed(1)}`,
-        entryId: entry.id,
-        trackId: entry.trackId,
-      });
-    }
     return {
       entryId: entry.id,
       trackId: entry.trackId,
@@ -209,6 +201,39 @@ export function validateSetPlan(
       deviation,
     };
   });
+  // Energy-arc diagnostics (2026-10 sessions): a per-entry warning for every
+  // deviating track turned each render's warning list into noise — the
+  // deviations were systematic (the pool simply lacks material as soft or as
+  // hard as the arc requests), not per-track anomalies. Systematic runs
+  // collapse into one summary per direction; isolated deviations stay
+  // per-entry because those are signal.
+  const deviating = energyByEntry.filter(
+    (row) => row.deviation !== null && Math.abs(row.deviation) > MAX_ENERGY_DEVIATION,
+  );
+  for (const direction of [1, -1] as const) {
+    const side = deviating.filter((row) => (row.deviation ?? 0) * direction > 0);
+    if (side.length === 0) continue;
+    const worst = side.reduce((max, row) =>
+      Math.abs(row.deviation ?? 0) > Math.abs(max.deviation ?? 0) ? row : max,
+    );
+    const worstTrack = tracksById.get(worst.trackId);
+    if (side.length >= 3) {
+      warnings.push({
+        code: "ENERGY_ARC_DEVIATION",
+        message: `${side.length} of ${plan.entries.length} entries sit ${direction > 0 ? "above" : "below"} the requested energy arc (worst ${worst.actualEnergy} vs ${worst.targetEnergy.toFixed(1)} at ${worstTrack?.title ?? worst.trackId}) — the pool lacks ${direction > 0 ? "softer opening" : "harder closing"} material for this arc`,
+      });
+    } else {
+      for (const row of side) {
+        const track = tracksById.get(row.trackId);
+        warnings.push({
+          code: "ENERGY_ARC_DEVIATION",
+          message: `${track?.title ?? row.trackId} energy ${row.actualEnergy} vs target ${row.targetEnergy.toFixed(1)}`,
+          entryId: row.entryId,
+          trackId: row.trackId,
+        });
+      }
+    }
+  }
 
   for (let i = 0; i < plan.entries.length - 1; i += 1) {
     const a = tracksById.get(plan.entries[i]!.trackId);
