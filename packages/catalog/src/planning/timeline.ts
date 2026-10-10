@@ -764,16 +764,24 @@ export function buildEntries(
     const overlap = isLast ? 0 : overlapFor(transition) || overlapMs;
     const rate =
       prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : (rates[index] ?? 1);
-    // R3 fix: the RESOLVED pair window takes precedence over raw manual
-    // cues. The window resolver (resolveManualMixIn/planPhraseWindow) already
-    // consulted the manual cue and either accepted or rejected it (dead
-    // intro, off-grid). Re-applying the raw cue here silently undoes that
-    // resolution — the exact dead-intro bug the review reproduced. Manual
-    // cues still apply when no aligned window was resolved for this entry.
+    // R3 scoped fix: prefer the resolved pair window for the mix-IN only
+    // when the PREVIOUS JOIN was aligned (the resolver evaluated the pair
+    // and its window is authoritative for where the incoming starts). Check
+    // chosen[index - 1]'s transition type, not the current entry's (which
+    // is null for the last entry — the exact incoming we're placing).
+    // Crossfades and non-aligned joins keep manual-cue precedence; the
+    // plannedStart fix above already feeds the resolver the correct start.
+    const prevJoinAligned =
+      chosen[index - 1]?.transition?.type === "phrase_mix" ||
+      chosen[index - 1]?.transition?.type === "bass_swap" ||
+      prior?.transitionToNext?.type === "phrase_mix" ||
+      prior?.transitionToNext?.type === "bass_swap";
     return musicalWindow(track, overlap, rate, isLast, {
       mixInMs:
-        prior?.sourceStartMs ?? pairWindows[index - 1]?.mixInMs ?? track.analysis?.manualMixInMs,
-      mixOutMs: pairWindows[index]?.mixOutMs ?? track.analysis?.manualMixOutMs,
+        prior?.sourceStartMs ??
+        (prevJoinAligned ? pairWindows[index - 1]?.mixInMs : undefined) ??
+        track.analysis?.manualMixInMs,
+      mixOutMs: track.analysis?.manualMixOutMs ?? pairWindows[index]?.mixOutMs,
       preserveWindow: true,
     });
   });
