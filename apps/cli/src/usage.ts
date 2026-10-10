@@ -30,7 +30,7 @@ Commands:
   transition:compare --plan UUID --transition UUID [--wait]
   plan:repair --plan UUID --entry UUID --with TRACK_UUID [--protect ID1,ID2,...]
   transition:validate --from UUID --to UUID --type phrase_mix|bass_swap|crossfade
-  plan:create --name TEXT [--duration-min N | --duration-ms N] [--seed N] [--end-query TEXT]
+  plan:create --name TEXT [--duration-min N | --duration-ms N] [--seed N] [--end-query TEXT] [--replay-from UUID]
   plan:create --brief-json FILE
   plan:clone --id UUID --name TEXT [--replan]
   plan:list

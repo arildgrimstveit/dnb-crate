@@ -72,7 +72,7 @@ export function draftSetPlan(
        * catalogs don't just rotate tracks. */
       recentArtistUses?: Record<string, number>;
       /** How the references were resolved (F8): recorded with the plan. */
-      mode?: "auto" | "explicit" | "off";
+      mode?: "auto" | "explicit" | "off" | "replay";
     };
     /** Internal single retry with complete-chain candidates; keeps the user's brief and seed. */
     chainSearch?: boolean;

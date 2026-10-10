@@ -237,6 +237,11 @@ export const createSetPlanInputSchema = z.object({
     .describe(
       "Prefer fresh recordings and directed pairs relative to these explicit prior mixes. Soft cost; never bypasses quality or required tracks/pairs. Strength defaults to 0.7. history: 'auto' (default) also diversifies against recent qualifying plans when no ids are given; 'off' disables that automatic history. Search drafts are not automatically listening history.",
     ),
+  replayFromPlanId: trackIdSchema
+    .optional()
+    .describe(
+      "Exact replay: reuse the referenced plan's frozen history context (reference plans, artist-use counts, policy version) and seed so the same catalog + brief reproduces the same selection despite newer plans added since.",
+    ),
   startTrackId: trackIdSchema.optional(),
   endTrackId: trackIdSchema.optional(),
   seed: z.number().int().optional().describe("Reproducibility seed. Default 1."),
@@ -476,7 +481,7 @@ export const planExplanationSchema = z.object({
     .object({
       referencePlanIds: z.array(z.string()),
       strength: z.number(),
-      historyMode: z.enum(["auto", "explicit", "off"]).optional(),
+      historyMode: z.enum(["auto", "explicit", "off", "replay"]).optional(),
       recentArtistUses: z.record(z.string(), z.number()).optional(),
       policyVersion: z.number().int().optional(),
       trackIds: z.array(z.string()),

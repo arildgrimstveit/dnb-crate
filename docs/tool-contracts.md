@@ -141,6 +141,9 @@ Plus a short `text` content fallback. Source `filePath` is never included in `da
 
 ## `create_set_plan`
 
+- Input: `{ name?, targetDurationMs?, targetDurationMinutes?, replayFromPlanId?, ... }`
+- `replayFromPlanId` reuses the referenced plan's frozen history context (reference plans, artist-use counts, policy version) and seed, so the same catalog + brief reproduces the same selection despite newer plans added since. The replayed plan's explanation records `historyMode: "replay"`. The CLI flag is `plan:create --name NAME --replay-from PLAN_UUID`.
+
 - Input: name, optional `targetDurationMinutes` or `targetDurationMs` (default 60 minutes; 1 minute–8 hours), BPM/arc/required/excluded/preferences/start/end/seed, `descriptors` 0–1 ranges, `genres` include/exclude, `qualityPolicy`, `requiredTransitions`
 - Output: `{ plan, explanation, validation, partial, quality }`
 - Errors: `TRACK_NOT_FOUND` when a required/start/end id does not exist. Named start/end and required tracks override pool filters (descriptors, moods, genres include, BPM, rating); an explicitly excluded track/artist/genre or a missing file still rejects the plan

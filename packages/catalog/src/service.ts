@@ -770,6 +770,39 @@ export class CatalogService {
       // artist-rotation counts and policy version are persisted with the
       // explanation, so "same catalog + brief + seed" is no longer an
       // implicit reproducibility claim.
+      //
+      // Replay (review feature 4): replayFromPlanId reuses the referenced
+      // plan's PERSISTED frozen context — its reference plans' track IDs,
+      // pairs, and artist-use counts — and its seed. The replay does not
+      // re-resolve history from the live catalog, so newer plans added
+      // since the reference cannot change the outcome.
+      let replaySeed: number | undefined;
+      if (input.replayFromPlanId) {
+        const replaySource = this.requirePlan(input.replayFromPlanId);
+        replaySeed = replaySource.seed;
+        const frozenVariety = replaySource.explanation.variety;
+        if (frozenVariety) {
+          const varietyHistory = {
+            trackIds: frozenVariety.trackIds,
+            pairs: frozenVariety.pairs,
+            recentArtistUses: frozenVariety.recentArtistUses ?? {},
+            mode: "replay" as const,
+          };
+          return this.createSetPlanWithHistory(
+            { ...input, seed: replaySeed ?? input.seed },
+            varietyHistory,
+            frozenVariety.referencePlanIds,
+            candidateTrackIds,
+          );
+        }
+        // No variety context to replay: plain replan with the same seed.
+        return this.createSetPlanWithHistory(
+          { ...input, seed: replaySeed ?? input.seed },
+          { trackIds: [], pairs: [], recentArtistUses: {}, mode: "off" as const },
+          [],
+          candidateTrackIds,
+        );
+      }
       const historyPreference = input.variety?.history ?? "auto";
       const explicitReferenceIds = input.variety?.referencePlanIds ?? [];
       let referencePlanIds = explicitReferenceIds;
@@ -817,63 +850,12 @@ export class CatalogService {
         recentArtistUses,
         mode: historyMode,
       };
-      const allTracks = this.repository.listAll();
-      const descriptorPercentiles = this.getLibraryStats().descriptorPercentiles;
-      const analyses = new Map(
-        allTracks
-          .map((track) => [track.id, this.toTimeline(track)] as const)
-          .filter(
-            (
-              entry,
-            ): entry is readonly [string, NonNullable<ReturnType<typeof analysisToTimeline>>] =>
-              entry[1] != null,
-          ),
+      return this.createSetPlanWithHistory(
+        input,
+        varietyHistory,
+        referencePlanIds,
+        candidateTrackIds,
       );
-      const drafted = draftSetPlan(
-        allTracks.filter((track) => !candidateTrackIds || candidateTrackIds.has(track.id)),
-        {
-          ...input,
-          descriptors: resolveDescriptorFilters(input.descriptors, descriptorPercentiles),
-          // The brief the planner and its explanation see carries the
-          // RESOLVED reference ids, not the user's raw input.
-          variety: {
-            referencePlanIds,
-            ...(input.variety?.strength != null ? { strength: input.variety.strength } : {}),
-          },
-        },
-        analyses,
-        {
-          percentiles: descriptorPercentiles,
-          feedback: this.feedback.index(),
-          recipes: this.recipes,
-          varietyHistory,
-        },
-      );
-      const tracksById = new Map(allTracks.map((track) => [track.id, track]));
-      const validation = validateSetPlan(drafted.plan, tracksById, {
-        artistRepeatSpacing: input.artistRepeatSpacing,
-        audioEndMsByTrackId: this.audioEndMsByTrackId(),
-        effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
-        keyConfidenceByTrackId: this.keyConfidenceByTrackId(),
-        firstDropStartMsByTrackId: this.firstDropStartMsByTrackId(),
-      });
-      const stored = this.setPlans.save(
-        drafted.plan,
-        drafted.explanation.seed,
-        drafted.explanation,
-      );
-      const quality = this.qualityFor(stored.plan, {
-        validation,
-        partial: drafted.partial,
-        partialReasons: drafted.partialReasons,
-      });
-      return {
-        plan: stored.plan,
-        explanation: stored.explanation,
-        validation: { ...validation, quality },
-        partial: quality.partial,
-        quality,
-      };
     } catch (error) {
       if (
         error instanceof PlanningConstraintError ||
@@ -893,6 +875,73 @@ export class CatalogService {
       }
       throw error;
     }
+  }
+
+  /** Shared planning pipeline: draft, validate, store. Both the normal
+   *  history-resolving path and the replay path (frozen context from a
+   *  referenced plan) feed into this. */
+  private createSetPlanWithHistory(
+    input: CreateSetPlanInput,
+    varietyHistory: {
+      trackIds: string[];
+      pairs: Array<{ outgoingTrackId: string; incomingTrackId: string }>;
+      recentArtistUses: Record<string, number>;
+      mode: "auto" | "explicit" | "off" | "replay";
+    },
+    referencePlanIds: string[],
+    candidateTrackIds?: ReadonlySet<string>,
+  ): CreateSetPlanResult {
+    const allTracks = this.repository.listAll();
+    const descriptorPercentiles = this.getLibraryStats().descriptorPercentiles;
+    const analyses = new Map(
+      allTracks
+        .map((track) => [track.id, this.toTimeline(track)] as const)
+        .filter(
+          (entry): entry is readonly [string, NonNullable<ReturnType<typeof analysisToTimeline>>] =>
+            entry[1] != null,
+        ),
+    );
+    const drafted = draftSetPlan(
+      allTracks.filter((track) => !candidateTrackIds || candidateTrackIds.has(track.id)),
+      {
+        ...input,
+        descriptors: resolveDescriptorFilters(input.descriptors, descriptorPercentiles),
+        // The brief the planner and its explanation see carries the
+        // RESOLVED reference ids, not the user's raw input.
+        variety: {
+          referencePlanIds,
+          ...(input.variety?.strength != null ? { strength: input.variety.strength } : {}),
+        },
+      },
+      analyses,
+      {
+        percentiles: descriptorPercentiles,
+        feedback: this.feedback.index(),
+        recipes: this.recipes,
+        varietyHistory,
+      },
+    );
+    const tracksById = new Map(allTracks.map((track) => [track.id, track]));
+    const validation = validateSetPlan(drafted.plan, tracksById, {
+      artistRepeatSpacing: input.artistRepeatSpacing,
+      audioEndMsByTrackId: this.audioEndMsByTrackId(),
+      effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
+      keyConfidenceByTrackId: this.keyConfidenceByTrackId(),
+      firstDropStartMsByTrackId: this.firstDropStartMsByTrackId(),
+    });
+    const stored = this.setPlans.save(drafted.plan, drafted.explanation.seed, drafted.explanation);
+    const quality = this.qualityFor(stored.plan, {
+      validation,
+      partial: drafted.partial,
+      partialReasons: drafted.partialReasons,
+    });
+    return {
+      plan: stored.plan,
+      explanation: stored.explanation,
+      validation: { ...validation, quality },
+      partial: quality.partial,
+      quality,
+    };
   }
 
   getSetPlan(setPlanId: string): SetPlanV1 {

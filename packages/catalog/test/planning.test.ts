@@ -2908,6 +2908,54 @@ describe("structural edits invalidate changed adjacencies only (F7)", () => {
   });
 });
 
+describe("replay from frozen context (feature 4)", () => {
+  it("replays a plan from its frozen context despite newer history", () => {
+    const catalog = runtime();
+    for (let i = 0; i < 20; i += 1) {
+      seedTrack(catalog, {
+        title: `Replay ${i}`,
+        artist: `Replayer ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    const brief = {
+      name: "Replay source",
+      targetDurationMs: 400_000,
+      seed: 42,
+      explorationWeight: 0,
+    };
+    const first = createPlan(catalog, brief);
+    expect(first.plan.entries.length).toBeGreaterThanOrEqual(3);
+    expect(first.explanation.variety?.historyMode).toBe("auto");
+
+    // Replay: same brief, same seed, frozen context from the first plan.
+    const replayed = createPlan(catalog, {
+      ...brief,
+      name: "Replay copy",
+      replayFromPlanId: first.plan.id,
+    });
+    expect(replayed.explanation.variety?.historyMode).toBe("replay");
+    expect(replayed.plan.entries.map((entry) => entry.trackId)).toEqual(
+      first.plan.entries.map((entry) => entry.trackId),
+    );
+
+    // Now create a NEW plan (which changes the auto history), then replay
+    // the first plan again — it must still reproduce the original selection.
+    createPlan(catalog, { ...brief, name: "Interloper", seed: 99 });
+    const replayedAgain = createPlan(catalog, {
+      ...brief,
+      name: "Replay copy 2",
+      replayFromPlanId: first.plan.id,
+    });
+    expect(replayedAgain.plan.entries.map((entry) => entry.trackId)).toEqual(
+      first.plan.entries.map((entry) => entry.trackId),
+    );
+  });
+});
+
 describe("resolved planning history is explicit and recorded (F8)", () => {
   function seededHistoryCatalog(entryCount: number) {
     const catalog = runtime();

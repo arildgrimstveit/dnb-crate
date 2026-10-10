@@ -41,12 +41,14 @@ export async function run(
       if (durationMsRaw !== undefined && durationMinRaw !== undefined) {
         throw new Error("plan:create accepts --duration-min or --duration-ms, not both");
       }
+      const replayFrom = option(args, "--replay-from");
       const created = runtime.service.createSetPlan({
         name,
         targetDurationMs: durationMsRaw === undefined ? undefined : Number(durationMsRaw),
         targetDurationMinutes: durationMinRaw === undefined ? undefined : Number(durationMinRaw),
         seed: seedRaw === undefined ? undefined : Number(seedRaw),
         endTrackId,
+        replayFromPlanId: replayFrom ?? undefined,
       });
       printJson({ ok: true, data: created });
       return true;

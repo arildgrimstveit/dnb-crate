@@ -47,14 +47,14 @@ Config comes from `dnb-crate.config.json` (see `.env.example` and the README for
 
 ## Planning
 
-| Command                                                                                                      | What it does                                              |
-| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
-| `plan:create --name N [--brief-json FILE] [--duration-min M \| --duration-ms MS] [--seed S] [--end-query Q]` | Draft and store a deterministic set plan                  |
-| `plan:list` / `plan:get --id UUID`                                                                           | List plans; plan + quality report                         |
-| `plan:quality --id UUID`                                                                                     | Strict-quality report (joins, harmony, duration, spacing) |
-| `plan:validate --id UUID`                                                                                    | Structural validation plus render readiness               |
-| `plan:clone --id UUID --name N [--replan]`                                                                   | Copy a plan (optionally rebuild joins)                    |
-| `plan:delete --id UUID --confirm`                                                                            | Delete a plan                                             |
+| Command                                                                                                                           | What it does                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `plan:create --name N [--brief-json FILE] [--duration-min M \| --duration-ms MS] [--seed S] [--end-query Q] [--replay-from UUID]` | Draft and store a deterministic set plan (replay from a prior plan's frozen context) |
+| `plan:list` / `plan:get --id UUID`                                                                                                | List plans; plan + quality report                                                    |
+| `plan:quality --id UUID`                                                                                                          | Strict-quality report (joins, harmony, duration, spacing)                            |
+| `plan:validate --id UUID`                                                                                                         | Structural validation plus render readiness                                          |
+| `plan:clone --id UUID --name N [--replan]`                                                                                        | Copy a plan (optionally rebuild joins)                                               |
+| `plan:delete --id UUID --confirm`                                                                                                 | Delete a plan                                                                        |
 
 ## Transitions and feedback
 

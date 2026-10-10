@@ -129,6 +129,12 @@ export type CreateSetPlanInput = {
     strength?: number;
     history?: "auto" | "off";
   };
+  /** Exact replay: reuse the referenced plan's frozen history context
+   *  (reference plans, artist-use counts, policy version) and seed so the
+   *  same catalog + brief reproduces the same selection, despite newer
+   *  plans added since. Prerequisite for dependable "repair just this
+   *  join" and fresh/replay UX (review feature 4). */
+  replayFromPlanId?: string;
   startTrackId?: string;
   endTrackId?: string;
   seed?: number;
@@ -175,8 +181,9 @@ export type PlanExplanation = {
     referencePlanIds: string[];
     strength: number;
     /** How the reference ids were resolved (F8): "explicit" from the brief,
-     *  "auto" from recent qualifying plans, "off" when disabled. */
-    historyMode?: "auto" | "explicit" | "off";
+     *  "auto" from recent qualifying plans, "off" when disabled,
+     *  "replay" when reusing a referenced plan's frozen context. */
+    historyMode?: "auto" | "explicit" | "off" | "replay";
     /** Auto mode: per-artist plan counts the artist-rotation penalty used. */
     recentArtistUses?: Record<string, number>;
     /** Version of the auto-history selection policy (eligibility and

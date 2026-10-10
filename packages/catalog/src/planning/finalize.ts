@@ -37,7 +37,7 @@ export type FinalizeInput = {
     chainRetry: PlanExplanation["chainRetry"];
     varietyPairs: Array<{ outgoingTrackId: string; incomingTrackId: string }>;
     recentArtistUses: Record<string, number>;
-    varietyHistoryMode: "auto" | "explicit" | "off";
+    varietyHistoryMode: "auto" | "explicit" | "off" | "replay";
   };
   targetDurationMs: number;
   requestedArc: NonNullable<CreateSetPlanInput["requestedArc"]>;
