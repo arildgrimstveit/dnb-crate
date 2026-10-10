@@ -70,6 +70,44 @@ describe("durable mix workflows", () => {
     expect(result.analysisJobIds).toEqual([]);
     expect(result.completedStages).toContain("analysis");
   });
+  it("schedules re-analysis when tempo bounds change and not when they repeat (R10)", async () => {
+    const { runtime, library, config } = await fixture(false);
+    await writeSineWav(path.join(library, "source.wav"), { durationMs: 1000 });
+    await runtime.service.scanLibrary();
+    const track = runtime.repository.listAll()[0]!;
+    await runtime.service.waitForAnalysisJob(
+      runtime.service.startTrackAnalysis({ trackIds: [track.id] }).job.id,
+    );
+    const first = runtime.workflows.start({ brief, requestToken: "bounds-agree-1" });
+    const defaultResult = await runtime.workflows.wait(first.id);
+    expect(defaultResult.analysisJobIds).toEqual([]);
+    await runtime.close();
+    cleanup.pop();
+
+    // Reopen with configured tempo bounds: the default-identity row is now
+    // stale to the repository's scope selection AND to the workflow's
+    // scheduler (the old workflow compared the bare analyzer version and
+    // treated the row as current, so the two disagreed).
+    const bounds = { bpmMin: 160, bpmMax: 190 };
+    const reopened = createCatalogRuntime(
+      { ...config, analysis: { ...config.analysis!, ...bounds } },
+      undefined,
+      { useFakeFfmpeg: true, passive: false },
+    );
+    cleanup.push(() => reopened.close());
+    expect(reopened.analyses.listIdsForScope("stale", bounds)).toContain(track.id);
+    const second = reopened.workflows.start({ brief, requestToken: "bounds-agree-2" });
+    const boundsResult = await reopened.workflows.wait(second.id);
+    expect(boundsResult.analysisJobIds).not.toEqual([]);
+
+    // With bounds unchanged now, the custom-identity row is current: the
+    // workflow schedules no redundant DSP pass (the old bare-version
+    // comparison would have re-enqueued it).
+    const third = reopened.workflows.start({ brief, requestToken: "bounds-agree-3" });
+    const repeatResult = await reopened.workflows.wait(third.id);
+    expect(repeatResult.analysisJobIds).toEqual([]);
+    expect(reopened.analyses.listIdsForScope("stale", bounds)).not.toContain(track.id);
+  });
   it("an unsuitable empty library retains a partial plan and never schedules render", async () => {
     const { runtime } = await fixture(false);
     const first = runtime.workflows.start({ brief, requestToken: "empty" });

@@ -634,6 +634,23 @@ describe("analysis freshness: inputs, force, and anchor invalidation (F9)", () =
     expect(catalog.service.getTrackAnalysis(trackId).analyzedAt).not.toBe(before);
   });
 
+  it("selects a pending row that lost its stage row for stale re-analysis (R10)", async () => {
+    const { catalog, trackId } = await clickCatalog();
+    // A rescan/legacy row can keep its analysis row while losing the dsp
+    // stage record and sitting at pending. The old scope selection returned
+    // missing-stage rows as current regardless of status, so the row
+    // escaped refresh here while the workflow's scheduler still wanted it.
+    catalog.repository.setAnalysisStatus(trackId, "pending");
+    catalog.db
+      .prepare("DELETE FROM analysis_stages WHERE track_id = ? AND stage = 'dsp'")
+      .run(trackId);
+    expect(catalog.analyses.listIdsForScope("stale")).toContain(trackId);
+    // The legacy policy itself stays intentional: a completed track row
+    // with this analyzer version and no stage record remains current.
+    catalog.repository.setAnalysisStatus(trackId, "complete");
+    expect(catalog.analyses.listIdsForScope("stale")).not.toContain(trackId);
+  });
+
   it("strips grid-indexed features when the beat anchor moves", async () => {
     const { catalog, trackId } = await clickCatalog();
     const analyzed = catalog.service.getTrackAnalysis(trackId);

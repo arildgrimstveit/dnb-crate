@@ -22,6 +22,7 @@ import type { RenderJobRepository } from "./render-job-repository.ts";
 import type { MixWorkflowRepository, MixWorkflow } from "./mix-workflow-repository.ts";
 import type { PreflightService, MixIssue } from "./preflight.ts";
 import { fingerprintFile } from "./fingerprint.ts";
+import { dspFreshness } from "./analysis/dsp-identity.ts";
 
 /** One bounded step per existing worker tick; child jobs never wait on this coordinator. */
 export class MixWorkflowCoordinator {
@@ -32,6 +33,8 @@ export class MixWorkflowCoordinator {
   private abort = new AbortController();
   private readonly settingsIdentity: string;
   private readonly effectiveSettings: MixWorkflow["effectiveSettings"];
+  private readonly bpmMin: number | null;
+  private readonly bpmMax: number | null;
   constructor(
     config: AppConfig,
     readonly repository: MixWorkflowRepository,
@@ -57,6 +60,11 @@ export class MixWorkflowCoordinator {
     this.settingsIdentity = createHash("sha256")
       .update(JSON.stringify({ settings, app: APP_VERSION, dsp: DSP_ANALYZER_VERSION }))
       .digest("hex");
+    // R10: the workflow's freshness decision must see the same analysis
+    // inputs (configured tempo bounds) as the coordinator and the
+    // repository's stale-scope selection.
+    this.bpmMin = config.analysis?.bpmMin ?? null;
+    this.bpmMax = config.analysis?.bpmMax ?? null;
   }
   start(input: { brief: CreateSetPlanInput; requestToken: string }): MixWorkflow {
     return this.repository.start(input, this.settingsIdentity, this.effectiveSettings);
@@ -220,19 +228,28 @@ export class MixWorkflowCoordinator {
     if (!track || track.fileMissing) return false;
     const dspRow = this.analyses.findByTrackId(id, DSP_ANALYZER_NAME);
     const dspStage = this.analyses.getStage(id, "dsp");
-    if (
-      !dspRow ||
-      dspRow.analyzerVersion !== DSP_ANALYZER_VERSION ||
-      track.analysisStatus === "pending" ||
-      track.analysisStatus === "failed"
-    )
-      return true;
-    const dspCurrent = dspStage
-      ? dspStage.state === "succeeded" &&
-        dspStage.fingerprint === track.fileFingerprint &&
-        dspStage.identity === DSP_ANALYZER_VERSION
-      : track.analysisStatus === "complete";
-    if (!dspCurrent) return true;
+    // R10: share the coordinator's freshness contract (dspFreshness) so
+    // tempo-bound, anchor, and reference-lock changes schedule the same way
+    // here as in stale-scope selection. The old bare-version comparison
+    // treated a custom-identity row as stale (redundant scheduling) and a
+    // default-identity row as current after a tempo-config change (missed
+    // re-analysis).
+    const freshness = dspFreshness({
+      hasAnalysisRow: Boolean(dspRow),
+      analyzerVersion: dspRow?.analyzerVersion ?? null,
+      analysisStatus: track.analysisStatus,
+      fileFingerprint: track.fileFingerprint,
+      stageState: dspStage?.state ?? null,
+      stageFingerprint: dspStage?.fingerprint ?? null,
+      stageIdentity: dspStage?.identity ?? null,
+      referenceBpm: dspRow?.referenceBpm ?? null,
+      trackBpm: track.bpm ?? null,
+      trackBpmSource: track.bpmSource ?? null,
+      beatAnchorMs: this.analyses.getBeatAnchorMs(id),
+      bpmMin: this.bpmMin,
+      bpmMax: this.bpmMax,
+    });
+    if (!freshness.current) return true;
     if (keyAnalysis === "off") return false;
     if (track.keySource === "manual" || track.keySource === "published") return false;
     const key = this.analyses.getStage(id, "key");

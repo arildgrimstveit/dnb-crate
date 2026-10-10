@@ -1,8 +1,6 @@
 import {
-  analyzerVersionLessThan,
   buildBeatGridSummary,
   DSP_ANALYZER_NAME,
-  DSP_ANALYZER_VERSION,
   resolveBpmHint,
   resolveCanonicalBpm,
   resolveCanonicalKey,
@@ -15,7 +13,7 @@ import {
 } from "@dnb-crate/domain";
 
 import type { SqliteDatabase } from "./db.ts";
-import { dspInputIdentity } from "./analysis/dsp-identity.ts";
+import { dspFreshness } from "./analysis/dsp-identity.ts";
 
 type AnalysisRow = {
   track_id: string;
@@ -479,10 +477,12 @@ export class AnalysisRepository {
           .all() as { id: string }[]
       ).map((row) => row.id);
     }
-    // Same freshness contract as the coordinator's dspCurrent (F9): version,
-    // reference lock, plus the versioned input identity — configured tempo
-    // bounds and the stored beat anchor. Unset optional inputs keep the bare
-    // analyzer version so existing rows stay current.
+    // One freshness contract (dspFreshness, R10) — the same decision the
+    // coordinator and the first-mix workflow apply: analyzer version, track
+    // analysis status (pending or failed re-analyzes), reference lock, and
+    // the versioned input identity from configured tempo bounds plus the
+    // CURRENT beat anchor. Legacy rows without a stage record are current
+    // only when the track row itself completed with this analyzer version.
     const rows = this.db
       .prepare(
         `SELECT t.id, t.analysis_status, t.bpm, t.bpm_source, t.file_fingerprint,
@@ -516,43 +516,21 @@ export class AnalysisRepository {
         if (row.analyzer_version === null) {
           return true;
         }
-        if (row.analysis_status === "failed") {
-          return true;
-        }
-        if (analyzerVersionLessThan(row.analyzer_version, DSP_ANALYZER_VERSION)) {
-          return true;
-        }
-        // Reference-lock freshness, same rule as dspCurrent: the stored
-        // reference must match what the current manual/published BPM would
-        // lock to. Drift or removal re-runs; the analyzed writeback echo is
-        // not a reference input.
-        const trackRef =
-          row.bpm != null && (row.bpm_source === "published" || row.bpm_source === "manual")
-            ? row.bpm
-            : null;
-        if (
-          (trackRef == null) !== (row.reference_bpm == null) ||
-          (trackRef != null &&
-            row.reference_bpm != null &&
-            Math.abs(trackRef - row.reference_bpm) > 0.01)
-        ) {
-          return true;
-        }
-        if (row.stage_state == null) {
-          return false;
-        }
-        if (row.stage_state !== "succeeded") {
-          return true;
-        }
-        if (row.stage_fingerprint !== row.file_fingerprint) {
-          return true;
-        }
-        const identity = dspInputIdentity({
+        return !dspFreshness({
+          hasAnalysisRow: true,
+          analyzerVersion: row.analyzer_version,
+          analysisStatus: row.analysis_status,
+          fileFingerprint: row.file_fingerprint,
+          stageState: row.stage_state,
+          stageFingerprint: row.stage_fingerprint,
+          stageIdentity: row.stage_identity,
+          referenceBpm: row.reference_bpm,
+          trackBpm: row.bpm,
+          trackBpmSource: row.bpm_source,
           beatAnchorMs: row.beat_anchor_ms,
           bpmMin: freshness.bpmMin,
           bpmMax: freshness.bpmMax,
-        });
-        return row.stage_identity !== identity;
+        }).current;
       })
       .map((row) => row.id);
   }

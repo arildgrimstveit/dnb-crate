@@ -6,7 +6,6 @@ import {
 } from "@dnb-crate/audio-analysis";
 import {
   DEFAULT_ANALYSIS_ENGINE,
-  DSP_ANALYZER_VERSION,
   DomainError,
   isDomainError,
   MIN_ANALYSIS_CONFIDENCE,
@@ -26,7 +25,7 @@ import {
 
 import type { AnalysisJobRepository } from "../analysis-job-repository.ts";
 import type { AnalysisRepository, StoredTrackAnalysis } from "../analysis-repository.ts";
-import { dspInputIdentity } from "./dsp-identity.ts";
+import { dspFreshness, dspInputIdentity } from "./dsp-identity.ts";
 import { loadPcmForAnalysis } from "./load-pcm.ts";
 import type { TrackRepository } from "../repository.ts";
 
@@ -327,41 +326,25 @@ export class AnalysisCoordinator {
     const track = this.tracks.findById(trackId);
     const stage = this.analyses.getStage(trackId, "dsp");
     const row = this.analyses.findByTrackId(trackId, "dnb-crate-dsp");
-    if (
-      !track ||
-      !row ||
-      row.analyzerVersion !== DSP_ANALYZER_VERSION ||
-      track.analysisStatus === "pending" ||
-      track.analysisStatus === "failed"
-    )
-      return false;
-    // Reference-lock freshness: compare the stored referenceBpm against the
-    // reference the CURRENT track state would lock to (manual/published —
-    // the analyzed writeback echo is the analyzer's own result and is not a
-    // reference input). Drift re-analyzes; removing the reference re-runs
-    // free (F9).
-    const trackRef =
-      track.bpm != null && (track.bpmSource === "manual" || track.bpmSource === "published")
-        ? track.bpm
-        : null;
-    if (
-      (trackRef == null) !== (row.referenceBpm == null) ||
-      (trackRef != null && row.referenceBpm != null && Math.abs(trackRef - row.referenceBpm) > 0.01)
-    )
-      return false;
-    // Input identity covers the configured tempo bounds and the beat anchor
-    // in addition to the analyzer version (F9): a config or anchor change
-    // re-analyzes even though version and fingerprint are unchanged.
-    const identity = dspInputIdentity({
+    // R10: one shared freshness decision (dspFreshness) — the workflow's
+    // scheduling and the repository's stale-scope selection evaluate the
+    // same contract so tempo-bound, anchor, reference-lock, and pending
+    // changes cannot look current to one caller and stale to another.
+    return dspFreshness({
+      hasAnalysisRow: Boolean(track && row),
+      analyzerVersion: row?.analyzerVersion ?? null,
+      analysisStatus: track?.analysisStatus ?? null,
+      fileFingerprint: track?.fileFingerprint ?? null,
+      stageState: stage?.state ?? null,
+      stageFingerprint: stage?.fingerprint ?? null,
+      stageIdentity: stage?.identity ?? null,
+      referenceBpm: row?.referenceBpm ?? null,
+      trackBpm: track?.bpm ?? null,
+      trackBpmSource: track?.bpmSource ?? null,
       beatAnchorMs: this.analyses.getBeatAnchorMs(trackId),
       bpmMin: this.config.analysis?.bpmMin,
       bpmMax: this.config.analysis?.bpmMax,
-    });
-    return stage
-      ? stage.state === "succeeded" &&
-          stage.fingerprint === track.fileFingerprint &&
-          stage.identity === identity
-      : track.analysisStatus === "complete";
+    }).current;
   }
 
   private async analyzeTrack(
