@@ -703,11 +703,15 @@ export function buildEntries(
     const outGrid = gridBpm(track);
     const locked = firstAlignedApplied || (rates[index] ?? 1) !== 1;
     const outgoingEffective = locked && outGrid != null ? outGrid * (rates[index] ?? 1) : undefined;
+    // R3 fix: the resolved previous-pair window takes precedence over the
+    // raw manual cue (the resolver already consulted it and may have rejected
+    // it as stale/dead). Manual cues still apply when no aligned window was
+    // resolved for this entry.
     const plannedStart =
       prior && "sourceStartMs" in prior && prior.sourceStartMs != null
         ? prior.sourceStartMs
-        : (track.analysis?.manualMixInMs ??
-          pairWindows[index - 1]?.mixInMs ??
+        : (pairWindows[index - 1]?.mixInMs ??
+          track.analysis?.manualMixInMs ??
           track.analysis?.mixInMs ??
           track.analysis?.audioStartMs ??
           0);
@@ -760,10 +764,16 @@ export function buildEntries(
     const overlap = isLast ? 0 : overlapFor(transition) || overlapMs;
     const rate =
       prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : (rates[index] ?? 1);
+    // R3 fix: the RESOLVED pair window takes precedence over raw manual
+    // cues. The window resolver (resolveManualMixIn/planPhraseWindow) already
+    // consulted the manual cue and either accepted or rejected it (dead
+    // intro, off-grid). Re-applying the raw cue here silently undoes that
+    // resolution — the exact dead-intro bug the review reproduced. Manual
+    // cues still apply when no aligned window was resolved for this entry.
     return musicalWindow(track, overlap, rate, isLast, {
       mixInMs:
-        prior?.sourceStartMs ?? track.analysis?.manualMixInMs ?? pairWindows[index - 1]?.mixInMs,
-      mixOutMs: track.analysis?.manualMixOutMs ?? pairWindows[index]?.mixOutMs,
+        prior?.sourceStartMs ?? pairWindows[index - 1]?.mixInMs ?? track.analysis?.manualMixInMs,
+      mixOutMs: pairWindows[index]?.mixOutMs ?? track.analysis?.manualMixOutMs,
       preserveWindow: true,
     });
   });
@@ -798,7 +808,15 @@ export function buildEntries(
             ...baseTransition,
             parameters: {
               ...baseTransition.parameters,
-              recipeVersion: 1,
+              // R4 fix: a transition whose alignment pins were stripped by
+              // the editor (alignmentInvalidated) must NOT get recipeVersion 1
+              // — that flag tells the renderer to skip alignment application,
+              // and with the pins gone the join would have no alignment at
+              // all. Without the flag, the renderer's alignment loop runs
+              // and recomputes for the new window.
+              ...(baseTransition.parameters.alignmentInvalidated == null
+                ? { recipeVersion: 1 }
+                : {}),
               mixOutMs:
                 sourceEndMs -
                 outputToSourceMs(
