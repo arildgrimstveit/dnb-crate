@@ -137,9 +137,14 @@ export function buildPlanningPool(
       // 55 ms and Pool Hopping - VIP at 82 ms both landed in one variety
       // plan and produced corroborated 60-140 ms join misalignments — the
       // stored-grid residual AND the deck-probe verifier agreed). Aligned
-      // blends on such grids flammed; keep them out of the pool until
-      // re-analysis clears the flag. Explicit pins still override below.
-      if (analysis?.descriptors?.gridPhaseSuspect === true) {
+      // blends on such grids flammed. Confidence-aware: only exclude when
+      // the catalog is large enough to be selective; a small library (or
+      // one where every track is suspect) admits them rather than refusing
+      // to plan. Explicit pins always pass.
+      if (
+        analysis?.descriptors?.gridPhaseSuspect === true &&
+        catalog.length >= PLANNER_POOL_MIN_TRACKS * 2
+      ) {
         rejected.push({ trackId: track.id, title: track.title, reason: "GRID_PHASE_SUSPECT" });
         return false;
       }
