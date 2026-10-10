@@ -3092,14 +3092,17 @@ describe("join inspector (batch 9)", () => {
       expect(Array.isArray(variant.blockers)).toBe(true);
     }
 
-    // Surgical repair: replace the incoming track of join 0.
-    const replacement = catalog.repository.listAll().find((track) => track.title === "Compare 11")!;
+    // Surgical repair: replace the incoming track of join 0 with a spare
+    // (not already in the plan) so the plan stays valid.
+    const planTrackIds = new Set(created.plan.entries.map((entry) => entry.trackId));
+    const replacement = catalog.repository.listAll().find((track) => !planTrackIds.has(track.id))!;
+    expect(replacement).toBeDefined();
     const repaired = catalog.service.repairSetPlan({
       setPlanId: created.plan.id,
       entryId: created.plan.entries[0]!.id,
       newIncomingTrackId: replacement.id,
     });
-    expect(repaired.diff.changedJoin.toTitle).toBe("Compare 11");
+    expect(repaired.diff.changedJoin.toTitle).toBe(replacement.title);
     const newEntries = [...repaired.plan.entries].sort((a, b) => a.order - b.order);
     expect(newEntries[1]!.trackId).toBe(replacement.id);
     // Other entries keep their tracks.
