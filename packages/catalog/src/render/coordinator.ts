@@ -630,8 +630,8 @@ export class RenderCoordinator {
     if (!track?.filePath) {
       return null;
     }
+    const resolved = path.resolve(track.filePath);
     try {
-      const resolved = path.resolve(track.filePath);
       const info = await stat(resolved);
       const fingerprint = await fingerprintFile(resolved, {
         size: info.size,
@@ -648,8 +648,37 @@ export class RenderCoordinator {
       }
       this.sourceHashCache.set(key, hash);
       return hash;
-    } catch {
-      return null;
+    } catch (error) {
+      // R8: a NEW request that requires a full-content hash must surface
+      // read/hashing failures instead of silently freezing the weaker
+      // legacy identity. Null stays reserved for rows without a file path,
+      // which structural validation rejects elsewhere. This cache is
+      // queue-time only; execution verifies by reading the bytes (see
+      // verifySourceContentHash) because this cache key cannot distinguish
+      // a same-size interior edit that preserves mtime.
+      throw new DomainError(
+        "AUDIO_FILE_UNAVAILABLE",
+        `${track.title} could not be read to freeze render-input identity`,
+        { details: { trackId: track.id, filePath: resolved }, cause: error },
+      );
+    }
+  }
+
+  /**
+   * R8 execution verification: hash the bytes as they are right now, never
+   * the queue-time cache. The decoder reads these exact bytes immediately
+   * after this check, so they — not a cached fingerprint keyed by
+   * path/size/mtime/head-tail — are the authoritative identity.
+   */
+  private async verifySourceContentHash(track: Track, resolved: string): Promise<string> {
+    try {
+      return await sha256File(resolved);
+    } catch (error) {
+      throw new DomainError(
+        "AUDIO_FILE_UNAVAILABLE",
+        `${track.title} could not be read for render content verification`,
+        { details: { trackId: track.id, filePath: resolved }, cause: error },
+      );
     }
   }
 
@@ -1912,8 +1941,12 @@ export class RenderCoordinator {
     const frozenEvidence = request?.evidence[track.id];
     const frozen = frozenEvidence && "present" in frozenEvidence ? frozenEvidence : undefined;
     if (typeof frozen?.sourceContentSha256 === "string" && frozen.sourceContentSha256 !== "") {
-      const contentHash = await this.sourceHashForTrack(track.id);
-      if (contentHash == null || contentHash !== frozen.sourceContentSha256) {
+      // R8: verification reads the actual bytes. The queue-time hash cache
+      // is keyed by path+size+mtime+head/tail fingerprint; a same-size
+      // interior edit that restores mtime keeps that key identical, so the
+      // cached queue-time hash would hide the change from this check.
+      const contentHash = await this.verifySourceContentHash(track, resolved);
+      if (contentHash !== frozen.sourceContentSha256) {
         throw new DomainError(
           "AUDIO_FILE_UNAVAILABLE",
           `${track.title} changed on disk since this render was queued (content hash differs from the frozen request)`,

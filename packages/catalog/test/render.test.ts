@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -202,6 +202,44 @@ describe("render jobs", () => {
     edited[mid] = (edited[mid] ?? 0) ^ 0xff;
     await writeFile(aPath, edited);
     await catalog.service.scanLibrary();
+
+    const staleId = crypto.randomUUID();
+    catalog.renderJobs.insertQueued({
+      id: staleId,
+      kind: "full",
+      setPlanId: plan.id,
+      params: { request: frozenRequest },
+    });
+    const stale = await catalog.service.waitForRenderJob(staleId, 15_000);
+    expect(stale.status).toBe("failed");
+    expect(stale.errorCode).toBe("AUDIO_FILE_UNAVAILABLE");
+    expect(stale.errorMessage).toMatch(/queued/);
+  });
+
+  it("rejects an interior edit that preserves size and mtime (R8)", async () => {
+    // The queue-time hash cache is keyed by path+size+mtime+head/tail
+    // fingerprint. This edit changes none of those, so the cache entry from
+    // the first render stays valid-looking — only reading the actual bytes
+    // at execution time can catch the change.
+    const { catalog, plan, aPath } = await seededLibrary();
+    // Pin mtime to whole milliseconds: stat reports 100ns fractions on
+    // NTFS that utimes rounds off, so a stat→utimes round trip of the
+    // original timestamp is not exact. A whole-ms value restores exactly,
+    // which is what the stale cache hit requires.
+    const pinned = new Date(Math.floor(Date.now() / 1000) * 1000);
+    await utimes(aPath, pinned, pinned);
+    const first = await catalog.service.startSetRender({ setPlanId: plan.id });
+    const done1 = await catalog.service.waitForRenderJob(first.job.id, 15_000);
+    expect(done1.status).toBe("succeeded");
+    const frozenRequest = catalog.renderJobs.findById(first.job.id)!.params.request!;
+
+    const bytes = await readFile(aPath);
+    const edited = Buffer.from(bytes);
+    const mid = Math.floor(edited.length / 2);
+    edited[mid] = (edited[mid] ?? 0) ^ 0xff;
+    await writeFile(aPath, edited);
+    // Restore the pinned mtime so the cache key matches the pre-edit entry.
+    await utimes(aPath, pinned, pinned);
 
     const staleId = crypto.randomUUID();
     catalog.renderJobs.insertQueued({
