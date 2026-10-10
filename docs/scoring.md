@@ -35,7 +35,7 @@ The planner shortlists the top 12 candidates, looks ahead one join (up to 8 stri
 
 ## Quality
 
-New plans default to `qualityPolicy: "strict"`. Conservative harmonic joins are required, and the automatically selected aligned template is `phrase_mix` (the set-plan path never auto-picks `bass_swap`; bass-swap joins arrive via approved recipes or explicit transition planning, and both types count as aligned for quality). Unexplained `other` / unknown / crossfade fails quality. `requiredTransitions` pin a pair only when you ask. `qualityPolicy: "off"` is a fixture/draft hatch. Ready mixes need to land within **5 minutes** of the requested `targetDurationMs`.
+New plans default to `qualityPolicy: "strict"`. Conservative harmonic joins are required, and the preferred aligned template is `phrase_mix` — it preserves volume and energy where it works. The set-plan path auto-picks `bass_swap` only on a **decisive** kick-placement conflict (`PLANNER_BASS_SWAP_TRIGGER_GROOVE = -0.45`, audition-calibrated October 2026); bass swaps also arrive through approved recipes or explicit transition planning, and all three count as aligned for quality. Template thresholds and triggers live in [mixing.md](mixing.md); this document covers scoring only. Unexplained `other` / unknown / crossfade fails quality. `requiredTransitions` pin a pair only when you ask. `qualityPolicy: "off"` is a fixture/draft hatch. Ready mixes need to land within **5 minutes** of the requested `targetDurationMs`.
 
 ## Timing
 
