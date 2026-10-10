@@ -119,12 +119,17 @@ export function createCatalogRuntime(
   let ownsWorker = false;
   let closing: Promise<void> | undefined;
   const canRun = () => ownsWorker && !closing;
+  // R12 claim tokens: valid while ownership is held, including for in-flight
+  // jobs finishing during close() — owner.release() only runs after every
+  // coordinator has settled, so completions during closing are legitimate
+  // under the still-held token. Deposal (heartbeat loss) clears it.
+  const ownerClaimToken = () => (ownsWorker ? owner.currentToken() : null);
   renders.canRun = canRun;
-  renders.ownerToken = () => (ownsWorker && !closing ? owner.currentToken() : null);
+  renders.ownerToken = ownerClaimToken;
   analysis.canRun = canRun;
-  analysis.ownerToken = () => (ownsWorker && !closing ? owner.currentToken() : null);
+  analysis.ownerToken = ownerClaimToken;
   enrichment.canRun = canRun;
-  enrichment.ownerToken = () => (ownsWorker && !closing ? owner.currentToken() : null);
+  enrichment.ownerToken = ownerClaimToken;
   const feedback = new FeedbackRepository(db);
   const recipes = new ApprovedRecipeRepository(db);
   const service = new CatalogService(
