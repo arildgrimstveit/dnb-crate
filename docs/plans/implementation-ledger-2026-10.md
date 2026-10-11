@@ -489,3 +489,14 @@ Both CI lanes green on `f21a019`. Remaining: Batch B tail (delayed
 native-process publication trials, scratch lifecycle), Batch D (automatic
 selection: overlap measurement, alternative evaluation, weak-join recovery,
 generalization - all gated on this corpus), and the documentation task.
+
+## 11 October review - Batch D started (11 October 2026)
+
+| Item                                                                                                                                              | Status    | Commit(s) |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
+| D step 3 (recovery tier 1): whole-phrase window shift on structural conflict before crossfade; explicit windows pinned; shift provenance recorded | Delivered | `f2121ff` |
+
+Both CI lanes green on `f2121ff`. Batch D steps 1-2 (overlap measurement,
+alternative treatment/window evaluation beyond the structural case) and step 5
+(generalization evaluation on held-out automatic plans) remain, gated on
+running the corpus against real library material for a baseline.
