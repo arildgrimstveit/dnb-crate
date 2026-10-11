@@ -457,3 +457,16 @@ Both CI lanes green on `58956bd`. Remaining: S7 unified-context remainder folded
 into S8/Batch B (frozen musical eligibility vs live availability); Batch B (S4
 aggregate CLI success, S5 side-effect fencing, S8 cache identity); Batch C (S9
 corpus); Batch D (automatic selection).
+
+## 11 October review - Batch B core complete (11 October 2026)
+
+| Finding                                                                                                                                                                                | Status | Commit(s)            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | -------------------- |
+| S4: aggregate CLI success over every attempted variant; cache-hit lifecycle preserved at enqueue; wait errors classified                                                               | Fixed  | `3c17d6e`            |
+| S8: previews + comparison freeze FRESH full hashes (stale cache-key hit closed); comparison freezing strict - no weak legacy request for new work                                      | Fixed  | `45e2311`            |
+| S5: authoritative cross-process claim predicate (isClaimCurrent) wired at analysis/enrichment evidence writes and the shared-name listen publication; graceful close is not claim loss | Fixed  | `ba2855c`, `ff91a1b` |
+
+Both CI lanes green on `ff91a1b`. Deliberately open in Batch B: two-runtime
+delayed-native-process publication trials and the scratch-lifecycle remainder.
+Batch C (S9 corpus: cold-start plans, unseen-pair holdouts, negative controls)
+and Batch D (automatic selection) follow.
