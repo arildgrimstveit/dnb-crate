@@ -3294,19 +3294,6 @@ describe("join inspector (batch 9)", () => {
       });
       stubDescriptors(catalog, id, {});
     }
-    // Replacement candidates at a different native tempo (few enough that
-    // the 174 chain dominates selection and a spare survives).
-    for (let i = 0; i < 4; i += 1) {
-      const id = seedTrack(catalog, {
-        title: `S3 Fast ${i}`,
-        artist: `S3 Fast Artist ${i}`,
-        bpm: 178,
-        camelot: "8A",
-        energy: 5,
-        durationMs: 100_000,
-      });
-      stubDescriptors(catalog, id, {}, { bpm: 178 });
-    }
     const created = createPlan(catalog, {
       name: "S3 fixture",
       targetDurationMs: 700_000,
@@ -3345,20 +3332,20 @@ describe("join inspector (batch 9)", () => {
     });
 
     // S3 defect: the replaced entry kept the placeholder rate 1.0 while the
-    // join targeted 174 BPM. The rate must now be derived from the pair:
-    // 174/172 within tolerance.
+    // join targeted 174 BPM. With an all-174 plan and a 172 spare, the
+    // rebuilt pair deterministically derives incoming rate 174/172.
     const after = [...repaired.plan.entries].sort((a, b) => a.order - b.order);
     const replacedIndex = after.findIndex((entry) => entry.id === replacedEntryId);
     expect(replacedIndex).toBe(joinIndex + 1);
+    const rebuiltJoin = after[joinIndex]!.transitionToNext!;
+    expect(["phrase_mix", "bass_swap"]).toContain(rebuiltJoin.type);
     expect(after[replacedIndex]!.playbackRate).toBeGreaterThan(1.001);
     expect(after[replacedIndex]!.playbackRate).toBeLessThan(1.05);
     expect(after[replacedIndex]!.playbackRate).toBeCloseTo(174 / 172, 3);
     expect(after[replacedIndex]!.rateSource).toBeUndefined();
-    // The join's transition targets the chain tempo and the effective BPM
-    // of the replaced entry is consistent with it.
-    const join = after[joinIndex]!.transitionToNext!;
+    // The join's transition targets a consistent chain tempo.
     expect(
-      typeof join.parameters.targetBpm === "number" ? join.parameters.targetBpm : 0,
+      typeof rebuiltJoin.parameters.targetBpm === "number" ? rebuiltJoin.parameters.targetBpm : 0,
     ).toBeLessThan(176);
 
     // The replacement is recorded as an edited plan with changed pairs.
@@ -3373,7 +3360,7 @@ describe("join inspector (batch 9)", () => {
     expect(changedOrders).toEqual([joinIndex, joinIndex + 1]);
     const incomingJoinChange = repaired.diff.changedJoins.find((row) => row.order === joinIndex)!;
     expect(incomingJoinChange.reason).toMatch(/incoming join of the replaced track/);
-    expect(incomingJoinChange.after.incomingRate).toBeCloseTo(174 / 172, 3);
+    expect(incomingJoinChange.after.incomingRate ?? 1).toBeCloseTo(174 / 172, 3);
     for (const preserved of repaired.diff.preservedJoins) {
       expect(preserved.treatment.type).toBe(preserved.type);
     }
