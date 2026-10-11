@@ -149,6 +149,33 @@ export type RenderCheckJoin = {
   audioUnmeasuredReason: string | null;
   /** Measured mix-quality findings (stutter, clipping, holes, clicks). */
   audioFindings: string[];
+  /** S9 stage 1: full source-deck probe provenance and measurement for
+   * this join — what was attempted, from which intervals, how much
+   * evidence locked, and the verifier's numbers — instead of the reduced
+   * status/reason pair. Null when no probe was attempted. */
+  sourceDeckProbe: {
+    mode: "fast" | "full";
+    /** Probe source intervals per deck (source-time ms). */
+    outgoingInterval: { startMs: number; durationMs: number };
+    incomingInterval: { startMs: number; durationMs: number };
+    /** Raw kick-band onsets decoded per deck (before grid locking). */
+    outgoingOnsetCount: number;
+    incomingOnsetCount: number;
+    /** Onsets that locked to their own deck's projected grid. */
+    outgoingLockedCount: number;
+    incomingLockedCount: number;
+    /** The verifier's full measurement (offset, drift halves, confidence). */
+    verification: {
+      status: "pass" | "fail" | "review" | "unmeasured";
+      deckOffsetMs: number | null;
+      startHalfOffsetMs: number | null;
+      endHalfOffsetMs: number | null;
+      confidence: string;
+    };
+    /** The probed bytes verified against the render's frozen content hash
+     * ("verified") or the verification outcome when they could not be. */
+    sourceIdentity: "verified" | "mismatch" | "no-frozen-hash" | "unreadable";
+  } | null;
   /** Level step from the planned (frozen) LUFS and applied gains. */
   plannedLevelStepLu: number | null;
   /** Measured level step across the overlap from the rendered master. */
@@ -185,6 +212,11 @@ export type RenderCheckResult = {
     mode: "off" | "fast" | "full";
     scope: "source-decks";
     probedJoins: number[];
+    /** S9: attempted (eligible, decode started) vs successfully measured
+     * (verdict reached) — sparse evidence abstains and stays visible as
+     * the difference between the two. */
+    attemptedJoins: number[];
+    measuredJoins: number[];
   };
 };
 
@@ -942,6 +974,8 @@ export class RenderCoordinator {
         // the stale "not implemented" default from before the probe existed.
         audioUnmeasuredReason: null,
         audioFindings: [],
+        // S9: filled by the source-deck probe when one is attempted.
+        sourceDeckProbe: null,
         plannedLevelStepLu: plannedLevelStepLu(
           outgoing.outgoingLufs ?? null,
           outgoing.incomingLufs ?? null,
@@ -1047,7 +1081,7 @@ export class RenderCoordinator {
     // rows only, never in the top-level warnings list that gates first-mix
     // workflows; a measured result never clears the geometric residual.
     const audioMode = options?.audioVerification ?? "fast";
-    const deckProbed = await runSourceDeckProbes({
+    const deckProbe = await runSourceDeckProbes({
       joins,
       manifest,
       outputPath,
@@ -1055,7 +1089,9 @@ export class RenderCoordinator {
       runner,
       binaries,
       trackById: (trackId) => this.tracks.findById(trackId) ?? undefined,
+      frozenEvidence: this.jobs.require(renderJobId).params.request?.evidence ?? null,
     });
+    const deckProbed = deckProbe.probed;
     // The stored-grid residual stands unless the user overrides it. An
     // inconclusive audio scan is absence of evidence and must not act as
     // proof of corrected alignment; the deck verifier is advisory until its
@@ -1136,6 +1172,8 @@ export class RenderCoordinator {
         mode: audioMode,
         scope: "source-decks" as const,
         probedJoins: [...deckProbed].sort((a, b) => a - b),
+        attemptedJoins: [...deckProbe.attempted].sort((a, b) => a - b),
+        measuredJoins: [...deckProbe.measured].sort((a, b) => a - b),
       },
     };
   }

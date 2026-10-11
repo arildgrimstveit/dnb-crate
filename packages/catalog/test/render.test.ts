@@ -318,6 +318,8 @@ describe("render jobs", () => {
       mode: "fast",
       scope: "source-decks",
       probedJoins: [],
+      attemptedJoins: [],
+      measuredJoins: [],
     });
     // A crossfade join has no aligned decks to probe: the reason says so
     // instead of the stale "not implemented" default.
@@ -334,6 +336,8 @@ describe("render jobs", () => {
       mode: "off",
       scope: "source-decks",
       probedJoins: [],
+      attemptedJoins: [],
+      measuredJoins: [],
     });
     expect(off.joins[0]!.audioUnmeasuredReason).toBe(
       "source-deck probe off (audioVerification=off)",
@@ -885,6 +889,34 @@ describe("render jobs", () => {
     expect(checked.joins[0]?.storedGridResidualMs).not.toBeNull();
     expect(Math.abs(checked.joins[0]?.storedGridResidualMs ?? 99)).toBeLessThan(20);
     expect(checked.ok).toBe(true);
+    // S9 stage 1: the probe's full provenance is exposed on the join row -
+    // intervals, evidence counts, the verifier's numbers - and the probed
+    // bytes were verified against the render's frozen content hash.
+    const probe = checked.joins[0]?.sourceDeckProbe;
+    expect(probe).not.toBeNull();
+    expect(probe?.mode).toBe("fast");
+    expect(probe?.sourceIdentity).toBe("verified");
+    expect(probe?.outgoingInterval.durationMs).toBeGreaterThan(0);
+    expect(probe?.incomingInterval.durationMs).toBeGreaterThan(0);
+    expect(probe?.outgoingOnsetCount).toBeGreaterThanOrEqual(0);
+    expect(probe?.verification.status).toMatch(/pass|review|fail|unmeasured/);
+    expect(checked.audioVerification.attemptedJoins).toContain(0);
+
+    // S9: after the file changes, the probe REFUSES to measure bytes that
+    // are not the render's — identity mismatch abstains with the reason
+    // instead of measuring the wrong audio.
+    const sourcePath = catalog.repository.findById(alpha.id)!.filePath;
+    const bytes = await readFile(sourcePath);
+    const edited = Buffer.from(bytes);
+    const mid = Math.floor(edited.length / 2);
+    edited[mid] = (edited[mid] ?? 0) ^ 0xff;
+    await writeFile(sourcePath, edited);
+    const rechecked = await catalog.service.checkRender(done.id);
+    const probe2 = rechecked.joins[0]?.sourceDeckProbe;
+    expect(probe2?.sourceIdentity).toBe("mismatch");
+    expect(rechecked.joins[0]?.audioStatus).toBe("unmeasured");
+    expect(rechecked.joins[0]?.audioUnmeasuredReason).toMatch(/source changed since this render/);
+    expect(rechecked.audioVerification.attemptedJoins).not.toContain(0);
   });
 
   it("fails a misaligned stored grid instead of clearing it with an inconclusive audio scan", async () => {

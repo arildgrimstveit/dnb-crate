@@ -2,7 +2,7 @@ import { readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import { outputToSourceMs, type RenderManifestV1, type Track } from "@dnb-crate/domain";
-import type { FfmpegBinaries, ProcessRunner } from "@dnb-crate/audio-renderer";
+import { sha256File, type FfmpegBinaries, type ProcessRunner } from "@dnb-crate/audio-renderer";
 
 import { lowpass, onsetTimesMs, verifyDeckAlignment } from "./audio-diagnostics.ts";
 import type { RenderCheckJoin } from "./coordinator.ts";
@@ -36,11 +36,36 @@ export async function runSourceDeckProbes(input: {
   runner: ProcessRunner;
   binaries: FfmpegBinaries;
   trackById: (trackId: string) => Track | undefined;
-}): Promise<Set<number>> {
+  /** S9: the render's frozen request — the probed bytes are verified
+   * against the frozen content hash BEFORE measuring, so the probe never
+   * reports on audio the render did not use. */
+  frozenEvidence?: Record<string, unknown> | null;
+}): Promise<{ probed: Set<number>; attempted: Set<number>; measured: Set<number> }> {
   const deckProbed = new Set<number>();
+  const attempted = new Set<number>();
+  const measured = new Set<number>();
+  const frozenHashFor = (trackId: string): string | null | undefined => {
+    const row = input.frozenEvidence?.[trackId] as
+      { sourceContentSha256?: string | null } | undefined;
+    return row?.sourceContentSha256;
+  };
+  const verifySourceIdentity = async (
+    track: Track,
+  ): Promise<"verified" | "mismatch" | "no-frozen-hash" | "unreadable"> => {
+    const frozenHash = frozenHashFor(track.id);
+    if (typeof frozenHash !== "string" || frozenHash === "") {
+      return "no-frozen-hash";
+    }
+    try {
+      const current = await sha256File(path.resolve(track.filePath));
+      return current === frozenHash ? "verified" : "mismatch";
+    } catch {
+      return "unreadable";
+    }
+  };
   if (input.audioMode === "off") {
     reconcileUnmeasuredReasons(input.joins, deckProbed, input.audioMode);
-    return deckProbed;
+    return { probed: deckProbed, attempted, measured };
   }
   for (const join of input.joins) {
     if (
@@ -72,6 +97,47 @@ export async function runSourceDeckProbes(input: {
       input.audioMode === "fast" ? Math.max(0, (overlapOutMs - probeMs) / 2) : 0;
     const outProbeSourceStart = outOverlapStartSource + outputToSourceMs(probeOffsetMs, outRate);
     const inProbeSourceStart = incomingRow.sourceStartMs + outputToSourceMs(probeOffsetMs, inRate);
+    // S9: verify the probed bytes ARE the render's bytes before measuring.
+    // A mismatch means the current file differs from what was rendered —
+    // measuring it would attribute the wrong audio to the join.
+    const outIdentity = await verifySourceIdentity(outTrack);
+    const inIdentity = await verifySourceIdentity(inTrack);
+    if (outIdentity === "mismatch" || inIdentity === "mismatch") {
+      deckProbed.add(join.order);
+      join.audioUnmeasuredReason =
+        "source-deck probe skipped: source changed since this render (frozen content hash mismatch)";
+      join.sourceDeckProbe = {
+        mode: input.audioMode,
+        outgoingInterval: {
+          startMs: Math.round(outProbeSourceStart),
+          durationMs: Math.round(probeMs * outRate),
+        },
+        incomingInterval: {
+          startMs: Math.round(inProbeSourceStart),
+          durationMs: Math.round(probeMs * inRate),
+        },
+        outgoingOnsetCount: 0,
+        incomingOnsetCount: 0,
+        outgoingLockedCount: 0,
+        incomingLockedCount: 0,
+        verification: {
+          status: "unmeasured",
+          deckOffsetMs: null,
+          startHalfOffsetMs: null,
+          endHalfOffsetMs: null,
+          confidence: "none",
+        },
+        sourceIdentity: "mismatch",
+      };
+      continue;
+    }
+    attempted.add(join.order);
+    const identity =
+      outIdentity === "verified" && inIdentity === "verified"
+        ? ("verified" as const)
+        : outIdentity === "unreadable" || inIdentity === "unreadable"
+          ? ("unreadable" as const)
+          : ("no-frozen-hash" as const);
     const token = crypto.randomUUID().slice(0, 8);
     const outPcm = `${input.outputPath}.deck-out-${join.order}-${token}.pcm`;
     const inPcm = `${input.outputPath}.deck-in-${join.order}-${token}.pcm`;
@@ -178,9 +244,37 @@ export async function runSourceDeckProbes(input: {
         beatPeriodMs,
       });
       deckProbed.add(join.order);
+      measured.add(join.order);
       join.audioStatus = verification.status;
       join.audioUnmeasuredReason =
         verification.status === "unmeasured" ? (verification.reasons[0] ?? null) : null;
+      // S9: expose the FULL measurement on the join row instead of the
+      // reduced status/reason pair — intervals, decoded and locked onset
+      // counts, offset/drift halves, and confidence — so coverage and
+      // abstention are inspectable per join.
+      join.sourceDeckProbe = {
+        mode: input.audioMode,
+        outgoingInterval: {
+          startMs: Math.round(outProbeSourceStart),
+          durationMs: Math.round(probeMs * outRate),
+        },
+        incomingInterval: {
+          startMs: Math.round(inProbeSourceStart),
+          durationMs: Math.round(probeMs * inRate),
+        },
+        outgoingOnsetCount: outgoingOnsets.length,
+        incomingOnsetCount: incomingOnsets.length,
+        outgoingLockedCount: lockedOut.length,
+        incomingLockedCount: lockedIn.length,
+        verification: {
+          status: verification.status,
+          deckOffsetMs: verification.deckOffsetMs,
+          startHalfOffsetMs: verification.startHalfOffsetMs,
+          endHalfOffsetMs: verification.endHalfOffsetMs,
+          confidence: verification.confidence,
+        },
+        sourceIdentity: identity,
+      };
       if (verification.status !== "pass") {
         join.audioFindings = [
           ...join.audioFindings,
@@ -198,7 +292,7 @@ export async function runSourceDeckProbes(input: {
     }
   }
   reconcileUnmeasuredReasons(input.joins, deckProbed, input.audioMode);
-  return deckProbed;
+  return { probed: deckProbed, attempted, measured };
 }
 
 /**
