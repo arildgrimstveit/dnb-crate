@@ -1,0 +1,29 @@
+# Library corpus baseline - audition guide (2026-10-11)
+
+Cold-start plans (no saved joins, history, or recipes). Listen to each file and rate joins by ear (feedback:rate / hour:feedback). Technical labels below are NOT musical judgments.
+
+## corpus-baseline-101 (seed 101, 4 tracks, render succeeded)
+
+- listen: renders/corpus-baseline-101.flac
+- partial: false
+- plan 1563ms, render 29445ms, check ok=false
+
+| #   | at (mm:ss) | join                                                     | template   | probe  | notes                          |
+| --- | ---------- | -------------------------------------------------------- | ---------- | ------ | ------------------------------ |
+| 0   | 4:06       | Rock It → Turn Back Time - Wilkinson Remix               | phrase_mix | pass   | offset 0.0ms, residual 0ms     |
+| 1   | 5:01       | Turn Back Time - Wilkinson Remix → Girl In The Fire      | phrase_mix | review | offset -10.0ms, residual 0ms   |
+| 2   | 9:10       | Girl In The Fire → All Fall Down - Fred V & Grafix Remix | phrase_mix | fail   | offset 108.3ms, residual 120ms |
+
+## corpus-baseline-102 (seed 102, 6 tracks, render succeeded)
+
+- listen: renders/corpus-baseline-102.flac
+- partial: false
+- plan 2352ms, render 75601ms, check ok=false
+
+| #   | at (mm:ss) | join                       | template   | probe  | notes                        |
+| --- | ---------- | -------------------------- | ---------- | ------ | ---------------------------- |
+| 0   | 1:39       | Lose Control → No Problem  | phrase_mix | pass   | offset -20.0ms, residual 0ms |
+| 1   | 4:48       | No Problem → Sunburst      | phrase_mix | pass   | offset -5.8ms, residual 0ms  |
+| 2   | 8:35       | Sunburst → Witchcraft      | phrase_mix | pass   | offset 0.0ms, residual 0ms   |
+| 3   | 9:23       | Witchcraft → Atmosphere    | phrase_mix | review | offset 49.7ms, residual 60ms |
+| 4   | 12:16      | Atmosphere → Time With You | phrase_mix | pass   | offset 0.0ms, residual 0ms   |

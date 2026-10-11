@@ -1,0 +1,248 @@
+{
+  "summary": {
+    "generatedAt": "2026-10-11T23:54:02.662Z",
+    "plans": 2,
+    "minutesPerPlan": 15,
+    "coldStart": {
+      "transitionFeedback": {
+        "n": 135
+      },
+      "hourFeedback": {
+        "n": 7
+      },
+      "approvedRecipes": {
+        "n": 0
+      }
+    },
+    "libraryStats": {
+      "totalTracks": 642,
+      "missingFiles": 11,
+      "unmixableTagged": 3,
+      "ratedOne": 30,
+      "analyzed": 641
+    },
+    "determinism": {
+      "sameSeedReproduces": true
+    },
+    "joins": {
+      "total": 8,
+      "aligned": 8,
+      "crossfade": 0,
+      "crossfadeReasons": {},
+      "windowShiftRecoveries": 0,
+      "probe": {
+        "pass": 5,
+        "review": 2,
+        "fail": 1,
+        "unmeasured": 0,
+        "notProbed": 0
+      },
+      "residualOver40Ms": 2,
+      "holdout": {
+        "tuningJoins": 4,
+        "holdoutJoins": 4
+      }
+    },
+    "variety": {
+      "distinctTitlePairs": 8,
+      "repeatedPairs": 0,
+      "distinctArtistsApprox": 10
+    },
+    "runtime": {
+      "totalPlanMs": 3915,
+      "totalRenderMs": 105046
+    },
+    "manualIntervention": {
+      "probeFlagged": 3,
+      "partialPlans": 0,
+      "failedRenders": 0
+    },
+    "scratchOutputRoot": "C:\\Users\\arild\\AppData\\Local\\Temp\\dnb-library-corpus-2026-10-11-7bed83a7\\output"
+  },
+  "plans": [
+    {
+      "seed": 101,
+      "name": "corpus-baseline-101",
+      "entryCount": 4,
+      "partial": false,
+      "selectedCount": 4,
+      "rejectedCount": 50,
+      "planMs": 1563,
+      "renderMs": 29445,
+      "renderStatus": "succeeded",
+      "checkOk": false,
+      "checkWarnings": 0,
+      "listenPath": "renders/corpus-baseline-101.flac",
+      "joins": [
+        {
+          "plan": "corpus-baseline-101",
+          "order": 0,
+          "outgoingTitle": "Rock It",
+          "incomingTitle": "Turn Back Time - Wilkinson Remix",
+          "template": "phrase_mix",
+          "barCount": 16,
+          "reason": "continuity-window",
+          "windowShiftBars": null,
+          "outgoingRate": 1,
+          "incomingRate": 1,
+          "joinAtMs": 245518,
+          "storedGridResidualMs": 0,
+          "probeStatus": "pass",
+          "probeOffsetMs": 0,
+          "probeLocked": "57/81",
+          "sourceIdentity": "verified",
+          "pairHoldout": "tuning"
+        },
+        {
+          "plan": "corpus-baseline-101",
+          "order": 1,
+          "outgoingTitle": "Turn Back Time - Wilkinson Remix",
+          "incomingTitle": "Girl In The Fire",
+          "template": "phrase_mix",
+          "barCount": 32,
+          "reason": "continuity-window",
+          "windowShiftBars": null,
+          "outgoingRate": 1,
+          "incomingRate": 1,
+          "joinAtMs": 300685,
+          "storedGridResidualMs": 0,
+          "probeStatus": "review",
+          "probeOffsetMs": -10,
+          "probeLocked": "41/54",
+          "sourceIdentity": "verified",
+          "pairHoldout": "tuning"
+        },
+        {
+          "plan": "corpus-baseline-101",
+          "order": 2,
+          "outgoingTitle": "Girl In The Fire",
+          "incomingTitle": "All Fall Down - Fred V & Grafix Remix",
+          "template": "phrase_mix",
+          "barCount": 32,
+          "reason": "continuity-window",
+          "windowShiftBars": null,
+          "outgoingRate": 1,
+          "incomingRate": 1,
+          "joinAtMs": 549781,
+          "storedGridResidualMs": 120,
+          "probeStatus": "fail",
+          "probeOffsetMs": 108.30177503987215,
+          "probeLocked": "79/67",
+          "sourceIdentity": "verified",
+          "pairHoldout": "tuning"
+        }
+      ]
+    },
+    {
+      "seed": 102,
+      "name": "corpus-baseline-102",
+      "entryCount": 6,
+      "partial": false,
+      "selectedCount": 6,
+      "rejectedCount": 50,
+      "planMs": 2352,
+      "renderMs": 75601,
+      "renderStatus": "succeeded",
+      "checkOk": false,
+      "checkWarnings": 0,
+      "listenPath": "renders/corpus-baseline-102.flac",
+      "joins": [
+        {
+          "plan": "corpus-baseline-102",
+          "order": 0,
+          "outgoingTitle": "Lose Control",
+          "incomingTitle": "No Problem",
+          "template": "phrase_mix",
+          "barCount": 32,
+          "reason": "continuity-window",
+          "windowShiftBars": null,
+          "outgoingRate": 1,
+          "incomingRate": 1,
+          "joinAtMs": 98739,
+          "storedGridResidualMs": 0,
+          "probeStatus": "pass",
+          "probeOffsetMs": -20,
+          "probeLocked": "104/47",
+          "sourceIdentity": "verified",
+          "pairHoldout": "holdout"
+        },
+        {
+          "plan": "corpus-baseline-102",
+          "order": 1,
+          "outgoingTitle": "No Problem",
+          "incomingTitle": "Sunburst",
+          "template": "phrase_mix",
+          "barCount": 16,
+          "reason": "continuity-window",
+          "windowShiftBars": null,
+          "outgoingRate": 1,
+          "incomingRate": 1.0057471264367825,
+          "joinAtMs": 287999,
+          "storedGridResidualMs": 0,
+          "probeStatus": "pass",
+          "probeOffsetMs": -5.828571428573923,
+          "probeLocked": "34/68",
+          "sourceIdentity": "verified",
+          "pairHoldout": "tuning"
+        },
+        {
+          "plan": "corpus-baseline-102",
+          "order": 2,
+          "outgoingTitle": "Sunburst",
+          "incomingTitle": "Witchcraft",
+          "template": "phrase_mix",
+          "barCount": 32,
+          "reason": "continuity-window",
+          "windowShiftBars": null,
+          "outgoingRate": 1.0057471264367825,
+          "incomingRate": 1.0057471264367825,
+          "joinAtMs": 515467,
+          "storedGridResidualMs": 0,
+          "probeStatus": "pass",
+          "probeOffsetMs": 0,
+          "probeLocked": "175/86",
+          "sourceIdentity": "verified",
+          "pairHoldout": "holdout"
+        },
+        {
+          "plan": "corpus-baseline-102",
+          "order": 3,
+          "outgoingTitle": "Witchcraft",
+          "incomingTitle": "Atmosphere",
+          "template": "phrase_mix",
+          "barCount": 32,
+          "reason": "continuity-window",
+          "windowShiftBars": null,
+          "outgoingRate": 1.0057471264367825,
+          "incomingRate": 1.0057471264367825,
+          "joinAtMs": 562854,
+          "storedGridResidualMs": 60,
+          "probeStatus": "review",
+          "probeOffsetMs": 49.714285714282596,
+          "probeLocked": "63/140",
+          "sourceIdentity": "verified",
+          "pairHoldout": "holdout"
+        },
+        {
+          "plan": "corpus-baseline-102",
+          "order": 4,
+          "outgoingTitle": "Atmosphere",
+          "incomingTitle": "Time With You",
+          "template": "phrase_mix",
+          "barCount": 16,
+          "reason": "continuity-window",
+          "windowShiftBars": null,
+          "outgoingRate": 1.0057471264367825,
+          "incomingRate": 1.0057471264367817,
+          "joinAtMs": 736399,
+          "storedGridResidualMs": 0,
+          "probeStatus": "pass",
+          "probeOffsetMs": 3.637978807091713e-12,
+          "probeLocked": "104/183",
+          "sourceIdentity": "verified",
+          "pairHoldout": "holdout"
+        }
+      ]
+    }
+  ]
+}
