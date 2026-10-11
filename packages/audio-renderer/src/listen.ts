@@ -8,6 +8,15 @@ import type { ProcessRunner } from "./runner.ts";
 
 const LISTEN_FLAC_COMPRESSION_LEVEL = 8;
 const TRUE_PEAK_HEADROOM_DB = 0.05;
+/** Bounded dither compensation (2026-10 CI diagnosis): a 16-bit dithered
+ * listen copy can measure a true peak slightly ABOVE the ceiling when the
+ * master legitimately sits at it — dither noise, not a loudness defect.
+ * The coordinator re-encodes once with a compensating attenuation when the
+ * overshoot is within this bound; larger overshoots indicate a real
+ * problem and still withhold. The gate itself is unchanged: the published
+ * copy must measure within the ceiling. */
+export const LISTEN_DITHER_COMPENSATION_MAX_DB = 0.5;
+export const LISTEN_DITHER_COMPENSATION_MARGIN_DB = 0.05;
 
 export function listenCopyFailureReason(
   measured: { integratedLufs: number | null; truePeakDb: number | null },
@@ -92,7 +101,9 @@ async function atomicReplace(fromPath: string, toPath: string): Promise<void> {
   }
 }
 
-/** 16-bit 48 kHz FLAC from a 24-bit master. Dithered. Copies tags and chapters. */
+/** 16-bit 48 kHz FLAC from a 24-bit master. Dithered. Copies tags and chapters.
+ * `options.gainDb` applies a static attenuation BEFORE the dither stage — the
+ * dither-compensation retry path. */
 export async function encodeListenFlac(
   runner: ProcessRunner,
   binaries: FfmpegBinaries,
@@ -100,6 +111,7 @@ export async function encodeListenFlac(
   outputPath: string,
   abortSignal?: AbortSignal,
   verifyStaged?: (stagedPath: string) => Promise<void>,
+  options?: { gainDb?: number },
 ): Promise<void> {
   if (abortSignal?.aborted) {
     const error = new Error("Render cancelled");
@@ -108,6 +120,9 @@ export async function encodeListenFlac(
   }
   await mkdir(path.dirname(outputPath), { recursive: true });
   const partial = `${outputPath}.${crypto.randomUUID()}.partial.flac`;
+  const resample = "aresample=osf=s16:dither_method=triangular_hp";
+  const filterChain =
+    options?.gainDb != null ? `volume=${options.gainDb.toFixed(2)}dB,${resample}` : resample;
   const args = [
     "-nostdin",
     "-hide_banner",
@@ -119,7 +134,7 @@ export async function encodeListenFlac(
     "-map_chapters",
     "0",
     "-af",
-    "aresample=osf=s16:dither_method=triangular_hp",
+    filterChain,
     "-c:a",
     "flac",
     "-compression_level",

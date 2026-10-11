@@ -65,6 +65,8 @@ import {
   measureLoudness,
   encodeListenFlac,
   listenCopyFailureReason,
+  LISTEN_DITHER_COMPENSATION_MAX_DB,
+  LISTEN_DITHER_COMPENSATION_MARGIN_DB,
   applyAlignmentOffset,
   planAlignmentOffsetMs,
   mixTagsFromTracklist,
@@ -1565,7 +1567,22 @@ export class RenderCoordinator {
             warnings.push("Listen path escaped outputRoot; skipped the 16-bit copy.");
             manifest.warnings = warnings;
           } else {
-            try {
+            // Dither-compensation retry (2026-10 CI diagnosis of the
+            // intermittent first-mix failure): a 16-bit dithered listen can
+            // measure a true peak slightly over the ceiling when the master
+            // legitimately sits at it (observed -0.90 dBTP vs -1.00 ceiling).
+            // Re-encode once with a bounded attenuation applied BEFORE the
+            // dither stage; the retry is measured and gated exactly like the
+            // first attempt, so the published copy always satisfies the
+            // ceiling. Larger overshoots are real failures and still
+            // withhold. Nothing about the check is weakened.
+            const ceilingDb = frozenSettings?.truePeakCeilingDb ?? this.settings.truePeakCeilingDb;
+            class ListenOverPeak extends Error {
+              constructor(readonly overshootDb: number) {
+                super(`Listen-copy true peak exceeds ceiling by ${overshootDb.toFixed(2)} dB`);
+              }
+            }
+            const encodeListenWithVerification = async (gainDb?: number) => {
               await encodeListenFlac(
                 this.runner,
                 binaries,
@@ -1582,16 +1599,43 @@ export class RenderCoordinator {
                   manifest.listenChecksumSha256 = await sha256File(stagedPath);
                   manifest.listenIntegratedLufs = measured.integratedLufs;
                   manifest.listenTruePeakDb = measured.truePeakDb;
-                  const failure = listenCopyFailureReason(
-                    measured,
-                    frozenSettings?.truePeakCeilingDb ?? this.settings.truePeakCeilingDb,
-                  );
-                  if (failure)
+                  const failure = listenCopyFailureReason(measured, ceilingDb);
+                  if (failure) {
+                    const overshoot =
+                      measured.truePeakDb != null ? measured.truePeakDb - ceilingDb : null;
+                    if (
+                      overshoot != null &&
+                      overshoot > 0 &&
+                      overshoot <= LISTEN_DITHER_COMPENSATION_MAX_DB
+                    ) {
+                      throw new ListenOverPeak(overshoot);
+                    }
                     throw new DomainError("RENDER_FAILED", `Listen copy withheld: ${failure}.`, {
                       retryable: false,
                     });
+                  }
                 },
+                gainDb != null ? { gainDb } : undefined,
               );
+            };
+            try {
+              try {
+                await encodeListenWithVerification();
+              } catch (error) {
+                if (
+                  error instanceof ListenOverPeak &&
+                  !(controller.signal?.aborted === true) &&
+                  this.jobs.findById(job.id)?.status !== "cancelled"
+                ) {
+                  const compensationDb = -(
+                    error.overshootDb + LISTEN_DITHER_COMPENSATION_MARGIN_DB
+                  );
+                  manifest.listenDitherCompensationDb = Number(compensationDb.toFixed(2));
+                  await encodeListenWithVerification(compensationDb);
+                } else {
+                  throw error;
+                }
+              }
               manifest.listenRootRelativePath = listenRel.split(path.sep).join("/");
               manifest.listenBitDepth = LISTEN_RENDER_BIT_DEPTH;
             } catch (error) {

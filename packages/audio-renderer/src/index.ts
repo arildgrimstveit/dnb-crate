@@ -53,7 +53,12 @@ export {
   type MixSegment,
   type StretchEngine,
 } from "./mix.ts";
-export { encodeListenFlac, listenCopyFailureReason } from "./listen.ts";
+export {
+  encodeListenFlac,
+  listenCopyFailureReason,
+  LISTEN_DITHER_COMPENSATION_MAX_DB,
+  LISTEN_DITHER_COMPENSATION_MARGIN_DB,
+} from "./listen.ts";
 export {
   MIX_TAG_ARTIST,
   buildCueSheet,

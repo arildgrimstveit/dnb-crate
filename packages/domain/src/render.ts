@@ -129,6 +129,11 @@ export type RenderManifestV1 = {
   stretchEngines?: string[];
   listenIntegratedLufs?: number | null;
   listenTruePeakDb?: number | null;
+  /** Dither compensation applied to the listen copy (2026-10 CI diagnosis):
+   * the 16-bit dither can push a ceiling-sitting master's true peak slightly
+   * over; the listen is re-encoded once with this attenuation before the
+   * dither stage and must still measure within the ceiling. */
+  listenDitherCompensationDb?: number | null;
   invocation: string;
   tracks: RenderManifestTrack[];
   joinEvidence?: FrozenJoinEvidence[];

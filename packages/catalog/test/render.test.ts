@@ -340,6 +340,82 @@ describe("render jobs", () => {
     );
   });
 
+  it("re-encodes the listen copy with bounded dither compensation (CI flake fix)", async () => {
+    // Reproduction of the diagnosed intermittent first-mix failure: the
+    // 16-bit dithered listen measures -0.90 dBTP against the -1.00 ceiling
+    // while the master legitimately sits at it. The listen must be
+    // re-encoded once with a compensating attenuation (before the dither
+    // stage) and must then MEET the ceiling - not be withheld.
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-listen-dither-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    let listenMeasurements = 0;
+    const runner = createFakeFfmpegRunner({
+      probeDurationSec: 16,
+      eburForInput: (input: string) => {
+        if (!input.endsWith(".partial.flac")) return undefined;
+        listenMeasurements += 1;
+        return listenMeasurements === 1
+          ? { integratedLufs: -14.2, truePeakDb: -0.9 }
+          : { integratedLufs: -14.2, truePeakDb: -1.05 };
+      },
+    });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { processRunner: runner });
+    cleanups.push(() => catalog.close());
+    const aPath = path.join(library, "alpha.wav");
+    const bPath = path.join(library, "bravo.wav");
+    await writeSineWav(aPath, { title: "Alpha", artist: "A", durationMs: 8000 });
+    await writeSineWav(bPath, { title: "Bravo", artist: "B", durationMs: 8000 });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
+    const plan = saveTwoTrackPlan(catalog, tracks[0]!.id, tracks[1]!.id);
+    const started = await catalog.service.startSetRender({ setPlanId: plan.id });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    // The retry ran and its measurement gates the deliverable.
+    expect(listenMeasurements).toBe(2);
+    expect(done.listenRootRelativePath).not.toBeNull();
+    const manifest = catalog.service.getRenderManifest(done.id);
+    expect(manifest.listenTruePeakDb).not.toBeNull();
+    expect(manifest.listenTruePeakDb!).toBeLessThanOrEqual(-1.0);
+    // Overshoot 0.10 dB + 0.05 margin.
+    expect(manifest.listenDitherCompensationDb).toBeCloseTo(-0.15, 2);
+    expect(done.warnings.join(" ")).not.toMatch(/Listen copy withheld/);
+  });
+
+  it("still withholds the listen copy when the overshoot exceeds the dither bound", async () => {
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-listen-bad-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const runner = createFakeFfmpegRunner({
+      probeDurationSec: 16,
+      eburForInput: (input: string) =>
+        input.endsWith(".partial.flac")
+          ? { integratedLufs: -14.2, truePeakDb: -0.2 } // 0.8 dB over: a real problem
+          : undefined,
+    });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { processRunner: runner });
+    cleanups.push(() => catalog.close());
+    const aPath = path.join(library, "alpha.wav");
+    const bPath = path.join(library, "bravo.wav");
+    await writeSineWav(aPath, { title: "Alpha", artist: "A", durationMs: 8000 });
+    await writeSineWav(bPath, { title: "Bravo", artist: "B", durationMs: 8000 });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
+    const plan = saveTwoTrackPlan(catalog, tracks[0]!.id, tracks[1]!.id);
+    const started = await catalog.service.startSetRender({ setPlanId: plan.id });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    // The master is fine; the listen is honestly withheld with the reason.
+    expect(done.status).toBe("succeeded");
+    expect(done.listenRootRelativePath).toBeNull();
+    expect(done.warnings.join(" ")).toMatch(/Listen copy withheld/);
+  });
+
   it("returns a cached preview for an identical second request", async () => {
     const { catalog, plan } = await seededLibrary();
     const transitionId = plan.entries[0]!.transitionToNext!.id;
