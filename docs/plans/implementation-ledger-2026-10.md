@@ -441,3 +441,19 @@ its in-test diagnostics remain armed. Nothing from the 10 October review or its
 remainder list is open; future work returns to the feature shortlist (similar
 approved treatments, vocal-overlap awareness) and opportunistic gray-zone
 calibration.
+
+## 11 October review - Batch A complete (11 October 2026)
+
+| Finding                                                                                                                        | Status | Commit(s)                                  |
+| ------------------------------------------------------------------------------------------------------------------------------ | ------ | ------------------------------------------ |
+| S1: invalidated joins never carry recipeVersion; transition/rate edits invalidate neighbors                                    | Fixed  | `34c32b1`, `4fa56af`                       |
+| S2: manual mix-out cues advisory; resolved window wins on aligned joins                                                        | Fixed  | `59ce6d0`                                  |
+| S3: replacement re-derives rates (pin/derived split, migration 024), edited marker, effective diff, no-op + atomicity          | Fixed  | `590f9dc`, `10c3fa6`, `f6dcd93`, `58956bd` |
+| S6: one base-eligibility predicate for the suspect policy; strict threshold; pins cannot resurrect unmixable                   | Fixed  | `f9907b3`                                  |
+| S7 stage 1: saved rates validated after selection + effective-tempo agreement; overlap-start fallback; actual duration honored | Fixed  | `25d9296`                                  |
+| Linux first-mix flake root cause: listen-copy dither over ceiling; bounded compensation re-encode, gate unchanged              | Fixed  | `518bb9b`                                  |
+
+Both CI lanes green on `58956bd`. Remaining: S7 unified-context remainder folded
+into S8/Batch B (frozen musical eligibility vs live availability); Batch B (S4
+aggregate CLI success, S5 side-effect fencing, S8 cache identity); Batch C (S9
+corpus); Batch D (automatic selection).
