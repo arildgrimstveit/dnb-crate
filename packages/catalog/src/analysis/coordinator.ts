@@ -225,11 +225,12 @@ export class AnalysisCoordinator {
     // the new owner re-claims it under a different token), so
     // isClaimCurrent goes false and this owner stops WRITING catalog
     // evidence — analysis rows, analyzed metadata, stages — for work
-    // nobody owns anymore. The terminal-row fence (R12) remains the second
+    // nobody owns anymore. Local `stopped` (graceful close) is NOT claim
+    // loss: in-flight jobs deliberately finish during close under the
+    // still-held claim. The terminal-row fence (R12) remains the second
     // defense.
     const claimToken = this.ownerToken();
     const claimCurrent = () =>
-      !this.stopped &&
       this.jobs.require(job.id).status !== "cancelled" &&
       this.jobs.isClaimCurrent(job.id, claimToken);
     try {

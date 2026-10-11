@@ -208,7 +208,7 @@ export class EnrichmentCoordinator {
     // authority. A deposed owner stops BEFORE applying published metadata
     // for tracks nobody owns the job for anymore.
     const claimToken = this.ownerToken();
-    const claimCurrent = () => !this.stopped && this.jobs.isClaimCurrent(job.id, claimToken);
+    const claimCurrent = () => this.jobs.isClaimCurrent(job.id, claimToken);
     try {
       if (this.config.enrichment?.enabled !== true) {
         throw new DomainError("ENRICHMENT_FAILED", "Enrichment is disabled in config");
