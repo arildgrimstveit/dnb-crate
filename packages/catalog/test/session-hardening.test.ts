@@ -244,6 +244,138 @@ describe("pool rejects unstable grids (2026-10 sessions)", () => {
     expect(pool.pool).toHaveLength(stable.length);
   });
 
+  it("suspect exclusion counts only base-eligible alternatives (S6)", () => {
+    // The reproduced defect: 13 otherwise-usable SUSPECT tracks plus 12
+    // NON-suspect tracks whose artist the brief excludes. The excluded-artist
+    // tracks counted as the alternative supply, dropped every suspect, and
+    // emptied the pool — ineligible filler decided eligibility.
+    const suspects = Array.from({ length: 13 }, (_, i) =>
+      plainTrack(`sus${i}`, `Suspect ${i}`, `Suspect Artist ${i}`),
+    );
+    const blocked = Array.from({ length: 12 }, (_, i) =>
+      plainTrack(`blk${i}`, `Blocked ${i}`, "Blocked Artist"),
+    );
+    const suspectAnalysis = (): TimelineAnalysis => ({
+      ...timelineAnalysis(0.9),
+      descriptors: {
+        energy: null,
+        danceability: null,
+        valence: null,
+        acousticness: null,
+        melodicness: null,
+        subBassRatio: null,
+        brightness: null,
+        suggestedEnergy: 6,
+        gridPhaseSuspect: true,
+      },
+    });
+    const cleanAnalysis = (): TimelineAnalysis => ({
+      ...timelineAnalysis(0.9),
+      descriptors: {
+        energy: null,
+        danceability: null,
+        valence: null,
+        acousticness: null,
+        melodicness: null,
+        subBassRatio: null,
+        brightness: null,
+        suggestedEnergy: 6,
+        gridPhaseSuspect: false,
+      },
+    });
+    const analyses = new Map<string, TimelineAnalysis>();
+    for (const track of suspects) analyses.set(track.id, suspectAnalysis());
+    for (const track of blocked) analyses.set(track.id, cleanAnalysis());
+    const pool = buildPlanningPool(
+      [...suspects, ...blocked],
+      { name: "brief", targetDurationMinutes: 30, excludedArtists: ["blocked artist"] },
+      {
+        analyses,
+        requiredIds: [],
+        targetDurationMs: 30 * 60_000,
+      },
+    );
+    // The suspects ARE the usable population: with no base-eligible
+    // non-suspect alternatives they are admitted, not dropped.
+    expect(pool.pool).toHaveLength(13);
+    expect(pool.pool.every((track) => track.id.startsWith("sus"))).toBe(true);
+    expect(
+      pool.rejected.some(
+        (row) => row.reason === "EXCLUDED_ARTIST" && row.trackId.startsWith("blk"),
+      ),
+    ).toBe(true);
+  });
+
+  it("still excludes suspects when base-eligible alternatives exist (S6)", () => {
+    const suspects = Array.from({ length: 3 }, (_, i) =>
+      plainTrack(`q${i}`, `Suspect ${i}`, `Suspect Artist ${i}`),
+    );
+    const clean = Array.from({ length: 16 }, (_, i) => plainTrack(`c${i}`, `Clean ${i}`));
+    const suspectAnalysis = (): TimelineAnalysis => ({
+      ...timelineAnalysis(0.9),
+      descriptors: {
+        energy: null,
+        danceability: null,
+        valence: null,
+        acousticness: null,
+        melodicness: null,
+        subBassRatio: null,
+        brightness: null,
+        suggestedEnergy: 6,
+        gridPhaseSuspect: true,
+      },
+    });
+    const cleanAnalysis = (): TimelineAnalysis => ({
+      ...timelineAnalysis(0.9),
+      descriptors: {
+        energy: null,
+        danceability: null,
+        valence: null,
+        acousticness: null,
+        melodicness: null,
+        subBassRatio: null,
+        brightness: null,
+        suggestedEnergy: 6,
+        gridPhaseSuspect: false,
+      },
+    });
+    const analyses = new Map<string, TimelineAnalysis>();
+    for (const track of suspects) analyses.set(track.id, suspectAnalysis());
+    for (const track of clean) analyses.set(track.id, cleanAnalysis());
+    const pool = buildPlanningPool(
+      [...suspects, ...clean],
+      { name: "brief", targetDurationMinutes: 30 },
+      {
+        analyses,
+        requiredIds: [],
+        targetDurationMs: 30 * 60_000,
+      },
+    );
+    expect(pool.pool.some((track) => track.id.startsWith("q"))).toBe(false);
+    expect(
+      pool.rejected.some(
+        (row) => row.reason === "GRID_PHASE_SUSPECT" && row.trackId.startsWith("q"),
+      ),
+    ).toBe(true);
+    expect(pool.pool).toHaveLength(clean.length);
+  });
+
+  it("pins cannot resurrect an owner unmixable verdict (S6)", () => {
+    const unmixable = { ...plainTrack("unm", "Unmixable Pin"), tags: ["unmixable"] };
+    const clean = Array.from({ length: 14 }, (_, i) => plainTrack(`p${i}`, `Pin Pool ${i}`));
+    expect(() =>
+      buildPlanningPool(
+        [unmixable, ...clean],
+        { name: "brief", targetDurationMinutes: 30, startTrackId: "unm" },
+        {
+          analyses: new Map(),
+          requiredIds: [],
+          targetDurationMs: 30 * 60_000,
+        },
+      ),
+    ).toThrow(/unmixable by an owner verdict/);
+  });
+
   it("treats a missing stability reading as unknown rather than unstable", () => {
     const unknown = plainTrack("unk", "Unknown Grid");
     const pool = buildPlanningPool(

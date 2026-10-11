@@ -79,20 +79,29 @@ export function buildPlanningPool(
   );
   let descriptorFilters = originalDescriptorFilters;
   let relaxationSteps = 0;
-  const filterCatalog = (filters: DescriptorFilters | undefined) =>
-    catalog.filter((track) => {
+  const filterCatalog = (filters: DescriptorFilters | undefined) => {
+    // S6 (11 October review): ONE shared base-eligibility pass per filter
+    // level, then the suspect policy applied to that usable population.
+    // The alternatives count now reflects what the brief can actually use:
+    // ineligible filler (excluded artists, BPM/genre/rating/descriptor
+    // mismatches, unstable grids) can no longer decide suspect eligibility,
+    // and the catalog is scanned once per level instead of once per suspect
+    // track.
+    const baseEligible = new Set<string>();
+    const suspectIds = new Set<string>();
+    for (const track of catalog) {
       if (track.fileMissing) {
         rejected.push({ trackId: track.id, title: track.title, reason: "FILE_MISSING" });
-        return false;
+        continue;
       }
       if (excludedIds.has(track.id)) {
         rejected.push({ trackId: track.id, title: track.title, reason: "EXCLUDED_ID" });
-        return false;
+        continue;
       }
       const artist = artistKey(track);
       if (artist !== null && excludedArtists.has(artist)) {
         rejected.push({ trackId: track.id, title: track.title, reason: "EXCLUDED_ARTIST" });
-        return false;
+        continue;
       }
       // minRating excludes explicitly-rated-bad material; UNRATED tracks pass.
       // The 2026-10 sessions showed the old null-rejecting semantics was a
@@ -104,24 +113,24 @@ export function buildPlanningPool(
         track.rating < input.minRating
       ) {
         rejected.push({ trackId: track.id, title: track.title, reason: "BELOW_MIN_RATING" });
-        return false;
+        continue;
       }
       // The owner's explicit "unmixable" verdict (rated after audition:
-      // joins fine, song doesn't work in mixes). Unconditional — no brief
+      // joins fine, song doesn't work in mixes). Unconditional - no brief
       // should have to opt out of a verdict the owner recorded by ear.
       if ((track.tags ?? []).some((tag) => tag.toLowerCase() === "unmixable")) {
         rejected.push({ trackId: track.id, title: track.title, reason: "UNMIXABLE_TAG" });
-        return false;
+        continue;
       }
       const analysis = analyses.get(track.id);
       const bpm = track.bpm ?? analysis?.bpmHint ?? null;
       if (input.bpmMin !== undefined && (bpm === null || bpm < input.bpmMin)) {
         rejected.push({ trackId: track.id, title: track.title, reason: "BPM_BELOW_RANGE" });
-        return false;
+        continue;
       }
       if (input.bpmMax !== undefined && (bpm === null || bpm > input.bpmMax)) {
         rejected.push({ trackId: track.id, title: track.title, reason: "BPM_ABOVE_RANGE" });
-        return false;
+        continue;
       }
       // 2026-10 listening sessions: unstable grids (Half Light 0.175, Break
       // The Cycle 0.131) flamed every join despite clean stored residuals.
@@ -129,38 +138,7 @@ export function buildPlanningPool(
       const stability = analysis?.tempoStability ?? null;
       if (stability != null && stability < PLANNER_MIN_TEMPO_STABILITY) {
         rejected.push({ trackId: track.id, title: track.title, reason: "UNSTABLE_GRID" });
-        return false;
-      }
-      // DSP 3.12 grid-phase diagnostics: a suspect flag means the stored
-      // grid phase disagrees with the track's own audio somewhere by more
-      // than the trust threshold (measured October 2026: canuhearmenow? at
-      // 55 ms and Pool Hopping - VIP at 82 ms both landed in one variety
-      // plan and produced corroborated 60-140 ms join misalignments — the
-      // stored-grid residual AND the deck-probe verifier agreed). Aligned
-      // blends on such grids flammed. Confidence-aware: only exclude when
-      // there are enough eligible NON-SUSPECT alternatives; a small library
-      // (or one where every track is suspect) admits them rather than
-      // refusing to plan. R11 fix: the threshold counts tracks that pass
-      // the basic eligibility checks (not missing, not excluded, not
-      // unmixable), not the raw catalog size which can be inflated by
-      // unusable rows.
-      if (analysis?.descriptors?.gridPhaseSuspect === true) {
-        const eligibleNonSuspect = catalog.filter(
-          (candidate) =>
-            !candidate.fileMissing &&
-            !excludedIds.has(candidate.id) &&
-            !(candidate.tags ?? []).some((tag) => tag.toLowerCase() === "unmixable") &&
-            candidate.rating !== 1 &&
-            analyses.get(candidate.id)?.descriptors?.gridPhaseSuspect !== true,
-        ).length;
-        if (eligibleNonSuspect >= PLANNER_POOL_MIN_TRACKS) {
-          rejected.push({
-            trackId: track.id,
-            title: track.title,
-            reason: "GRID_PHASE_SUSPECT",
-          });
-          return false;
-        }
+        continue;
       }
       const descriptors = analysis?.descriptors ?? null;
       const descriptorMatch = matchesDescriptorFilters(track, descriptors, filters);
@@ -170,7 +148,7 @@ export function buildPlanningPool(
           title: track.title,
           reason: descriptorMatch.reason ?? "DESCRIPTOR_OUT_OF_RANGE",
         });
-        return false;
+        continue;
       }
       const genreMatch = genresMatchFilter(track.genres, input.genres);
       if (!genreMatch.ok) {
@@ -179,10 +157,43 @@ export function buildPlanningPool(
           title: track.title,
           reason: genreMatch.reason ?? "GENRE_EXCLUDED",
         });
-        return false;
+        continue;
       }
-      return true;
-    });
+      // DSP 3.12 grid-phase diagnostics: a suspect flag means the stored
+      // grid phase disagrees with the track's own audio somewhere by more
+      // than the trust threshold (measured October 2026: corroborated
+      // 60-140 ms join misalignments - the stored-grid residual AND the
+      // deck-probe verifier agreed). Aligned blends on such grids flamed.
+      // Confidence-aware: only exclude when the base-eligible non-suspect
+      // supply can actually host a working pool - STRICTLY more than
+      // PLANNER_POOL_MIN_TRACKS, so dropping suspects can never leave a
+      // pool the later guard immediately rejects (the exactly-at-threshold
+      // interaction, S6).
+      if (analysis?.descriptors?.gridPhaseSuspect === true) {
+        suspectIds.add(track.id);
+        continue;
+      }
+      baseEligible.add(track.id);
+    }
+    const excludeSuspects = suspectIds.size > 0 && baseEligible.size > PLANNER_POOL_MIN_TRACKS;
+    if (excludeSuspects) {
+      for (const id of suspectIds) {
+        const track = catalog.find((item) => item.id === id)!;
+        rejected.push({ trackId: id, title: track.title, reason: "GRID_PHASE_SUSPECT" });
+      }
+    } else if (suspectIds.size > 0) {
+      // Visible admission: suspects entered because the usable supply
+      // cannot host a pool without them (S6: record admission reasons).
+      rejected.push({
+        trackId: "pool",
+        title: "pool",
+        reason: "SUSPECT_ADMITTED_SUPPLY",
+      });
+    }
+    return catalog.filter(
+      (track) => baseEligible.has(track.id) || (!excludeSuspects && suspectIds.has(track.id)),
+    );
+  };
 
   let pool = filterCatalog(descriptorFilters);
   if (
@@ -218,6 +229,15 @@ export function buildPlanningPool(
     }
     if (found.fileMissing || excludedIds.has(id) || excludedArtists.has(artistKey(found) ?? "")) {
       throw new PlanningConstraintError(`Required ${label} track ${id} is excluded or missing`);
+    }
+    // S6: an owner-recorded "unmixable" verdict outranks every pin — naming
+    // a track start/end/required must not resurrect a verdict recorded by
+    // ear. (This closes the gap between the "unconditional" comment and
+    // the pin readmission path.)
+    if ((found.tags ?? []).some((tag) => tag.toLowerCase() === "unmixable")) {
+      throw new PlanningConstraintError(
+        `Required ${label} track ${id} is tagged unmixable by an owner verdict; remove the tag to use it`,
+      );
     }
     // An explicitly excluded genre contradicts the brief; a missing include
     // match (GENRE_MISMATCH) does not — the pin overrides it.
