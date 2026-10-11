@@ -416,6 +416,39 @@ describe("render jobs", () => {
     expect(done.warnings.join(" ")).toMatch(/Listen copy withheld/);
   });
 
+  it("reports cache hits as succeeded with their artifact at enqueue (S4)", async () => {
+    // The reproduced defect: a cache hit was reported as "queued" with a
+    // null artifact because the service discarded startPreview's returned
+    // status and output path. A non-waiting client saw the wrong lifecycle.
+    const { catalog, plan } = await seededLibrary();
+    const transitionId = plan.entries[0]!.transitionToNext!.id;
+    const first = await catalog.service.createTransitionPreview({
+      setPlanId: plan.id,
+      transitionId,
+      windowMs: 30_000,
+    });
+    await catalog.service.waitForRenderJob(first.job.id, 15_000);
+    const second = await catalog.service.createTransitionPreview({
+      setPlanId: plan.id,
+      transitionId,
+      windowMs: 30_000,
+    });
+    expect(second.job.status).toBe("succeeded");
+
+    const compared = await catalog.service.compareTransitionVariants({
+      setPlanId: plan.id,
+      transitionId,
+      windowMs: 30_000,
+    });
+    const cached = compared.variants.filter((v) => v.jobId != null);
+    expect(cached.length).toBeGreaterThan(0);
+    for (const variant of cached) {
+      expect(variant.status).toBe("succeeded");
+      expect(variant.outputRootRelativePath).not.toBeNull();
+      expect(variant.errorCode).toBeNull();
+    }
+  });
+
   it("returns a cached preview for an identical second request", async () => {
     const { catalog, plan } = await seededLibrary();
     const transitionId = plan.entries[0]!.transitionToNext!.id;

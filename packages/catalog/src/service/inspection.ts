@@ -51,7 +51,10 @@ export type JoinInspectionService = {
       barCount?: 8 | 16 | 32;
       allowLowConfidence?: boolean;
       request?: FrozenRenderRequest;
-    }): Promise<{ job: { id: string }; warnings: string[] }>;
+    }): Promise<{
+      job: { id: string; status: string; outputRootRelativePath: string | null };
+      warnings: string[];
+    }>;
   };
 };
 
@@ -381,7 +384,8 @@ export async function compareTransitionVariants(
     const feasible = proposal?.feasible ?? false;
     const blockers = proposal?.blockers ?? [];
     let jobId: string | null = null;
-    const outputPath: string | null = null;
+    let outputPath: string | null = null;
+    let enqueueStatus = "not-started";
     let enqueueError: { code: string; message: string } | null = null;
     if (feasible || isStored) {
       try {
@@ -394,6 +398,11 @@ export async function compareTransitionVariants(
           request: sharedRequest,
         });
         jobId = started.job.id;
+        // S4: preserve the returned lifecycle — a CACHE HIT is already
+        // succeeded with its artifact attached, not "queued" with a null
+        // path. Non-waiting clients see the truth immediately.
+        enqueueStatus = started.job.status;
+        outputPath = started.job.outputRootRelativePath ?? null;
       } catch (error) {
         // Preview enqueue failed; report it without blocking the others.
         // Preserve the actionable domain error (R2) — a bare "preview
@@ -406,6 +415,7 @@ export async function compareTransitionVariants(
               message: error instanceof Error ? error.message : "Preview render failed",
             };
         blockers.push(`preview render failed: ${enqueueError.message}`);
+        enqueueStatus = "failed";
       }
     }
     variants.push({
@@ -415,9 +425,10 @@ export async function compareTransitionVariants(
       blockers,
       jobId,
       outputRootRelativePath: outputPath,
-      // Lifecycle at enqueue time (R2): callers that wait overwrite
-      // these with the terminal state from waitForRenderJob.
-      status: jobId != null ? "queued" : enqueueError ? "failed" : "not-started",
+      // Lifecycle at enqueue time (R2/S4): the preview job's ACTUAL status
+      // (queued, or succeeded for cache hits with the artifact attached);
+      // waiting callers overwrite with the terminal state.
+      status: enqueueStatus,
       errorCode: enqueueError?.code ?? null,
       errorMessage: enqueueError?.message ?? null,
     });

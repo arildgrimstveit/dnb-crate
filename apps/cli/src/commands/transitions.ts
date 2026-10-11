@@ -112,10 +112,9 @@ export async function run(
         transitionId,
       });
       if (args.includes("--wait")) {
-        // R2: wait for every variant and surface each job's terminal state.
-        // A failed or cancelled variant is a partial-success (exit 1) with
-        // the full data still on stdout; a timeout is recorded per variant
-        // instead of aborting the others.
+        // R2/S4: wait for every variant and surface each job's terminal
+        // state. Wait errors are classified — only an actual wait timeout
+        // is labelled "timeout"; other errors keep their own code/message.
         for (const variant of result.variants) {
           if (!variant.jobId) continue;
           try {
@@ -137,17 +136,35 @@ export async function run(
               }
             }
           } catch (error) {
-            variant.status = "timeout";
-            variant.errorCode = "RENDER_FAILED";
-            variant.errorMessage =
-              error instanceof Error ? error.message : "Timed out waiting for preview render";
+            const message = error instanceof Error ? error.message : String(error);
+            if (/timed out/i.test(message)) {
+              variant.status = "timeout";
+              variant.errorCode = "RENDER_FAILED";
+            } else {
+              variant.status = "failed";
+              variant.errorCode = "RENDER_FAILED";
+            }
+            variant.errorMessage = message;
           }
         }
       }
-      const started = result.variants.filter((variant) => variant.jobId != null);
-      const allSucceeded = started.every((variant) => variant.status === "succeeded");
-      const partial = started.length > 0 && !allSucceeded;
-      if (args.includes("--wait") && partial) {
+      // S4: aggregate success evaluates EVERY variant, not only those with
+      // a job id. Enqueue failures carry status "failed" without a job and
+      // previously disappeared from the calculation (all-failing and
+      // success-plus-failure both reported ok:true, exit 0). Deliberately
+      // infeasible variants ("not-started", never attempted) are not
+      // failures; a comparison where nothing was runnable still succeeds.
+      const attempted = result.variants.filter((variant) => variant.jobId != null);
+      const failedAttempts = result.variants.filter((variant) => variant.status === "failed");
+      const anyFailure =
+        failedAttempts.length > 0 ||
+        (args.includes("--wait") &&
+          attempted.some(
+            (variant) => variant.status !== "succeeded" && variant.status !== "timeout",
+          )) ||
+        (args.includes("--wait") &&
+          result.variants.some((variant) => variant.status === "timeout"));
+      if (anyFailure) {
         printJson({ ok: false, data: result });
         process.exitCode = 1;
         return true;
