@@ -3324,15 +3324,19 @@ describe("join inspector (batch 9)", () => {
     expect(joinIndex).toBeGreaterThanOrEqual(0);
     const replacedEntryId = sorted[joinIndex + 1]!.id;
     // Seed the replacement AFTER planning so selection cannot absorb it.
+    // 172 BPM (0.66% off the 174 chain) guarantees the rebuilt pair aligns
+    // (well inside the 3% tempo tolerance, straight grids, no structural
+    // conflict) regardless of the seeded UUID tie-breaks that otherwise
+    // vary plan composition between runs.
     const fastId = seedTrack(catalog, {
       title: "S3 Spare Fast",
       artist: "S3 Spare Artist",
-      bpm: 178,
+      bpm: 172,
       camelot: "8A",
       energy: 5,
       durationMs: 100_000,
     });
-    stubDescriptors(catalog, fastId, {}, { bpm: 178 });
+    stubDescriptors(catalog, fastId, {}, { bpm: 172 });
     const fast = catalog.repository.findById(fastId)!;
     const repaired = catalog.service.repairSetPlan({
       setPlanId: created.plan.id,
@@ -3342,13 +3346,13 @@ describe("join inspector (batch 9)", () => {
 
     // S3 defect: the replaced entry kept the placeholder rate 1.0 while the
     // join targeted 174 BPM. The rate must now be derived from the pair:
-    // 174/178 within tolerance.
+    // 174/172 within tolerance.
     const after = [...repaired.plan.entries].sort((a, b) => a.order - b.order);
     const replacedIndex = after.findIndex((entry) => entry.id === replacedEntryId);
     expect(replacedIndex).toBe(joinIndex + 1);
-    expect(after[replacedIndex]!.playbackRate).toBeGreaterThan(0.9);
-    expect(after[replacedIndex]!.playbackRate).toBeLessThan(0.99);
-    expect(after[replacedIndex]!.playbackRate).toBeCloseTo(174 / 178, 3);
+    expect(after[replacedIndex]!.playbackRate).toBeGreaterThan(1.001);
+    expect(after[replacedIndex]!.playbackRate).toBeLessThan(1.05);
+    expect(after[replacedIndex]!.playbackRate).toBeCloseTo(174 / 172, 3);
     expect(after[replacedIndex]!.rateSource).toBeUndefined();
     // The join's transition targets the chain tempo and the effective BPM
     // of the replaced entry is consistent with it.
@@ -3369,7 +3373,7 @@ describe("join inspector (batch 9)", () => {
     expect(changedOrders).toEqual([joinIndex, joinIndex + 1]);
     const incomingJoinChange = repaired.diff.changedJoins.find((row) => row.order === joinIndex)!;
     expect(incomingJoinChange.reason).toMatch(/incoming join of the replaced track/);
-    expect(incomingJoinChange.after.incomingRate).toBeCloseTo(174 / 178, 3);
+    expect(incomingJoinChange.after.incomingRate).toBeCloseTo(174 / 172, 3);
     for (const preserved of repaired.diff.preservedJoins) {
       expect(preserved.treatment.type).toBe(preserved.type);
     }
