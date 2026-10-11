@@ -4,7 +4,8 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createCatalogRuntime } from "../src/index.ts";
+import { mkdir, rm } from "node:fs/promises";
+import { createCatalogRuntime, writeSineWav } from "../src/index.ts";
 import {
   DSP_ANALYZER_NAME,
   VARIETY_AUTO_HISTORY_SCAN,
@@ -73,13 +74,16 @@ function seedTrack(
     genres?: string[];
     rating?: number;
     durationMs?: number;
+    /** Real file path when the fixture writes actual audio (S8 strict
+     * freezing needs readable sources). */
+    filePath?: string;
   },
 ): string {
   const id = spec.id ?? crypto.randomUUID();
   const key = spec.camelot.endsWith("A") ? "xmin" : "X";
   catalog.repository.upsertFromScan({
     id,
-    filePath: path.join("C:", "virtual", `${spec.title}.wav`),
+    filePath: spec.filePath ?? path.join("C:", "virtual", `${spec.title}.wav`),
     fileFingerprint: spec.title,
     artist: spec.artist,
     title: spec.title,
@@ -3230,21 +3234,19 @@ describe("join inspector (batch 9)", () => {
     expect(created.plan.entries.length).toBeGreaterThanOrEqual(3);
     const transition = created.plan.entries[0]!.transitionToNext!;
 
-    // Variant comparison: stored + alternatives, each with feasibility.
-    const compared = await catalog.service.compareTransitionVariants({
-      setPlanId: created.plan.id,
-      transitionId: transition.id,
-    });
-    expect(compared.storedTemplate).toBe(transition.type);
-    expect(compared.variants.length).toBe(3);
-    const templates = compared.variants.map((variant) => variant.template);
-    expect(templates).toContain("phrase_mix");
-    expect(templates).toContain("bass_swap");
-    expect(templates).toContain("crossfade");
-    for (const variant of compared.variants) {
-      expect(typeof variant.feasible).toBe("boolean");
-      expect(Array.isArray(variant.blockers)).toBe(true);
-    }
+    // Variant comparison on virtual tracks (no files): the STRICT shared
+    // freeze (S8) rejects with the domain error instead of enqueueing a
+    // weakened legacy request.
+    await expect(
+      catalog.service.compareTransitionVariants({
+        setPlanId: created.plan.id,
+        transitionId: transition.id,
+      }),
+    ).rejects.toThrow(/could not be read|No transition/i);
+    const queuedPreviews = catalog.db
+      .prepare("SELECT COUNT(*) AS n FROM render_jobs WHERE kind = 'preview'")
+      .get() as { n: number };
+    expect(queuedPreviews.n).toBe(0);
 
     // Surgical repair: replace the incoming track of join 0 with a spare
     // (not already in the plan) so the plan stays valid. The invariant:
@@ -3435,12 +3437,13 @@ describe("join inspector (batch 9)", () => {
     expect(JSON.stringify(catalog.service.getSetPlan(created.plan.id))).toBe(before);
   });
 
-  it("reports per-variant lifecycle and preserves enqueue failure detail (R2)", async () => {
+  it("strict comparison freezing rejects unreadable sources without enqueueing weak work (R2/S8)", async () => {
     const catalog = runtime();
-    // Virtual tracks: no real audio files exist, so preview ENQUEUE fails
-    // during readiness for every renderable variant. The comparison must
-    // report that as per-variant lifecycle with the actionable domain error
-    // preserved — not a bare "preview render failed".
+    // Virtual tracks: no real audio files exist. Per S8 the comparison's
+    // shared freeze is STRICT — the whole comparison rejects with the
+    // actionable domain error, and NO job enters the queue with a weakened
+    // "legacy" identity (previously per-variant enqueue failures were
+    // reported while the frozen request silently lacked content hashes).
     for (let i = 0; i < 12; i += 1) {
       seedTrack(catalog, {
         title: `Lifecycle ${i}`,
@@ -3458,27 +3461,16 @@ describe("join inspector (batch 9)", () => {
       explorationWeight: 0,
     });
     const transition = created.plan.entries[0]!.transitionToNext!;
-    const compared = await catalog.service.compareTransitionVariants({
-      setPlanId: created.plan.id,
-      transitionId: transition.id,
-    });
-    expect(compared.variants.length).toBe(3);
-    for (const variant of compared.variants) {
-      expect(["queued", "failed", "not-started"]).toContain(variant.status);
-      if (variant.status === "failed") {
-        // The domain error code survived (readiness/file access), and the
-        // blocker text carries the detail.
-        expect(variant.errorCode).not.toBeNull();
-        expect(variant.errorMessage).not.toBeNull();
-        expect(variant.blockers.join(" ")).toMatch(/preview render failed: .+/);
-      }
-      if (variant.status === "not-started") {
-        // Infeasible variants never enqueue and carry no error.
-        expect(variant.jobId).toBeNull();
-        expect(variant.errorCode).toBeNull();
-        expect(variant.errorMessage).toBeNull();
-      }
-    }
+    await expect(
+      catalog.service.compareTransitionVariants({
+        setPlanId: created.plan.id,
+        transitionId: transition.id,
+      }),
+    ).rejects.toThrow(/could not be read to freeze render-input identity/i);
+    const queuedPreviews = catalog.db
+      .prepare("SELECT COUNT(*) AS n FROM render_jobs WHERE kind = 'preview'")
+      .get() as { n: number };
+    expect(queuedPreviews.n).toBe(0);
   });
 
   it("validates saved rates after selection instead of trusting them (S7)", () => {
@@ -3822,6 +3814,12 @@ describe("join inspector (batch 9)", () => {
   });
 
   it("evaluates variant feasibility on the saved join's windows, not fresh proposals (R14)", async () => {
+    const fileRoot = path.join(
+      os.tmpdir(),
+      `dnb-r14-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    await mkdir(path.join(fileRoot, "library"), { recursive: true });
+    cleanups.push(() => rm(fileRoot, { recursive: true, force: true }));
     const catalog = runtime();
     // The structural gate compares the two sides' LOCAL syncopation at the
     // join coordinates. Low tracks are straight everywhere (0.05); High
@@ -3830,7 +3828,8 @@ describe("join inspector (batch 9)", () => {
     // finds a clean early window for any pair; a SAVED join at bars 52-67
     // structurally conflicts. The region sits late enough that a join there
     // still leaves every entry its 90 s minimum playable span on 200 s
-    // tracks.
+    // tracks (per the catalog ROWS; tiny real files satisfy the strict
+    // S8 freeze without execution).
     const barMs = (4 * 60_000) / 174;
     const straight = Array.from({ length: 144 }, () => 0.05);
     const regional = Array.from({ length: 144 }, (_, bar) => (bar >= 52 && bar < 68 ? 0.95 : 0.05));
@@ -3838,13 +3837,19 @@ describe("join inspector (batch 9)", () => {
     const highIds = new Set<string>();
     for (let i = 0; i < 12; i += 1) {
       const high = i % 2 === 1;
+      const title = `${high ? "HighCtx" : "LowCtx"} ${i}`;
+      await writeSineWav(path.join(fileRoot, "library", `${title}.wav`), {
+        title,
+        durationMs: 1000,
+      });
       const id = seedTrack(catalog, {
-        title: `${high ? "HighCtx" : "LowCtx"} ${i}`,
+        title,
         artist: `Saver ${i}`,
         bpm: 174,
         camelot: "8A",
         energy: high ? 7 : 3,
         durationMs: 200_000,
+        filePath: path.join(fileRoot, "library", `${title}.wav`),
       });
       (high ? highIds : lowIds).add(id);
       stubDescriptors(catalog, id, {

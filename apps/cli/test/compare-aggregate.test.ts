@@ -129,9 +129,10 @@ describe("transition:compare CLI aggregate success (S4)", () => {
         await seed.close();
       }
 
-      // Delete the source files: readiness rejects every preview enqueue,
-      // and the aggregate must FAIL (previously ok:true exit 0 because
-      // enqueue failures have no job id and vanished from the calculation).
+      // Delete the source files: the STRICT shared freeze (S8) rejects the
+      // comparison with the domain error — no weakened request is enqueued —
+      // and the aggregate run exits nonzero with ok:false (previously
+      // ok:true exit 0 because enqueue failures vanished from the calc).
       for (const source of sources) {
         await rm(source, { force: true });
       }
@@ -142,16 +143,21 @@ describe("transition:compare CLI aggregate success (S4)", () => {
       );
       const body = JSON.parse(compare.stdout) as {
         ok: boolean;
+        error?: { code?: string };
         data?: {
           variants?: Array<{ status: string; jobId: string | null; errorCode: string | null }>;
         };
       };
-      const attempted = (body.data?.variants ?? []).filter((v) => v.status === "failed");
-      expect(attempted.length).toBeGreaterThan(0);
-      expect(attempted.every((v) => v.jobId === null)).toBe(true);
-      expect(attempted.every((v) => v.errorCode !== null)).toBe(true);
       expect(compare.code).toBe(1);
       expect(body.ok).toBe(false);
+      if (body.error) {
+        // Strict-freeze rejection (unreadable source): honest domain error.
+        expect(body.error.code).toBe("AUDIO_FILE_UNAVAILABLE");
+      } else {
+        const attempted = (body.data?.variants ?? []).filter((v) => v.status === "failed");
+        expect(attempted.length).toBeGreaterThan(0);
+        expect(attempted.every((v) => v.errorCode !== null)).toBe(true);
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }

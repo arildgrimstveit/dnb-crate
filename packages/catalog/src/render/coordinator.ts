@@ -557,32 +557,16 @@ export class RenderCoordinator {
   /** Freeze the render request for a plan once (R14): callers rendering
    * several variants of the same join share this single comparison context —
    * same evidence, source hashes, and settings — instead of freezing (and
-   * re-hashing every source file) per variant. With
-   * tolerateUnreadableSources, an unreadable source skips its content hash
-   * instead of failing the whole freeze: variant previews report the exact
-   * readiness failure per variant (R2), and nothing weakened ever reaches
-   * execution because enqueue fails first. */
-  async freezeRequest(
-    setPlanId: string,
-    options?: { tolerateUnreadableSources?: boolean },
-  ): Promise<FrozenRenderRequest> {
+   * re-hashing every source file) per variant. Hashes are read FRESH (S8):
+   * the queue-time cache cannot distinguish a preserved-timestamp interior
+   * edit, and a stale shared request would both mis-key the preview cache
+   * and enqueue against identity it never verified. A hashing failure fails
+   * the comparison with the domain error — no weakened "legacy" request is
+   * ever constructed for new work. */
+  async freezeRequest(setPlanId: string): Promise<FrozenRenderRequest> {
     const stored = this.requirePlan(setPlanId);
-    const hashForTrack = async (trackId: string): Promise<string | null> => {
-      if (options?.tolerateUnreadableSources !== true) {
-        return this.sourceHashForTrack(trackId);
-      }
-      try {
-        return await this.sourceHashForTrack(trackId);
-      } catch {
-        return null;
-      }
-    };
-    return freezeRenderRequest(
-      stored.plan,
-      this.analyses,
-      this.tracks,
-      this.settings,
-      hashForTrack,
+    return freezeRenderRequest(stored.plan, this.analyses, this.tracks, this.settings, (trackId) =>
+      this.sourceHashForTrack(trackId, { fresh: true }),
     );
   }
 
@@ -638,6 +622,13 @@ export class RenderCoordinator {
     // identity instead of re-freezing — and re-hashing every source file —
     // per variant. The supplied request must be for this plan; it is the
     // caller's responsibility to freeze via freezeRequest(setPlanId).
+    // S8: when freezing HERE, previews read FRESH full content hashes —
+    // the queue-time hash cache is keyed by size/mtime/head-tail and a
+    // preserved-timestamp interior edit produces a stale frozen request
+    // whose cache key still matches the OLD artifact: a cache hit returns
+    // audio for bytes that no longer exist without ever reaching the
+    // execution hash check. Fresh hashes change the key when content
+    // changes, so stale hits cannot happen.
     const request =
       input.request ??
       (await freezeRenderRequest(
@@ -645,7 +636,7 @@ export class RenderCoordinator {
         this.analyses,
         this.tracks,
         this.settings,
-        (trackId) => this.sourceHashForTrack(trackId),
+        (trackId) => this.sourceHashForTrack(trackId, { fresh: true }),
       ));
     const cacheKey = previewCacheIdentity(request, {
       windowMs,
@@ -690,12 +681,37 @@ export class RenderCoordinator {
     return { job: toPublicJob(job), warnings: job.warnings };
   }
 
-  private async sourceHashForTrack(trackId: string): Promise<string | null> {
+  private async sourceHashForTrack(
+    trackId: string,
+    options?: { fresh?: boolean },
+  ): Promise<string | null> {
     const track = this.tracks.findById(trackId);
     if (!track?.filePath) {
       return null;
     }
     const resolved = path.resolve(track.filePath);
+    const readFullHash = async (): Promise<string> => {
+      try {
+        return await sha256File(resolved);
+      } catch (error) {
+        // R8: a NEW request that requires a full-content hash must surface
+        // read/hashing failures instead of silently freezing the weaker
+        // legacy identity. Null stays reserved for rows without a file path,
+        // which structural validation rejects elsewhere. This cache is
+        // queue-time only; execution verifies by reading the bytes (see
+        // verifySourceContentHash) because this cache key cannot distinguish
+        // a same-size interior edit that preserves mtime.
+        throw new DomainError(
+          "AUDIO_FILE_UNAVAILABLE",
+          `${track.title} could not be read to freeze render-input identity`,
+          { details: { trackId: track.id, filePath: resolved }, cause: error },
+        );
+      }
+    };
+    if (options?.fresh === true) {
+      // S8: preview freeze path — bypass the weak-keyed cache entirely.
+      return readFullHash();
+    }
     try {
       const info = await stat(resolved);
       const fingerprint = await fingerprintFile(resolved, {
@@ -707,25 +723,20 @@ export class RenderCoordinator {
       if (cached != null) {
         return cached;
       }
-      const hash = await sha256File(resolved);
+      const hash = await readFullHash();
       if (this.sourceHashCache.size > 1_000) {
         this.sourceHashCache.clear();
       }
       this.sourceHashCache.set(key, hash);
       return hash;
     } catch (error) {
-      // R8: a NEW request that requires a full-content hash must surface
-      // read/hashing failures instead of silently freezing the weaker
-      // legacy identity. Null stays reserved for rows without a file path,
-      // which structural validation rejects elsewhere. This cache is
-      // queue-time only; execution verifies by reading the bytes (see
-      // verifySourceContentHash) because this cache key cannot distinguish
-      // a same-size interior edit that preserves mtime.
-      throw new DomainError(
-        "AUDIO_FILE_UNAVAILABLE",
-        `${track.title} could not be read to freeze render-input identity`,
-        { details: { trackId: track.id, filePath: resolved }, cause: error },
-      );
+      if (error instanceof DomainError) {
+        throw error;
+      }
+      // Non-DomainError failures here are stat/fingerprint issues on the
+      // cache path; fall through to a direct read so caching problems do
+      // not fabricate identity errors.
+      return readFullHash();
     }
   }
 

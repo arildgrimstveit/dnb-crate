@@ -416,6 +416,54 @@ describe("render jobs", () => {
     expect(done.warnings.join(" ")).toMatch(/Listen copy withheld/);
   });
 
+  it("a preserved-timestamp interior edit invalidates the preview cache (S8)", async () => {
+    // The reproduced defect: preview freezing used the queue-time hash
+    // cache (size/mtime/head-tail keyed), so an interior edit preserving
+    // size and mtime produced the SAME frozen request and cache key - the
+    // next preview returned the OLD artifact (succeeded, old path, cloned
+    // job) without ever reaching the execution hash check.
+    const { catalog, plan, aPath } = await seededLibrary();
+    const transitionId = plan.entries[0]!.transitionToNext!.id;
+    const first = await catalog.service.createTransitionPreview({
+      setPlanId: plan.id,
+      transitionId,
+      windowMs: 30_000,
+    });
+    const done = await catalog.service.waitForRenderJob(first.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
+    const firstPath = done.outputRootRelativePath;
+
+    // Pin mtime to whole ms, flip one middle byte, restore mtime: the weak
+    // cache key is unchanged but the content differs.
+    const { stat, utimes } = await import("node:fs/promises");
+    const before = await stat(aPath);
+    const pinned = new Date(Math.floor(Date.now() / 1000) * 1000);
+    await utimes(aPath, pinned, pinned);
+    const bytes = await readFile(aPath);
+    const edited = Buffer.from(bytes);
+    const mid = Math.floor(edited.length / 2);
+    edited[mid] = (edited[mid] ?? 0) ^ 0xff;
+    await writeFile(aPath, edited);
+    await utimes(aPath, pinned, pinned);
+    void before;
+
+    const second = await catalog.service.createTransitionPreview({
+      setPlanId: plan.id,
+      transitionId,
+      windowMs: 30_000,
+    });
+    // NOT a stale cache hit: the fresh-hash freeze changes the cache key,
+    // so a NEW job runs and renders the CURRENT bytes (a cache clone would
+    // return the OLD artifact path). The edit is interior-only; the
+    // head/tail fingerprint the catalog row carries still matches, so the
+    // render itself is legitimate — it is the STALE HIT that was the bug.
+    expect(second.job.status === "queued" || second.job.status === "running").toBe(true);
+    const secondDone = await catalog.service.waitForRenderJob(second.job.id, 15_000);
+    expect(secondDone.status).toBe("succeeded");
+    expect(secondDone.id).not.toBe(first.job.id);
+    expect(secondDone.outputRootRelativePath).not.toBe(firstPath);
+  });
+
   it("reports cache hits as succeeded with their artifact at enqueue (S4)", async () => {
     // The reproduced defect: a cache hit was reported as "queued" with a
     // null artifact because the service discarded startPreview's returned

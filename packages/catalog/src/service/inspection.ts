@@ -369,11 +369,11 @@ export async function compareTransitionVariants(
   // settings — and share it across every variant preview, instead of
   // freezing (and re-hashing every source file) per variant. All artifacts
   // and blockers from this comparison refer to the same identity.
-  // Unreadable sources skip their hash here so the per-variant readiness
-  // failures (R2) still surface instead of failing the whole comparison.
-  const sharedRequest = await service.renders.freezeRequest(input.setPlanId, {
-    tolerateUnreadableSources: true,
-  });
+  // S8: the freeze is STRICT — an unreadable source fails the comparison
+  // with the domain error instead of enqueueing a weakened "legacy"
+  // request. Per-variant readiness failures still surface at enqueue for
+  // sources that hash but fail later checks.
+  const sharedRequest = await service.renders.freezeRequest(input.setPlanId);
   const contextIdentity = comparisonContextIdentity(sharedRequest, {
     transitionId: input.transitionId,
     windowMs: input.windowMs ?? null,
