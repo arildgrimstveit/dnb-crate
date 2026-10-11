@@ -3403,6 +3403,134 @@ describe("join inspector (batch 9)", () => {
     void before;
   });
 
+  it("keeps the resolver's corrected outgoing position over a raw manual cue (S2)", () => {
+    const catalog = runtime();
+    // The S2 scenario: the outgoing's manual outro cue sits OFF its own
+    // grid (bar 52 + 140 ms) and the incoming's grid phase differs, so the
+    // chooser's alignment bake CORRECTS the outgoing mix-out back onto the
+    // grid (a -140 ms correction = exactly bar 52). Final entry
+    // construction previously restored the RAW cue while keeping the
+    // corrected incoming side - a 140 ms inter-deck phase error.
+    const barMs = (4 * 60_000) / 174;
+    const beatMs = 60_000 / 174;
+    const phaseMs = 140; // incoming grid leads the outgoing grid
+    const rawCueMs = 52 * barMs + 140;
+    const gridFor = (phase: number) => {
+      const beats: number[] = [];
+      for (let t = phase; t < 200_000; t += beatMs) {
+        beats.push(Number(t.toFixed(3)));
+      }
+      const downbeats: number[] = [];
+      for (let t = phase; t < 200_000; t += barMs) {
+        downbeats.push(Number(t.toFixed(3)));
+      }
+      return { beats, downbeats };
+    };
+    const lowGrid = gridFor(0);
+    const highGrid = gridFor(phaseMs);
+    const lowIds = new Set<string>();
+    const highIds = new Set<string>();
+    for (let i = 0; i < 12; i += 1) {
+      const high = i % 2 === 1;
+      const grid = high ? highGrid : lowGrid;
+      const id = seedTrack(catalog, {
+        title: `S2 ${high ? "In" : "Out"} ${i}`,
+        artist: `S2 Artist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: high ? 7 : 3,
+        durationMs: 200_000,
+      });
+      (high ? highIds : lowIds).add(id);
+      catalog.analyses.upsert({
+        trackId: id,
+        analyzerName: DSP_ANALYZER_NAME,
+        analyzerVersion: "3.0.0",
+        bpm: 174,
+        bpmConfidence: 0.9,
+        bpmRaw: 174,
+        referenceBpm: null,
+        beatTimesMs: grid.beats,
+        downbeatTimesMs: grid.downbeats,
+        gridRejected: false,
+        gridRejectionReason: null,
+        gridSource: "analyzed",
+        musicalKey: null,
+        keyConfidence: null,
+        keyMode: null,
+        camelotKey: null,
+        tempoStability: null,
+        downbeatConfidence: 0.9,
+        integratedLufs: null,
+        truePeakDb: null,
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        waveformSummary: null,
+        beatAnchorMs: null,
+        descriptors: {
+          ...testSonicDescriptors(),
+          bars: {
+            rms: Array.from({ length: 144 }, () => 0.5),
+            syncopation: Array.from({ length: 144 }, () => 0.05),
+          },
+        },
+        engineRuntimeMs: 1,
+        analyzedAt: new Date().toISOString(),
+        suggestedCues: [],
+        // Drop-anchored windows need an incoming drop with a start bar.
+        sections: high
+          ? [
+              {
+                type: "drop" as const,
+                startMs: phaseMs + 20 * barMs,
+                endMs: phaseMs + 40 * barMs,
+                startBar: 20,
+                endBar: 40,
+                confidence: 0.9,
+                sectionEnergy: 0.9,
+              },
+            ]
+          : [],
+      });
+      if (!high) {
+        // Off-grid manual outro_start cue on every OUTGOING-side track.
+        catalog.service.setCuePoints(id, [
+          { type: "outro_start", positionMs: Math.round(rawCueMs), label: "manual out" },
+        ]);
+      }
+    }
+    const created = createPlan(catalog, {
+      name: "S2 fixture",
+      targetDurationMs: 400_000,
+      seed: 8,
+      explorationWeight: 0,
+    });
+    const sorted = [...created.plan.entries].sort((a, b) => a.order - b.order);
+    // A low -> high aligned join carries the scenario (manual-cued outgoing,
+    // phase-shifted drop-anchored incoming).
+    const joinIndex = sorted.findIndex(
+      (entry, i) =>
+        entry.transitionToNext?.parameters.recipeVersion === 1 &&
+        lowIds.has(entry.trackId) &&
+        i + 1 < sorted.length &&
+        highIds.has(sorted[i + 1]!.trackId),
+    );
+    expect(joinIndex).toBeGreaterThanOrEqual(0);
+    const outgoing = sorted[joinIndex]!;
+    const transition = outgoing.transitionToNext!;
+
+    const mixOut = transition.parameters.mixOutMs as number;
+    // S2 defect: the raw manual cue (bar 52 + 140 ms) came back verbatim,
+    // discarding the alignment correction.
+    expect(Math.abs(mixOut - rawCueMs)).toBeGreaterThan(50);
+    // The resolver's corrected position is grid-aligned: within 5 ms of a
+    // whole bar multiple of the outgoing grid (phase 0).
+    const phase = ((mixOut % barMs) + barMs) % barMs;
+    const distanceToBar = Math.min(phase, barMs - phase);
+    expect(distanceToBar).toBeLessThan(5);
+  });
+
   it("invalidates alignment on transition and rate edits, not on no-ops (S1)", () => {
     const catalog = runtime();
     for (let i = 0; i < 12; i += 1) {
@@ -3422,7 +3550,17 @@ describe("join inspector (batch 9)", () => {
         seed,
         explorationWeight: 0,
       });
-    const marker = (plan: { plan: { entries: Array<{ id: string }> } }, entryId: string) =>
+    const marker = (
+      plan: {
+        plan: {
+          entries: Array<{
+            id: string;
+            transitionToNext: { parameters: Record<string, unknown> } | null;
+          }>;
+        };
+      },
+      entryId: string,
+    ) =>
       plan.plan.entries.find((e) => e.id === entryId)!.transitionToNext?.parameters
         .alignmentInvalidated;
 

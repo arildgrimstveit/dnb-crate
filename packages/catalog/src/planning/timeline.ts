@@ -776,12 +776,25 @@ export function buildEntries(
       chosen[index - 1]?.transition?.type === "bass_swap" ||
       prior?.transitionToNext?.type === "phrase_mix" ||
       prior?.transitionToNext?.type === "bass_swap";
+    // S2 (11 October review): the SAME semantics on the outgoing side. The
+    // resolver treats a manual mix-out cue as an advisory candidate and
+    // snaps it onto the grid (an alignment correction); final entry
+    // construction must not silently restore the raw cue over the corrected
+    // position while keeping the corrected incoming side — that re-opened
+    // the outgoing half of the dead-intro bug. Scoped to THIS entry's own
+    // aligned join; crossfades and the last entry keep the raw cue. A hard
+    // pin remains expressible through absolute entry trims (setTrim /
+    // applyTransition), which are honored verbatim via the prior windows.
+    const outgoingJoinAligned =
+      transition?.type === "phrase_mix" || transition?.type === "bass_swap";
     return musicalWindow(track, overlap, rate, isLast, {
       mixInMs:
         prior?.sourceStartMs ??
         (prevJoinAligned ? pairWindows[index - 1]?.mixInMs : undefined) ??
         track.analysis?.manualMixInMs,
-      mixOutMs: track.analysis?.manualMixOutMs ?? pairWindows[index]?.mixOutMs,
+      mixOutMs:
+        (outgoingJoinAligned ? pairWindows[index]?.mixOutMs : undefined) ??
+        track.analysis?.manualMixOutMs,
       preserveWindow: true,
     });
   });
