@@ -48,6 +48,10 @@ export type PlanTransitionInput = {
     barCount: 8 | 16 | 32;
     outgoingRate?: number;
     incomingRate?: number;
+    /** The ACTUAL stored transition duration (S7): governs overlap-size
+     * checks instead of rederiving bars × BPM, which evaluates a different
+     * interval for edited or legacy joins. */
+    durationMs?: number;
   };
 };
 
@@ -191,6 +195,34 @@ function propose(
     // not re-derive rates for coordinates that already exist on the plan.
     if (saved.outgoingRate != null) outgoingRate = saved.outgoingRate;
     if (saved.incomingRate != null) incomingRate = saved.incomingRate;
+    // S7 (11 October review): the SAVED rates must pass the same bounds the
+    // derived ones did. Previously propose validated the freshly derived
+    // rates (often 1.0) and then replaced them with the stored ones without
+    // re-checking — a plan carrying 1.2 rates reported both aligned
+    // templates feasible with no blockers.
+    try {
+      assertPlaybackRate(outgoingRate, { allowExcessive: options.allowExcessiveTempo });
+      assertPlaybackRate(incomingRate, { allowExcessive: options.allowExcessiveTempo });
+    } catch (error) {
+      blockers.push(
+        `Saved playback rate out of range: ${
+          error instanceof Error ? error.message : "rate out of range"
+        }`,
+      );
+    }
+    // Effective-tempo agreement: both sides of a saved join must land on
+    // the same effective BPM within the tempo-deviation tolerance, or the
+    // decks drift apart through the overlap (S3's reproduced inconsistent
+    // chain, evaluated at the proposal boundary).
+    if (outGrid != null && inGrid != null) {
+      const effectiveOut = outGrid * outgoingRate;
+      const effectiveIn = inGrid * incomingRate;
+      if (Math.abs(effectiveOut - effectiveIn) > MAX_TEMPO_DEVIATION * effectiveOut) {
+        blockers.push(
+          `Saved rates disagree on effective tempo: outgoing ${effectiveOut.toFixed(1)} BPM vs incoming ${effectiveIn.toFixed(1)} BPM`,
+        );
+      }
+    }
   } else if (
     shared &&
     (shared.outgoingRate !== 1 || shared.incomingRate !== 1 || shared.targetBpm != null)
@@ -246,7 +278,12 @@ function propose(
   const structurallyInfeasible = structural?.conflict === true;
   const resolvedBars = window?.barCount ?? barCount ?? DEFAULT_PHRASE_BARS;
   const durationMs =
-    type === "crossfade" ? 30_000 : Math.round(phraseDurationMs(resolvedBars, targetBpm ?? 174));
+    type === "crossfade"
+      ? 30_000
+      : // S7: a saved context carrying the ACTUAL stored duration uses it —
+        // rederiving bars × BPM evaluates a different interval for edited
+        // or legacy joins than the one the plan renders.
+        (saved?.durationMs ?? Math.round(phraseDurationMs(resolvedBars, targetBpm ?? 174)));
 
   const outBeats = outgoing.analysis?.beatTimesMs ?? [];
   const inBeats = incoming.analysis?.beatTimesMs ?? [];

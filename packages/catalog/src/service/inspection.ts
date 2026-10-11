@@ -7,6 +7,7 @@ import {
 } from "@dnb-crate/domain";
 
 import { comparisonContextIdentity } from "../render/coordinator.ts";
+import { outputToSourceMs } from "@dnb-crate/domain";
 import type { FrozenRenderRequest } from "../render-job-repository.ts";
 import {
   planTransition,
@@ -317,11 +318,21 @@ export async function compareTransitionVariants(
   const savedWindow: PlanTransitionInput["savedWindow"] =
     savedBarCount != null
       ? {
-          outgoingMixOutMs: paramNumber("mixOutMs") ?? outgoingEntry.sourceEndMs,
+          // S7 (11 October review): the outgoing fallback is the OVERLAP
+          // START — end minus the actual duration converted to source time
+          // at the stored rate — not the raw source end. The raw end
+          // evaluated a different interval than the one rendered.
+          outgoingMixOutMs:
+            paramNumber("mixOutMs") ??
+            outgoingEntry.sourceEndMs - outputToSourceMs(transition.durationMs, outRate),
           incomingMixInMs: paramNumber("mixInMs") ?? incomingEntry.sourceStartMs,
           barCount: savedBarCount,
           outgoingRate: outRate,
           incomingRate: inRate,
+          // S7: the ACTUAL stored duration governs overlap-size checks;
+          // rederiving it from bars/BPM evaluates a different interval for
+          // edited or legacy joins whose parameters disagree.
+          durationMs: transition.durationMs,
         }
       : undefined;
 

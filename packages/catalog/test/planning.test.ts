@@ -3490,6 +3490,49 @@ describe("join inspector (batch 9)", () => {
     }
   });
 
+  it("validates saved rates after selection instead of trusting them (S7)", () => {
+    const catalog = runtime();
+    const outId = seedTrack(catalog, {
+      title: "S7 Out",
+      artist: "S7 Out Artist",
+      bpm: 174,
+      camelot: "8A",
+      energy: 5,
+      durationMs: 100_000,
+    });
+    const inId = seedTrack(catalog, {
+      title: "S7 In",
+      artist: "S7 In Artist",
+      bpm: 174,
+      camelot: "8A",
+      energy: 5,
+      durationMs: 100_000,
+    });
+    stubDescriptors(catalog, outId, {});
+    stubDescriptors(catalog, inId, {});
+    // Saved rates of 1.2 with NO excessive-tempo override: the reproduced
+    // defect returned both aligned templates feasible with no blockers
+    // because propose validated the freshly DERIVED rates (1.0) and then
+    // replaced them with the saved ones without re-checking.
+    const planned = catalog.service.planTransition({
+      outgoingTrackId: outId,
+      incomingTrackId: inId,
+      preferredType: "any",
+      savedWindow: {
+        outgoingMixOutMs: 60_000,
+        incomingMixInMs: 20_000,
+        barCount: 16,
+        outgoingRate: 1.2,
+        incomingRate: 1.2,
+      },
+    });
+    for (const proposal of planned.proposals) {
+      if (proposal.type === "crossfade") continue;
+      expect(proposal.feasible).toBe(false);
+      expect(proposal.blockers.join(" ")).toMatch(/rate/i);
+    }
+  });
+
   it("drops the resolved-placement flag when a window edit invalidates alignment (S1)", () => {
     const catalog = runtime();
     for (let i = 0; i < 12; i += 1) {
