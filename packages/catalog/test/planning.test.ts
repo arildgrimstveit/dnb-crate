@@ -3516,6 +3516,96 @@ describe("join inspector (batch 9)", () => {
     }
   });
 
+  it("recovers a structurally conflicted join with a whole-phrase window shift before crossfading (Batch D)", async () => {
+    const { chooseTransition } = await import("../src/planning/timeline.ts");
+    const barMs = (4 * 60_000) / 174;
+    const downbeats: number[] = [];
+    for (let t = 0; t < 200_000; t += barMs) {
+      downbeats.push(Number(t.toFixed(3)));
+    }
+    const analysisFor = (syncopation: number[], dropAtBar: number | null) => ({
+      gridOk: true,
+      bpm: 174,
+      canonicalBpm: 174,
+      bpmHint: null,
+      bpmHintConfidence: null,
+      suggestedEnergy: 6,
+      introStartMs: null,
+      outroStartMs: null,
+      outroEndMs: null,
+      introLenMs: null,
+      outroLenMs: null,
+      sections: dropAtBar
+        ? [
+            {
+              type: "drop" as const,
+              startMs: dropAtBar * barMs,
+              endMs: (dropAtBar + 16) * barMs,
+              startBar: dropAtBar,
+              endBar: dropAtBar + 16,
+              confidence: 0.9,
+              sectionEnergy: 0.9,
+            },
+          ]
+        : [],
+      downbeatTimesMs: downbeats,
+      downbeatConfidence: 0.9,
+      beatTimesMs: [],
+      headEnergy: null,
+      tailEnergy: null,
+      integratedLufs: null,
+      keyConfidence: null,
+      audioStartMs: null,
+      audioEndMs: null,
+      mixInMs: null,
+      mixOutMs: null,
+      tempoStability: null,
+      descriptors: {
+        energy: null,
+        danceability: null,
+        valence: null,
+        acousticness: null,
+        melodicness: null,
+        subBassRatio: null,
+        brightness: null,
+        suggestedEnergy: 6,
+        bars: {
+          rms: Array.from({ length: 144 }, () => 0.5),
+          syncopation,
+        },
+      },
+    });
+    const track = (id: string, syncopation: number[], dropAtBar: number | null) => ({
+      id,
+      durationMs: 200_000,
+      energy: 5,
+      bpm: 174,
+      camelotKey: "8A",
+      analysis: analysisFor(syncopation, dropAtBar),
+    });
+    const straight = Array.from({ length: 144 }, () => 0.05);
+    const regional = Array.from({ length: 144 }, (_, bar) => (bar >= 16 && bar < 32 ? 0.95 : 0.05));
+    const allConflict = Array.from({ length: 144 }, () => 0.95);
+
+    // Drop at bar 32 anchors the incoming's 16-bar window at bars 16-31 —
+    // the conflicted region. Recovery shifts a whole phrase onto clean
+    // material and the join aligns with recorded provenance.
+    const outgoing = track("d1-out", straight, null);
+    const incoming = track("d1-in", regional, 32);
+    const chosen = chooseTransition(outgoing, incoming, { chainTargetBpm: 174 });
+    expect(chosen.transition.type).toBe("phrase_mix");
+    expect(chosen.transition.parameters.windowShiftBars).toBe(16);
+    expect(chosen.transition.parameters.windowShiftReason).toBe(
+      "groove-syncopation-conflict-resolved",
+    );
+
+    // When EVERY candidate window conflicts, the crossfade fallback stands.
+    const hopeless = track("d1-hopeless", allConflict, 32);
+    const fallback = chooseTransition(outgoing, hopeless, { chainTargetBpm: 174 });
+    expect(fallback.transition.type).toBe("crossfade");
+    expect(fallback.transition.parameters.reason).toBe("groove-syncopation-conflict");
+  });
+
   it("drops the resolved-placement flag when a window edit invalidates alignment (S1)", () => {
     const catalog = runtime();
     for (let i = 0; i < 12; i += 1) {

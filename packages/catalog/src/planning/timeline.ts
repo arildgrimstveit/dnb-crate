@@ -366,7 +366,7 @@ export function chooseTransition(
     rightConfidence,
     plannedBars: window.barCount,
   });
-  const resolvedWindow =
+  const resolvedBase =
     forcedBars && window.barCount !== forcedBars && !options.window
       ? planPhraseWindow(outgoing, incoming, {
           dropAnchored: options.dropAnchored,
@@ -399,27 +399,80 @@ export function chooseTransition(
       syncopation: outgoing.analysis?.descriptors?.bars?.syncopation,
       bpm: outgoing.analysis?.bpm,
       downbeat0Ms: outgoing.analysis?.downbeatTimesMs?.[0] ?? null,
-      windowStartMs: resolvedWindow.mixOutMs,
-      windowBars: resolvedWindow.barCount,
+      windowStartMs: resolvedBase.mixOutMs,
+      windowBars: resolvedBase.barCount,
     },
     {
       syncopation: incoming.analysis?.descriptors?.bars?.syncopation,
       bpm: incoming.analysis?.bpm,
       downbeat0Ms: incoming.analysis?.downbeatTimesMs?.[0] ?? null,
-      windowStartMs: resolvedWindow.mixInMs,
-      windowBars: resolvedWindow.barCount,
+      windowStartMs: resolvedBase.mixInMs,
+      windowBars: resolvedBase.barCount,
     },
     PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP,
   );
-  if (structural.conflict && structural.gap != null) {
+  // Batch D (11 October review): when the anchored window structurally
+  // conflicts, recover automatically with a different WINDOW before
+  // accepting the crossfade fallback — the gate is overlap-local, so a
+  // whole-phrase shift of the incoming mix-in can move the blend onto
+  // compatible material without changing tracks. Whole-phrase shifts are
+  // alignment-safe (bar phase is preserved) and bounded at two phrases per
+  // side; downstream gates (playable span, continuity, timeline) still
+  // reject an infeasible shift, so termination is unchanged.
+  let resolvedWindow = resolvedBase;
+  let windowShiftBars: number | null = null;
+  if (structural.conflict && structural.gap != null && options.window == null) {
+    const barMs = target && target > 0 ? (4 * 60_000) / target : 1379.31;
+    const inAudioStart = incoming.analysis?.audioStartMs ?? 0;
+    const inAudioEnd = incoming.analysis?.audioEndMs ?? incoming.durationMs;
+    const inBpm = incoming.analysis?.bpm ?? target;
+    const shifts = [
+      resolvedBase.barCount,
+      -resolvedBase.barCount,
+      resolvedBase.barCount * 2,
+      -resolvedBase.barCount * 2,
+    ];
+    for (const shiftBars of shifts) {
+      const candidateIn = resolvedBase.mixInMs + shiftBars * barMs;
+      if (
+        candidateIn < inAudioStart ||
+        candidateIn + resolvedBase.barCount * barMs > inAudioEnd - 100
+      ) {
+        continue;
+      }
+      const shifted = structuralGrooveConflict(
+        {
+          syncopation: outgoing.analysis?.descriptors?.bars?.syncopation,
+          bpm: outgoing.analysis?.bpm,
+          downbeat0Ms: outgoing.analysis?.downbeatTimesMs?.[0] ?? null,
+          windowStartMs: resolvedBase.mixOutMs,
+          windowBars: resolvedBase.barCount,
+        },
+        {
+          syncopation: incoming.analysis?.descriptors?.bars?.syncopation,
+          bpm: inBpm,
+          downbeat0Ms: incoming.analysis?.downbeatTimesMs?.[0] ?? null,
+          windowStartMs: candidateIn,
+          windowBars: resolvedBase.barCount,
+        },
+        PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP,
+      );
+      if (!shifted.conflict) {
+        resolvedWindow = { ...resolvedBase, mixInMs: Math.round(candidateIn) };
+        windowShiftBars = shiftBars;
+        break;
+      }
+    }
+  }
+  if (structural.conflict && structural.gap != null && windowShiftBars == null) {
     return crossfade("groove-syncopation-conflict", DEFAULT_TRANSITION_OVERLAP_MS, {
       grooveGap: Number(structural.gap.toFixed(3)),
       grooveOutSync: Number((structural.outgoing?.mean ?? 0).toFixed(3)),
       grooveInSync: Number((structural.incoming?.mean ?? 0).toFixed(3)),
       grooveOutBars: structural.outgoing?.measuredBars ?? 0,
       grooveInBars: structural.incoming?.measuredBars ?? 0,
-      grooveOutWindowMs: Math.round(resolvedWindow.mixOutMs),
-      grooveInWindowMs: Math.round(resolvedWindow.mixInMs),
+      grooveOutWindowMs: Math.round(resolvedBase.mixOutMs),
+      grooveInWindowMs: Math.round(resolvedBase.mixInMs),
     });
   }
   // Groove-triggered bass_swap scores the same overlap-local material the
@@ -529,6 +582,11 @@ export function chooseTransition(
           : {}),
         ...(keyClash ? { keyClash: true, keyClashWarning: "KEY_CLASH" } : {}),
         ...(structuralAbstain ? { grooveAbstain: structuralAbstain } : {}),
+        // Batch D: when the anchored window structurally conflicted and a
+        // whole-phrase shift recovered it, the shift is provenance.
+        ...(windowShiftBars != null
+          ? { windowShiftBars, windowShiftReason: "groove-syncopation-conflict-resolved" }
+          : {}),
         ...(policyHandoff.rateRegionsVersion === 2 ? { rateRegionsVersion: 2 } : {}),
         ...(selectionReason ? { selectionReason } : {}),
         ...(resolvedWindow.continuity
