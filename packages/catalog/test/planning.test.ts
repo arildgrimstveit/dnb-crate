@@ -3362,8 +3362,9 @@ describe("join inspector (batch 9)", () => {
         sourceEndMs: 99_900,
       },
     });
-    const editedTransition = edited.plan.entries.find((e) => e.id === aligned.id)!
-      .transitionToNext!;
+    const editedTransition = edited.plan.entries.find(
+      (e) => e.id === aligned.id,
+    )!.transitionToNext!;
     expect(editedTransition.parameters.alignmentInvalidated).toBe("window-edited");
     // S1: the prior-parameters spread re-introduced recipeVersion alongside
     // the invalidation marker, so the renderer kept taking its version-1
@@ -3382,8 +3383,9 @@ describe("join inspector (batch 9)", () => {
         sourceEndMs: 99_900,
       },
     });
-    const stillInvalidated = untouched.plan.entries.find((e) => e.id === aligned.id)!
-      .transitionToNext!;
+    const stillInvalidated = untouched.plan.entries.find(
+      (e) => e.id === aligned.id,
+    )!.transitionToNext!;
     expect(stillInvalidated.parameters.alignmentInvalidated).toBe("window-edited");
     expect(stillInvalidated.parameters.recipeVersion).toBeUndefined();
     const otherAligned = sorted.findIndex(
@@ -3393,8 +3395,9 @@ describe("join inspector (batch 9)", () => {
         entry.transitionToNext?.parameters.recipeVersion === 1,
     );
     if (otherAligned >= 0) {
-      const other = untouched.plan.entries.find((e) => e.id === sorted[otherAligned]!.id)!
-        .transitionToNext!;
+      const other = untouched.plan.entries.find(
+        (e) => e.id === sorted[otherAligned]!.id,
+      )!.transitionToNext!;
       expect(other.parameters.alignmentInvalidated).toBeUndefined();
     }
     void before;
