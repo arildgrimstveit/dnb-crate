@@ -104,6 +104,22 @@ export class AnalysisJobRepository {
     return this.require(row.id);
   }
 
+  /** S5 (11 October review): authoritative, cross-process claim check for
+   * side-effect fencing. The job row is the source of truth: a claim is
+   * current only while the job is still running under this exact token.
+   * A deposed owner's token mismatches after takeover recovery (or a
+   * re-claim by the new owner), so persistence boundaries can refuse to
+   * write catalog evidence for work nobody owns anymore. */
+  isClaimCurrent(jobId: string, ownerToken: string | null | undefined): boolean {
+    if (ownerToken == null) {
+      return false;
+    }
+    const row = this.db
+      .prepare(`SELECT status, claimed_by FROM analysis_jobs WHERE id = ?`)
+      .get(jobId) as { status: string; claimed_by: string | null } | undefined;
+    return Boolean(row && row.status === "running" && row.claimed_by === ownerToken);
+  }
+
   updateProgress(
     id: string,
     progress: number,

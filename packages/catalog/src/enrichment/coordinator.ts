@@ -204,6 +204,11 @@ export class EnrichmentCoordinator {
   private async execute(job: EnrichmentJob): Promise<void> {
     const completed: string[] = [];
     const failed: string[] = [];
+    // S5: claim context captured at claim time; the job row is the
+    // authority. A deposed owner stops BEFORE applying published metadata
+    // for tracks nobody owns the job for anymore.
+    const claimToken = this.ownerToken();
+    const claimCurrent = () => !this.stopped && this.jobs.isClaimCurrent(job.id, claimToken);
     try {
       if (this.config.enrichment?.enabled !== true) {
         throw new DomainError("ENRICHMENT_FAILED", "Enrichment is disabled in config");
@@ -218,6 +223,13 @@ export class EnrichmentCoordinator {
             completed,
             failed,
             this.ownerToken(),
+          );
+          return;
+        }
+        if (!claimCurrent()) {
+          this.logger.warn(
+            { jobId: job.id },
+            "Enrichment claim lost to a takeover; stopping without applying metadata",
           );
           return;
         }

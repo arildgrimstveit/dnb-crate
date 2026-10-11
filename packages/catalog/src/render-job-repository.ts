@@ -326,6 +326,18 @@ export class RenderJobRepository {
     return this.require(id);
   }
 
+  /** S5: authoritative cross-process claim check — see
+   * AnalysisJobRepository.isClaimCurrent. */
+  isClaimCurrent(jobId: string, ownerToken: string | null | undefined): boolean {
+    if (ownerToken == null) {
+      return false;
+    }
+    const row = this.db
+      .prepare(`SELECT status, claimed_by FROM render_jobs WHERE id = ?`)
+      .get(jobId) as { status: string; claimed_by: string | null } | undefined;
+    return Boolean(row && row.status === "running" && row.claimed_by === ownerToken);
+  }
+
   failRunningAsInterrupted(): number {
     const result = this.db
       .prepare(

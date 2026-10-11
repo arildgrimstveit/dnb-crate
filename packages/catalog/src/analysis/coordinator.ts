@@ -220,6 +220,18 @@ export class AnalysisCoordinator {
     const completed: string[] = [];
     const failed: string[] = [];
     const pcmCache = new Map<string, Promise<PcmAudio>>();
+    // S5: the claim context captured at claim time. The job ROW is the
+    // authority: after a takeover, recovery marks this job interrupted (or
+    // the new owner re-claims it under a different token), so
+    // isClaimCurrent goes false and this owner stops WRITING catalog
+    // evidence — analysis rows, analyzed metadata, stages — for work
+    // nobody owns anymore. The terminal-row fence (R12) remains the second
+    // defense.
+    const claimToken = this.ownerToken();
+    const claimCurrent = () =>
+      !this.stopped &&
+      this.jobs.require(job.id).status !== "cancelled" &&
+      this.jobs.isClaimCurrent(job.id, claimToken);
     try {
       this.binaries = undefined;
       const binaries = await this.detect();
@@ -268,6 +280,15 @@ export class AnalysisCoordinator {
           );
           return;
         }
+        // S5: a deposed owner aborts BEFORE writing any catalog evidence
+        // for this track. The recovery owner owns the job now.
+        if (!claimCurrent()) {
+          this.logger.warn(
+            { jobId: job.id },
+            "Analysis claim lost to a takeover; stopping without writing evidence",
+          );
+          return;
+        }
         const trackId = job.trackIds[i]!;
         if (prefetchN > 0) {
           for (let k = 1; k <= prefetchN && i + k < job.trackIds.length; k += 1) {
@@ -277,6 +298,16 @@ export class AnalysisCoordinator {
         try {
           if (job.forceDsp || !this.dspCurrent(trackId)) {
             await this.analyzeTrack(trackId, binaries, pcmCache.get(trackId));
+            // S5: the expensive DSP ran while we (may have) lost the claim;
+            // persist rows/stage ONLY while the claim is still current.
+            if (!claimCurrent()) {
+              this.logger.warn(
+                { jobId: job.id, trackId },
+                "Analysis claim lost during DSP; discarding result without writing evidence",
+              );
+              pcmCache.delete(trackId);
+              return;
+            }
             this.analyses.setStage(trackId, "dsp", {
               state: "succeeded",
               fingerprint: this.tracks.findById(trackId)!.fileFingerprint,
@@ -291,10 +322,12 @@ export class AnalysisCoordinator {
           completed.push(trackId);
         } catch (error) {
           failed.push(trackId);
-          this.tracks.setAnalysisStatus(trackId, "failed");
+          if (claimCurrent()) {
+            this.tracks.setAnalysisStatus(trackId, "failed");
+          }
           this.logger.warn({ err: error, trackId }, "Track analysis failed");
         }
-        if (this.tracks.findById(trackId) && !this.abort.signal.aborted)
+        if (this.tracks.findById(trackId) && !this.abort.signal.aborted && claimCurrent())
           await keys.analyze(trackId, keyProbe, this.abort.signal);
         pcmCache.delete(trackId);
         this.jobs.updateProgress(job.id, (i + 1) / job.trackIds.length, completed, failed);

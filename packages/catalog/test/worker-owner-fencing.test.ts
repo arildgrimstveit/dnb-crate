@@ -252,4 +252,53 @@ describe("worker ownership fencing (review item 5)", () => {
     expect(catalog.renderJobs.require(jobId).status).toBe("running");
     ownerB.release();
   });
+
+  it("a deposed analysis owner holds no current claim and writes no evidence (S5)", async () => {
+    const root = path.join(os.tmpdir(), `dnb-s5-${crypto.randomUUID()}`);
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      useFakeFfmpeg: true,
+      passive: true,
+    });
+    cleanups.push(() => catalog.close());
+    const { writeSineWav } = await import("../src/index.ts");
+    await writeSineWav(path.join(library, "a.wav"), { title: "Alpha", durationMs: 2000 });
+    await catalog.service.scanLibrary();
+    const trackId = catalog.repository.listAll()[0]!.id;
+
+    const db = (catalog as unknown as { db: Database }).db;
+    const ownerA = new WorkerOwner(db);
+    expect(ownerA.acquire()).toBe(true);
+    const tokenA = ownerA.currentToken()!;
+
+    // Owner A claims an analysis job and is deposed mid-flight (heartbeat
+    // expiry + takeover + recovery) BEFORE its evidence is written.
+    const inserted = catalog.analysisJobs.insertQueued([trackId]);
+    const jobId = inserted.id;
+    const claimed = catalog.analysisJobs.claimNextQueued(tokenA);
+    expect(claimed?.id).toBe(jobId);
+    backdateHeartbeat(db);
+    const ownerB = new WorkerOwner(db);
+    expect(ownerB.acquire()).toBe(true);
+    expect(catalog.analysisJobs.failRunningAsInterrupted()).toBe(1);
+
+    // The authoritative cross-process claim check (S5): A's claim is gone
+    // even though A's in-memory owned flag has not noticed yet; the
+    // coordinator's persistence gates consult exactly this predicate.
+    expect(catalog.analysisJobs.isClaimCurrent(jobId, tokenA)).toBe(false);
+    expect(catalog.analysisJobs.isClaimCurrent(jobId, null)).toBe(false);
+
+    // No catalog evidence exists for the deposed work, and the late fenced
+    // terminal write is still rejected (R12 second defense).
+    const stages = (db.prepare("SELECT COUNT(*) AS n FROM analysis_stages").get() as { n: number })
+      .n;
+    expect(stages).toBe(0);
+    expect(catalog.analyses.findByTrackId(trackId)).toBeNull();
+    expect(() => catalog.analysisJobs.markSucceeded(jobId, [trackId], [], tokenA)).toThrow(
+      /taken over/,
+    );
+    expect(catalog.repository.findById(trackId)!.analysisStatus).not.toBe("failed");
+    ownerB.release();
+  });
 });

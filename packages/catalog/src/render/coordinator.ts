@@ -1571,6 +1571,20 @@ export class RenderCoordinator {
           return;
         }
         if (this.jobs.findById(job.id)?.status !== "cancelled") {
+          // S5: the named listen file is SHARED by plan name — a deposed
+          // owner publishing here would clobber the winner's artifact even
+          // though its terminal-row write is fenced. Verify the claim
+          // against the job row before encoding/publishing; the master is
+          // job-id-named and harmless, but the listen goes through this
+          // gate. The terminal DB fence remains the second defense.
+          const claimToken = this.ownerToken();
+          if (!this.jobs.isClaimCurrent(job.id, claimToken)) {
+            this.logger.warn(
+              { jobId: job.id },
+              "Render claim lost to a takeover before listen publication; skipping the shared-name artifact",
+            );
+            return;
+          }
           this.jobs.updateProgress(job.id, 0.96, "listen-encode");
           const listenRel = listenRenderRelPath(plan.name, job.id);
           const listenAbs = path.resolve(this.config.outputRoot, listenRel);
