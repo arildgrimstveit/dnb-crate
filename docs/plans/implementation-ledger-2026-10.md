@@ -500,3 +500,16 @@ Both CI lanes green on `f2121ff`. Batch D steps 1-2 (overlap measurement,
 alternative treatment/window evaluation beyond the structural case) and step 5
 (generalization evaluation on held-out automatic plans) remain, gated on
 running the corpus against real library material for a baseline.
+
+## Linux MCP first-mix flake - RESOLVED (12 October 2026 update)
+
+Root cause FOUND and FIXED (was tracked as "intermittent, root cause unresolved"):
+the 16-bit DITHERED listen copy measured -0.90 dBTP against the -1.00 ceiling on
+master mixes that legitimately sat at the ceiling - dither noise, not a loudness
+defect. The listen was withheld and first-mix failed OUTPUT_CHECK_FAILED, only on
+Linux because the fixture mix's peak sat closest to the ceiling on that lane's
+measurements. Fix `518bb9b`: one bounded compensation re-encode before the dither
+stage; the published copy must still measure within the ceiling (gate unchanged),
+the exact CI numbers reproduced in the regression test, and every subsequent CI
+run on both lanes is green. The in-test diagnostics that captured the numbers
+remain armed.

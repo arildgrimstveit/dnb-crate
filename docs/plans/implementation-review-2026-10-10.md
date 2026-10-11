@@ -1,11 +1,12 @@
 # Implementation review and next handoff — 10 October 2026
 
-> **Status: ACTIVE BACKLOG** (committed 11 October 2026). Findings R1–R14 with acceptance criteria.
-> Fix status as of 11 October 2026: R1–R5, R7–R14 fixed (R3 scoped per its note); the deck-verifier
-> recalibration after R5 is recorded in the ledger appendix. Remaining: R6 naming/status pass landed
-> with the calibration; R2/R7 remainders (compare lifecycle, eligibility paging, replay-of-replay)
-> landed 10–11 October; documentation reconciliation is in progress. The single frozen
-> comparison-context identity across variant previews is the main open engineering item.
+> **Status: HISTORICAL SNAPSHOT** (as of 12 October 2026). Findings R1–R14 are all
+> fixed or superseded — see the [follow-up completion rows in the ledger]
+> (implementation-ledger-2026-10.md) with commits and acceptance evidence. The active
+> backlog is the [11 October implementation review](implementation-review-2026-10-11.md)
+> (findings S1–S9, automatic-quality direction); its Batch A/B/C cores and Batch D step 3
+> are delivered per the ledger. This document remains the acceptance-criteria record for
+> the R-series fixes.
 
 ## Start here
 
