@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -40,7 +40,10 @@ describe("track analysis and aligned transitions", () => {
     const library = path.join(root, "library");
     await mkdir(library, { recursive: true });
     const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
-    cleanups.push(() => catalog.close());
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
     const pcm = buildClickTrackPcm({ bpm: 174, durationMs: 12_000 });
     await writeFile(path.join(library, "click.wav"), encodeMonoWav(pcm));
     await catalog.service.scanLibrary();
@@ -69,7 +72,10 @@ describe("track analysis and aligned transitions", () => {
     const library = path.join(root, "library");
     await mkdir(library, { recursive: true });
     const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
-    cleanups.push(() => catalog.close());
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
     await writeSineWav(path.join(library, "alpha.wav"), {
       title: "Alpha",
       artist: "A",
@@ -177,7 +183,10 @@ describe("track analysis and aligned transitions", () => {
     const library = path.join(root, "library");
     await mkdir(library, { recursive: true });
     const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
-    cleanups.push(() => catalog.close());
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
     const click = buildClickTrackPcm({ bpm: 174, durationMs: 12_000 });
     await writeFile(path.join(library, "inrange.wav"), encodeMonoWav(click));
     await writeSineWav(path.join(library, "outrange.wav"), {
@@ -211,7 +220,10 @@ describe("track analysis and aligned transitions", () => {
     const library = path.join(root, "library");
     await mkdir(library, { recursive: true });
     const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
-    cleanups.push(() => catalog.close());
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
     await writeSineWav(path.join(library, "fresh.wav"), { title: "Fresh", durationMs: 2000 });
     await writeSineWav(path.join(library, "oldver.wav"), { title: "OldVer", durationMs: 2000 });
     await writeSineWav(path.join(library, "noref.wav"), { title: "NoRef", durationMs: 2000 });
@@ -306,7 +318,10 @@ describe("track analysis and aligned transitions", () => {
     const library = path.join(root, "library");
     await mkdir(library, { recursive: true });
     const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
-    cleanups.push(() => catalog.close());
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
     const click175 = buildClickTrackPcm({ bpm: 175, durationMs: 12_000 });
     const click174 = buildClickTrackPcm({ bpm: 174, durationMs: 12_000 });
     await writeFile(path.join(library, "memory.wav"), encodeMonoWav(click175));
@@ -442,7 +457,10 @@ describe("track analysis and aligned transitions", () => {
     const library = path.join(root, "library");
     await mkdir(library, { recursive: true });
     const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
-    cleanups.push(() => catalog.close());
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
     await writeSineWav(path.join(library, "memory.wav"), {
       title: "Memory",
       artist: "Test",
@@ -501,7 +519,10 @@ describe("track analysis and aligned transitions", () => {
     const library = path.join(root, "library");
     await mkdir(library, { recursive: true });
     const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
-    cleanups.push(() => catalog.close());
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
     await writeSineWav(path.join(library, "sidecar.wav"), {
       title: "Sidecar",
       artist: "Test",

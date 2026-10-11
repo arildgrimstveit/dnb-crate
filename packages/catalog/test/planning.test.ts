@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
+import { mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { mkdir, rm } from "node:fs/promises";
 import { createCatalogRuntime, writeSineWav } from "../src/index.ts";
 import {
   DSP_ANALYZER_NAME,
@@ -53,7 +53,12 @@ function runtime() {
     `dnb-plan-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   );
   const created = createCatalogRuntime(testConfig(root));
-  cleanups.push(() => created.close());
+  // S12/F10 fixture lifecycle: close AND remove the scratch root — runtime
+  // close alone leaks every catalog.sqlite and output dir to the OS temp.
+  cleanups.push(async () => {
+    await created.close();
+    await rm(root, { recursive: true, force: true });
+  });
   return created;
 }
 

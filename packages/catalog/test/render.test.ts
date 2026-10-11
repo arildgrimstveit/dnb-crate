@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -40,7 +40,11 @@ async function seededLibrary() {
   );
   const library = path.join(root, "library");
   const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
-  cleanups.push(() => catalog.close());
+  // S12/F10 fixture lifecycle: close AND remove the scratch root.
+  cleanups.push(async () => {
+    await catalog.close();
+    await rm(root, { recursive: true, force: true });
+  });
   const aPath = path.join(library, "alpha.wav");
   const bPath = path.join(library, "bravo.wav");
   const { mkdir } = await import("node:fs/promises");
