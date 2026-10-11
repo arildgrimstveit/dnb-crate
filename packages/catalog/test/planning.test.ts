@@ -3281,6 +3281,169 @@ describe("join inspector (batch 9)", () => {
     }
   });
 
+  it("re-derives replacement rates, stamps edited, and diffs effective treatments (S3)", () => {
+    const catalog = runtime();
+    for (let i = 0; i < 16; i += 1) {
+      const id = seedTrack(catalog, {
+        title: `S3 Chain ${i}`,
+        artist: `S3 Artist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+      stubDescriptors(catalog, id, {});
+    }
+    // Replacement candidates at a different native tempo (few enough that
+    // the 174 chain dominates selection and a spare survives).
+    for (let i = 0; i < 4; i += 1) {
+      const id = seedTrack(catalog, {
+        title: `S3 Fast ${i}`,
+        artist: `S3 Fast Artist ${i}`,
+        bpm: 178,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+      stubDescriptors(catalog, id, {}, { bpm: 178 });
+    }
+    const created = createPlan(catalog, {
+      name: "S3 fixture",
+      targetDurationMs: 700_000,
+      seed: 9,
+      explorationWeight: 0,
+    });
+    const sorted = [...created.plan.entries].sort((a, b) => a.order - b.order);
+    expect(sorted.length).toBeGreaterThanOrEqual(4);
+    // Replace the incoming side of a join whose OUTGOING track is 174 BPM
+    // with a 178 BPM spare; the chain targets 174.
+    const bpmOf = (id: string) => catalog.repository.findById(id)?.bpm ?? null;
+    const joinIndex = sorted.findIndex(
+      (entry, i) => i >= 1 && i + 1 < sorted.length && bpmOf(entry.trackId) === 174,
+    );
+    expect(joinIndex).toBeGreaterThanOrEqual(0);
+    const replacedEntryId = sorted[joinIndex + 1]!.id;
+    // Seed the replacement AFTER planning so selection cannot absorb it.
+    const fastId = seedTrack(catalog, {
+      title: "S3 Spare Fast",
+      artist: "S3 Spare Artist",
+      bpm: 178,
+      camelot: "8A",
+      energy: 5,
+      durationMs: 100_000,
+    });
+    stubDescriptors(catalog, fastId, {}, { bpm: 178 });
+    const fast = catalog.repository.findById(fastId)!;
+    const repaired = catalog.service.repairSetPlan({
+      setPlanId: created.plan.id,
+      entryId: sorted[joinIndex]!.id,
+      newIncomingTrackId: fast.id,
+    });
+
+    // S3 defect: the replaced entry kept the placeholder rate 1.0 while the
+    // join targeted 174 BPM. The rate must now be derived from the pair:
+    // 174/178 within tolerance.
+    const after = [...repaired.plan.entries].sort((a, b) => a.order - b.order);
+    const replacedIndex = after.findIndex((entry) => entry.id === replacedEntryId);
+    expect(replacedIndex).toBe(joinIndex + 1);
+    expect(after[replacedIndex]!.playbackRate).toBeGreaterThan(0.9);
+    expect(after[replacedIndex]!.playbackRate).toBeLessThan(0.99);
+    expect(after[replacedIndex]!.playbackRate).toBeCloseTo(174 / 178, 3);
+    expect(after[replacedIndex]!.rateSource).toBeUndefined();
+    // The join's transition targets the chain tempo and the effective BPM
+    // of the replaced entry is consistent with it.
+    const join = after[joinIndex]!.transitionToNext!;
+    expect(
+      typeof join.parameters.targetBpm === "number" ? join.parameters.targetBpm : 0,
+    ).toBeLessThan(176);
+
+    // The replacement is recorded as an edited plan with changed pairs.
+    expect(repaired.diff.replacedTrack.toTitle).toBe(fast.title);
+    expect(repaired.explanation.edited).toBeDefined();
+    expect(repaired.explanation.edited?.changedJoins.length).toBeGreaterThan(0);
+
+    // The effective diff: changed joins carry before/after treatments
+    // including rates; the reason labels name the correct side (the join at
+    // joinIndex is the replaced track's INCOMING join).
+    const changedOrders = repaired.diff.changedJoins.map((row) => row.order).sort((a, b) => a - b);
+    expect(changedOrders).toEqual([joinIndex, joinIndex + 1]);
+    const incomingJoinChange = repaired.diff.changedJoins.find((row) => row.order === joinIndex)!;
+    expect(incomingJoinChange.reason).toMatch(/incoming join of the replaced track/);
+    expect(incomingJoinChange.after.incomingRate).toBeCloseTo(174 / 178, 3);
+    for (const preserved of repaired.diff.preservedJoins) {
+      expect(preserved.treatment.type).toBe(preserved.type);
+    }
+
+    // Same-track replacement is a no-op: nothing changes, and the
+    // explanation is returned untouched (an earlier edit's marker may
+    // legitimately persist — a no-op must not add or clear one).
+    const before = catalog.service.getSetPlan(created.plan.id);
+    const editedBefore = JSON.stringify(
+      catalog.service.requirePlan(created.plan.id).explanation.edited ?? null,
+    );
+    const noop = catalog.service.repairSetPlan({
+      setPlanId: created.plan.id,
+      entryId: sorted[joinIndex]!.id,
+      newIncomingTrackId: after[replacedIndex]!.trackId,
+    });
+    expect(noop.diff.changedJoins).toEqual([]);
+    expect(JSON.stringify(noop.explanation.edited ?? null)).toBe(editedBefore);
+    expect(
+      [...noop.plan.entries].sort((a, b) => a.order - b.order).map((entry) => entry.trackId),
+    ).toEqual([...before.entries].sort((a, b) => a.order - b.order).map((e) => e.trackId));
+
+    // An intentional rate pin survives later rebuilds verbatim.
+    const pinned = catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      setPlaybackRate: { entryId: sorted[0]!.id, playbackRate: 1.005 },
+    });
+    const pinnedEntry = pinned.plan.entries.find((entry) => entry.id === sorted[0]!.id)!;
+    expect(pinnedEntry.rateSource).toBe("pinned");
+    const rebuilt = catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      setTrim: {
+        entryId: after[after.length - 1]!.id,
+        sourceStartMs: 100,
+        sourceEndMs: 99_900,
+      },
+    });
+    const rebuiltEntry = rebuilt.plan.entries.find((entry) => entry.id === sorted[0]!.id)!;
+    expect(rebuiltEntry.playbackRate).toBe(1.005);
+    expect(rebuiltEntry.rateSource).toBe("pinned");
+  });
+
+  it("rejects an invalid replacement without mutating the stored plan (S3)", () => {
+    const catalog = runtime();
+    for (let i = 0; i < 12; i += 1) {
+      seedTrack(catalog, {
+        title: `S3b ${i}`,
+        artist: `S3b Artist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    const created = createPlan(catalog, {
+      name: "S3b fixture",
+      targetDurationMs: 400_000,
+      seed: 10,
+      explorationWeight: 0,
+    });
+    const sorted = [...created.plan.entries].sort((a, b) => a.order - b.order);
+    const before = JSON.stringify(catalog.service.getSetPlan(created.plan.id));
+    // Replacing with a track ALREADY in the plan duplicates it and must
+    // fail validation — leaving the stored plan unchanged.
+    expect(() =>
+      catalog.service.repairSetPlan({
+        setPlanId: created.plan.id,
+        entryId: sorted[0]!.id,
+        newIncomingTrackId: sorted[sorted.length - 1]!.trackId,
+      }),
+    ).toThrow();
+    expect(JSON.stringify(catalog.service.getSetPlan(created.plan.id))).toBe(before);
+  });
+
   it("reports per-variant lifecycle and preserves enqueue failure detail (R2)", async () => {
     const catalog = runtime();
     // Virtual tracks: no real audio files exist, so preview ENQUEUE fails

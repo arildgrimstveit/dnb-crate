@@ -124,6 +124,9 @@ export const setPlanEntrySchema = z.object({
   // fractional (4*60000/bpm is irrational for almost every tempo).
   timelineStartMs: z.number().nonnegative(),
   playbackRate: z.number(),
+  // S3: "pinned" marks an intentional manual rate that survives rebuilds
+  // verbatim; absent means the rate is chain-derived.
+  rateSource: z.literal("pinned").optional(),
   gainDb: z.number(),
   transitionToNext: transitionPlanSchema.nullable(),
 });

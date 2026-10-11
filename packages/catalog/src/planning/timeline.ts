@@ -671,10 +671,35 @@ export function buildEntries(
 ): SetPlanEntry[] {
   const referenceLufs = medianLufs(tracks.map((track) => track.analysis?.integratedLufs));
   const pairWindows: Array<PhraseWindow | null> = [];
-  const rates = tracks.map((track) => {
+  // S3 (11 October review): rates distinguish intentional PINS from derived
+  // chain values. A prior rate is authoritative only when it is pinned
+  // (setPlaybackRate) or when the entry's adjacency survived the edit —
+  // evidenced by the previous entry's KEPT transition still stamping this
+  // track as its incoming side (the F7 pair identity). Everything else (a
+  // replaced entry's placeholder rate, a replaced neighbor, a structurally
+  // invalidated join) re-derives from the newly chosen pair targets, so a
+  // 178 BPM replacement in a 174 BPM chain actually plays at 174/178.
+  const rateFromPrior = tracks.map((track, index) => {
     const prior = existing?.get(track.id);
-    return prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : 1;
+    if (!prior?.playbackRate || prior.playbackRate <= 0) {
+      return false;
+    }
+    if (prior.rateSource === "pinned") {
+      return true;
+    }
+    if (index === 0) {
+      // The chain-head rate derives from join 0's outgoing side: keep it
+      // while join 0 survived (a null prior transition means it was
+      // invalidated and the head re-derives).
+      return existing?.get(track.id)?.transitionToNext != null;
+    }
+    const prevPrior = existing?.get(tracks[index - 1]!.id);
+    const stamp = prevPrior?.transitionToNext?.parameters.incomingTrackId;
+    return typeof stamp === "string" && stamp === track.id;
   });
+  const rates = tracks.map((track, index) =>
+    rateFromPrior[index] ? existing?.get(track.id)!.playbackRate! : 1,
+  );
   const chosen: Array<ChosenTransition | null> = [];
   let firstAlignedApplied = false;
   for (let index = 0; index < tracks.length; index += 1) {
@@ -745,11 +770,11 @@ export function buildEntries(
     const aligned =
       result.transition.type === "phrase_mix" || result.transition.type === "bass_swap";
     if (aligned) {
-      if (!firstAlignedApplied && !existing?.get(track.id)?.playbackRate) {
+      if (!firstAlignedApplied && !rateFromPrior[index]) {
         rates[index] = result.outgoingRate;
       }
       firstAlignedApplied = true;
-      if (!existing?.get(next.id)?.playbackRate) {
+      if (!rateFromPrior[index + 1]) {
         rates[index + 1] = result.incomingRate;
       }
     }
@@ -762,8 +787,9 @@ export function buildEntries(
     const picked = chosen[index];
     const transition = isLast ? null : (prior?.transitionToNext ?? picked?.transition ?? null);
     const overlap = isLast ? 0 : overlapFor(transition) || overlapMs;
-    const rate =
-      prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : (rates[index] ?? 1);
+    const rate = rateFromPrior[index]
+      ? (existing?.get(track.id)?.playbackRate as number)
+      : (rates[index] ?? 1);
     // R3 scoped fix: prefer the resolved pair window for the mix-IN only
     // when the PREVIOUS JOIN was aligned (the resolver evaluated the pair
     // and its window is authoritative for where the incoming starts). Check
@@ -866,8 +892,9 @@ export function buildEntries(
               incomingTrackId: tracks[index + 1]!.id,
             },
           };
-    const playbackRate =
-      prior?.playbackRate && prior.playbackRate > 0 ? prior.playbackRate : (rates[index] ?? 1);
+    const playbackRate = rateFromPrior[index]
+      ? (existing?.get(track.id)?.playbackRate as number)
+      : (rates[index] ?? 1);
     const matched = levelMatchGainDb(
       track.analysis?.integratedLufs,
       referenceLufs,
@@ -898,6 +925,9 @@ export function buildEntries(
       sourceEndMs,
       timelineStartMs: timeline,
       playbackRate,
+      // S3: an intentional rate pin survives rebuilds verbatim; derived
+      // entries carry no marker (absent = derived).
+      ...(prior?.rateSource === "pinned" ? { rateSource: "pinned" as const } : {}),
       gainDb,
       transitionToNext: stampedTransition,
     });

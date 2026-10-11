@@ -38,6 +38,7 @@ type EntryRow = {
   source_end_ms: number;
   timeline_start_ms: number;
   playback_rate: number;
+  rate_source: string | null;
   gain_db: number;
   transition_json: string | null;
 };
@@ -151,8 +152,8 @@ export class SetPlanRepository {
       const stmt = this.db.prepare(
         `INSERT INTO set_plan_entries (
           id, set_plan_id, track_id, order_index, source_start_ms, source_end_ms,
-          timeline_start_ms, playback_rate, gain_db, transition_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          timeline_start_ms, playback_rate, rate_source, gain_db, transition_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const entry of plan.entries) {
         stmt.run(
@@ -164,6 +165,7 @@ export class SetPlanRepository {
           entry.sourceEndMs,
           entry.timelineStartMs,
           entry.playbackRate,
+          entry.rateSource === "pinned" ? "pinned" : null,
           entry.gainDb,
           entry.transitionToNext === null ? null : JSON.stringify(entry.transitionToNext),
         );
@@ -304,6 +306,8 @@ function mapEntry(row: EntryRow): SetPlanEntry {
     sourceEndMs: row.source_end_ms,
     timelineStartMs: row.timeline_start_ms,
     playbackRate: row.playback_rate,
+    // S3: "pinned" marks an intentional rate that survives rebuilds.
+    ...(row.rate_source === "pinned" ? { rateSource: "pinned" as const } : {}),
     gainDb: row.gain_db,
     transitionToNext: parseStoredJson<SetPlanEntry["transitionToNext"]>(
       row.transition_json,

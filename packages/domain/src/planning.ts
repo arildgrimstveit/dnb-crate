@@ -27,6 +27,11 @@ export type SetPlanEntry = {
   sourceEndMs: number;
   timelineStartMs: number;
   playbackRate: number;
+  /** S3 (11 October review): distinguishes an intentional rate PIN
+   * (setPlaybackRate — survives every rebuild verbatim) from a DERIVED
+   * chain rate (recomputed when the entry's adjacency changes). Absent on
+   * legacy and derived entries, which means "derived". */
+  rateSource?: "pinned";
   gainDb: number;
   transitionToNext: TransitionPlan | null;
 };

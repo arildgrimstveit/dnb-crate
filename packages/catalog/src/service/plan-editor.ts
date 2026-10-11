@@ -110,30 +110,49 @@ export function applySetPlanUpdate(
       i + 1 < originalSorted.length ? originalSorted[i + 1]!.trackId : null,
     );
   }
+  // S3: pairs changed by replacement, recorded before transitions clear.
+  const replacedPairs: string[] = [];
   if (input.replaceTrack) {
     const entry = entries.find((item) => item.id === input.replaceTrack!.entryId);
     if (!entry) {
       throw new DomainError("INVALID_SET_PLAN", `No entry ${input.replaceTrack.entryId}`);
     }
     const track = service.requireTrack(input.replaceTrack.trackId);
-    const index = entries.indexOf(entry);
-    if (index > 0) {
-      entries[index - 1] = { ...entries[index - 1]!, transitionToNext: null };
+    // Same-track replacement is a no-op: nothing is invalidated, no edited
+    // marker, no diff churn (S3).
+    if (entry.trackId !== track.id) {
+      const index = entries.indexOf(entry);
+      // S3: record the replaced adjacency BEFORE the transitions are
+      // cleared, so the persisted explanation carries an honest edited
+      // marker with the changed pairs (the changed-joins loop below skips
+      // nulled transitions and previously lost the replacement entirely).
+      replacedPairs.push(
+        `${index > 0 ? `${entries[index - 1]!.trackId}->${entry.trackId}` : entry.trackId}=>${
+          index + 1 < entries.length ? `${track.id}->${entries[index + 1]!.trackId}` : track.id
+        }`,
+      );
+      if (index > 0) {
+        entries[index - 1] = { ...entries[index - 1]!, transitionToNext: null };
+      }
+      if (index + 1 < entries.length) {
+        const next = { ...entries[index + 1]! };
+        delete (next as { sourceStartMs?: number }).sourceStartMs;
+        entries[index + 1] = next;
+      }
+      entries[index] = {
+        id: entry.id,
+        trackId: track.id,
+        order: entry.order,
+        timelineStartMs: entry.timelineStartMs,
+        // S3: rate 1 is a PLACEHOLDER, not authority — buildEntries
+        // re-derives it from the new pair's targets (and propagates the
+        // chain) because this entry carries no pin and its adjacency
+        // stamps are gone.
+        playbackRate: 1,
+        gainDb: entry.gainDb,
+        transitionToNext: null,
+      } as (typeof entries)[number];
     }
-    if (index + 1 < entries.length) {
-      const next = { ...entries[index + 1]! };
-      delete (next as { sourceStartMs?: number }).sourceStartMs;
-      entries[index + 1] = next;
-    }
-    entries[index] = {
-      id: entry.id,
-      trackId: track.id,
-      order: entry.order,
-      timelineStartMs: entry.timelineStartMs,
-      playbackRate: 1,
-      gainDb: entry.gainDb,
-      transitionToNext: null,
-    } as (typeof entries)[number];
   }
   if (input.setTrim) {
     const entry = entries.find((item) => item.id === input.setTrim!.entryId);
@@ -195,10 +214,6 @@ export function applySetPlanUpdate(
       throw new DomainError("INVALID_SET_PLAN", `No entry ${input.setPlaybackRate.entryId}`);
     }
     assertPlaybackRate(input.setPlaybackRate.playbackRate, { allowExcessive: true });
-    // S1: a rate change rescales this entry's source geometry on BOTH sides
-    // (its own overlap start and the previous join's incoming placement),
-    // so alignment provenance on both joins is invalidated. A no-op keeps
-    // the resolved state.
     if (entry.playbackRate !== input.setPlaybackRate.playbackRate) {
       stripAlignmentPins(entry.transitionToNext, "rate-edited");
       const index = entries.indexOf(entry);
@@ -206,7 +221,10 @@ export function applySetPlanUpdate(
         stripAlignmentPins(entries[index - 1]!.transitionToNext, "rate-edited");
       }
     }
+    // S3: an explicit rate edit is an intentional PIN — it survives every
+    // later rebuild verbatim, unlike derived chain rates.
     entry.playbackRate = input.setPlaybackRate.playbackRate;
+    entry.rateSource = "pinned";
   }
   if (input.applyTransition) {
     const index = entries.findIndex((item) => item.id === input.applyTransition!.entryId);
@@ -271,7 +289,7 @@ export function applySetPlanUpdate(
   // Adjacencies whose pair is unchanged keep their (possibly approved)
   // treatments. Chain-tempo rates stay as stored; downstream re-derivation
   // on early-pair changes remains deliberate follow-up work.
-  const changedJoins: string[] = [];
+  const changedJoins: string[] = [...replacedPairs];
   for (let i = 0; i < entries.length - 1; i += 1) {
     const entry = entries[i]!;
     const next = entries[i + 1]!;

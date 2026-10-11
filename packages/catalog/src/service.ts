@@ -25,6 +25,7 @@ import type {
   ServerStatus,
   SetPlanSummary,
   SetPlanV1,
+  PlanExplanation,
   Track,
   TrackAnalysisView,
   TrackMetadataPatch,
@@ -947,10 +948,44 @@ export class CatalogService {
         reason: string;
         beforeType: string | null;
         afterType: string | null;
+        /** Effective treatment before/after (S3): type, duration, both
+         * sides' rates, and the placed windows. */
+        before: {
+          type: string | null;
+          durationMs: number | null;
+          outgoingRate: number | null;
+          incomingRate: number | null;
+          mixOutMs: number | null;
+          mixInMs: number | null;
+        };
+        after: {
+          type: string | null;
+          durationMs: number | null;
+          outgoingRate: number | null;
+          incomingRate: number | null;
+          mixOutMs: number | null;
+          mixInMs: number | null;
+        };
       }>;
-      preservedJoins: Array<{ order: number; pair: string; type: string }>;
+      preservedJoins: Array<{
+        order: number;
+        pair: string;
+        type: string;
+        treatment: {
+          type: string | null;
+          durationMs: number | null;
+          outgoingRate: number | null;
+          incomingRate: number | null;
+          mixOutMs: number | null;
+          mixInMs: number | null;
+        };
+      }>;
     };
     validation: ValidateSetPlanResult;
+    /** The persisted explanation after the edit (S3): carries the honest
+     * edited marker with the changed pairs when the replacement actually
+     * changed something. */
+    explanation: PlanExplanation;
   } {
     const stored = this.requirePlan(input.setPlanId);
     const beforeEntries = [...stored.plan.entries].sort((a, b) => a.order - b.order);
@@ -964,6 +999,33 @@ export class CatalogService {
     const newTrack = this.requireTrack(input.newIncomingTrackId);
     const oldTrack = this.requireTrack(beforeEntries[index + 1]!.trackId);
 
+    // Same-track replacement is a no-op: return the stored plan with an
+    // empty diff and the unedited explanation — no rebuild churn (S3).
+    if (oldTrack.id === newTrack.id) {
+      const stored = this.requirePlan(input.setPlanId);
+      const tracksById = new Map(this.repository.listAll().map((track) => [track.id, track]));
+      const validation = validateSetPlan(stored.plan, tracksById, {
+        audioEndMsByTrackId: this.audioEndMsByTrackId(),
+        effectiveEnergyByTrackId: this.effectiveEnergyByTrackId(),
+        keyConfidenceByTrackId: this.keyConfidenceByTrackId(),
+        firstDropStartMsByTrackId: this.firstDropStartMsByTrackId(),
+      });
+      return {
+        plan: stored.plan,
+        diff: {
+          replacedTrack: {
+            fromTitle: oldTrack.title,
+            toTitle: newTrack.title,
+            order: index + 1,
+          },
+          changedJoins: [],
+          preservedJoins: [],
+        },
+        validation,
+        explanation: stored.explanation,
+      };
+    }
+
     // Apply via updateSetPlan's replaceTrack, which handles adjacency
     // invalidation (F7) correctly: only the changed pair is replanned.
     const result = this.updateSetPlan({
@@ -971,38 +1033,77 @@ export class CatalogService {
       replaceTrack: { entryId: beforeEntries[index + 1]!.id, trackId: input.newIncomingTrackId },
     });
 
-    // Honest before/after diff: report EVERY join that changed and every
-    // join that kept its exact treatment. A join "changed" if its
-    // transition ID differs (the old one was invalidated and a new one
-    // was created) or its type changed.
+    // Honest before/after diff (S3): compare EFFECTIVE treatment — type,
+    // duration, both sides' playback rates, and the placed windows — not
+    // just transition ids. "Preserved" claims must survive this comparison.
     const afterEntries = [...result.plan.entries].sort((a, b) => a.order - b.order);
     const titleOf = new Map(this.repository.listAll().map((track) => [track.id, track.title]));
+    const treatmentOf = (
+      outgoing: (typeof beforeEntries)[number] | undefined,
+      incoming: (typeof beforeEntries)[number] | undefined,
+    ) => ({
+      type: outgoing?.transitionToNext?.type ?? null,
+      durationMs: outgoing?.transitionToNext?.durationMs ?? null,
+      outgoingRate: outgoing?.playbackRate ?? null,
+      incomingRate: incoming?.playbackRate ?? null,
+      mixOutMs:
+        typeof outgoing?.transitionToNext?.parameters.mixOutMs === "number"
+          ? Math.round(outgoing.transitionToNext.parameters.mixOutMs)
+          : null,
+      mixInMs:
+        typeof outgoing?.transitionToNext?.parameters.mixInMs === "number"
+          ? Math.round(outgoing.transitionToNext.parameters.mixInMs)
+          : null,
+    });
+    const sameTreatment = (
+      a: ReturnType<typeof treatmentOf>,
+      b: ReturnType<typeof treatmentOf>,
+    ): boolean =>
+      a.type === b.type &&
+      a.durationMs === b.durationMs &&
+      a.outgoingRate === b.outgoingRate &&
+      a.incomingRate === b.incomingRate &&
+      a.mixOutMs === b.mixOutMs &&
+      a.mixInMs === b.mixInMs;
     const changedJoins: Array<{
       order: number;
       pair: string;
       reason: string;
       beforeType: string | null;
       afterType: string | null;
+      before: ReturnType<typeof treatmentOf>;
+      after: ReturnType<typeof treatmentOf>;
     }> = [];
-    const preservedJoins: Array<{ order: number; pair: string; type: string }> = [];
+    const preservedJoins: Array<{
+      order: number;
+      pair: string;
+      type: string;
+      treatment: ReturnType<typeof treatmentOf>;
+    }> = [];
     for (let i = 0; i < afterEntries.length - 1; i += 1) {
-      const before = beforeEntries[i]?.transitionToNext ?? null;
-      const after = afterEntries[i]?.transitionToNext ?? null;
+      const before = treatmentOf(beforeEntries[i], beforeEntries[i + 1]);
+      const after = treatmentOf(afterEntries[i], afterEntries[i + 1]);
       const pair = `${titleOf.get(afterEntries[i]!.trackId) ?? "?"} -> ${titleOf.get(afterEntries[i + 1]!.trackId) ?? "?"}`;
-      const beforeId = before?.id ?? null;
-      const afterId = after?.id ?? null;
-      const beforeType = before?.type ?? null;
-      const afterType = after?.type ?? null;
-      if (beforeId !== afterId || beforeType !== afterType) {
+      const beforeId = beforeEntries[i]?.transitionToNext?.id ?? null;
+      const afterId = afterEntries[i]?.transitionToNext?.id ?? null;
+      if (beforeId !== afterId || !sameTreatment(before, after)) {
         const reason =
           i === index
-            ? `outgoing join of the replaced track (${oldTrack.title} -> ${newTrack.title})`
+            ? `incoming join of the replaced track (${oldTrack.title} -> ${newTrack.title})`
             : i === index + 1
-              ? `incoming join of the replaced track (${oldTrack.title} -> ${newTrack.title})`
+              ? `outgoing join of the replaced track (${oldTrack.title} -> ${newTrack.title})`
               : "unexpected change — this join does not touch the replaced track";
-        changedJoins.push({ order: i, pair, reason, beforeType, afterType });
-      } else if (after) {
-        preservedJoins.push({ order: i, pair, type: after.type });
+        changedJoins.push({
+          order: i,
+          pair,
+          reason,
+          beforeType: before.type,
+          afterType: after.type,
+          before,
+          after,
+        });
+      } else if (afterEntries[i]?.transitionToNext && after.type != null) {
+        preservedJoins.push({ order: i, pair, type: after.type, treatment: after });
       }
     }
     return {
@@ -1017,6 +1118,7 @@ export class CatalogService {
         preservedJoins,
       },
       validation: result.validation,
+      explanation: result.explanation,
     };
   }
 
