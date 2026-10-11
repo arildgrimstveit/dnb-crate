@@ -470,3 +470,22 @@ Both CI lanes green on `ff91a1b`. Deliberately open in Batch B: two-runtime
 delayed-native-process publication trials and the scratch-lifecycle remainder.
 Batch C (S9 corpus: cold-start plans, unseen-pair holdouts, negative controls)
 and Batch D (automatic selection) follow.
+
+## 11 October review - Batch C complete (11 October 2026)
+
+| Finding                                                                                                                                                                                                                                        | Status    | Commit(s) |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
+| S9 stage 1: probe verifies source identity against the frozen hash before measuring; full measurement (intervals, onset/locked counts, offset, drift halves, confidence) exposed per join; attempted vs measured coverage in audioVerification | Fixed     | `353ee85` |
+| S9 stage 2: audio regression corpus - synthetic negative controls (aligned, 40/80/140 ms, whole-beat, half-beat, drift, sparse) through the real renderer, with report + false pass/fail/abstention/coverage/runtime summary                   | Delivered | `f21a019` |
+
+Corpus baseline: 4 true positives (40/80/140 ms + drift, measured offsets
+accurate), 2 true negatives (aligned, whole-beat phase equivalence), 1 honest
+abstention (sparse), and ONE REAL FINDING: a half-beat offset (172 ms) falls
+outside the own-grid +-100 ms lock window - the verifier abstains (false
+pass). Documented in beatmatching-followups.md as the bar-phase blind spot;
+the corpus keeps the case to measure the eventual fix.
+
+Both CI lanes green on `f21a019`. Remaining: Batch B tail (delayed
+native-process publication trials, scratch lifecycle), Batch D (automatic
+selection: overlap measurement, alternative evaluation, weak-join recovery,
+generalization - all gated on this corpus), and the documentation task.
