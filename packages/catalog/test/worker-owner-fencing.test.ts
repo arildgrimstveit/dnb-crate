@@ -301,4 +301,134 @@ describe("worker ownership fencing (review item 5)", () => {
     expect(catalog.repository.findById(trackId)!.analysisStatus).not.toBe("failed");
     ownerB.release();
   });
+
+  it("a deposed owner cannot publish the shared listen artifact mid-encode (S5)", async () => {
+    const { createFakeFfmpegRunner } = await import("@dnb-crate/audio-renderer");
+    const root = path.join(os.tmpdir(), `dnb-s5-pub-${crypto.randomUUID()}`);
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const config = testConfig(root);
+
+    // Runtime A: the ACTIVE worker whose listen encode BLOCKS on a delayed
+    // runner until the test releases it — the real publication boundary.
+    let releaseEncode!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseEncode = resolve;
+    });
+    const base = createFakeFfmpegRunner({ probeDurationSec: 16 });
+    const delayedRunner = {
+      run: async (request: {
+        executable: string;
+        args: string[];
+        abortSignal?: AbortSignal;
+        onStdout?: (chunk: string) => void;
+        onStderr?: (chunk: string) => void;
+      }) => {
+        const result = await base.run(request);
+        // Delay ONLY the listen encode — the dither filter marker is unique
+        // to it (the master's staged flac shares the .partial.flac suffix).
+        if (request.args.some((arg) => String(arg).includes("dither_method=triangular_hp"))) {
+          await gate;
+        }
+        return result;
+      },
+    };
+    const ownerA = createCatalogRuntime(config, undefined, { processRunner: delayedRunner });
+    cleanups.push(() => ownerA.close());
+    const { writeSineWav: writeWav } = await import("../src/index.ts");
+    await writeWav(path.join(library, "a.wav"), { title: "Alpha", durationMs: 8000 });
+    await writeWav(path.join(library, "b.wav"), { title: "Bravo", durationMs: 8000 });
+    await ownerA.service.scanLibrary();
+    const tracks = ownerA.service.searchTracks({ limit: 10 }).tracks;
+    const plan = {
+      schemaVersion: 1 as const,
+      id: crypto.randomUUID(),
+      name: "s5-pub",
+      targetDurationMs: 15_000,
+      targetBpm: 174,
+      requestedArc: [
+        { atFraction: 0, targetEnergy: 3 },
+        { atFraction: 1, targetEnergy: 6 },
+      ],
+      entries: [
+        {
+          id: crypto.randomUUID(),
+          trackId: tracks[0]!.id,
+          order: 0,
+          sourceStartMs: 0,
+          sourceEndMs: tracks[0]!.durationMs,
+          timelineStartMs: 0,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: {
+            id: crypto.randomUUID(),
+            type: "crossfade" as const,
+            durationMs: 1000,
+            outgoingCuePointId: null,
+            incomingCuePointId: null,
+            parameters: { purpose: "fixture" },
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          trackId: tracks[1]!.id,
+          order: 1,
+          sourceStartMs: 0,
+          sourceEndMs: tracks[1]!.durationMs,
+          timelineStartMs: tracks[0]!.durationMs - 1000,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: null,
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    ownerA.setPlans.save(plan, 1, {
+      seed: 1,
+      selected: [],
+      rejected: [],
+      harmonicCoverage: { knownJoins: 0, totalJoins: 0 },
+    });
+    const started = await ownerA.service.startSetRender({ setPlanId: plan.id });
+    // Wait until A is INSIDE the listen encode (blocked on the gate).
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const row = ownerA.renderJobs.findById(started.job.id);
+      if (row?.progressMessage === "listen-encode") break;
+      if (row && (row.status === "failed" || row.status === "succeeded")) {
+        throw new Error(
+          `render settled early: ${row.status} ${row.errorCode ?? ""} ${row.errorMessage ?? ""} (progress ${row.progressMessage})`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    expect(ownerA.renderJobs.findById(started.job.id)?.progressMessage).toBe("listen-encode");
+
+    // Runtime B takes over mid-encode: heartbeat expiry + acquire + recover.
+    const ownerB = createCatalogRuntime(config, undefined, {
+      passive: true,
+      useFakeFfmpeg: true,
+    });
+    cleanups.push(() => ownerB.close());
+    const bdb = (ownerB as unknown as { db: Database }).db;
+    backdateHeartbeat(bdb);
+    const winner = new WorkerOwner(bdb);
+    expect(winner.acquire()).toBe(true);
+    expect(ownerB.renderJobs.failRunningAsInterrupted()).toBe(1);
+
+    // Release A: the encode finishes, but the publication-boundary claim
+    // check (between staging and publishing) refuses to write the
+    // shared-name artifact, and the terminal write stays fenced.
+    releaseEncode?.();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const settled = ownerB.renderJobs.findById(started.job.id)!;
+    expect(settled.status).toBe("failed");
+    expect(settled.errorCode).toBe("RENDER_INTERRUPTED");
+    // The named listen file was never published by the deposed owner.
+    const rendersDir = path.join(config.outputRoot, "renders");
+    const files = await (await import("node:fs/promises")).readdir(rendersDir);
+    const rogueListen = files.filter((name) => name.startsWith("s5-pub"));
+    expect(rogueListen).toEqual([]);
+    winner.release();
+  }, 30_000);
 });

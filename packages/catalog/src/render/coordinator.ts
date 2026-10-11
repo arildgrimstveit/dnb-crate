@@ -1611,10 +1611,11 @@ export class RenderCoordinator {
         if (this.jobs.findById(job.id)?.status !== "cancelled") {
           // S5: the named listen file is SHARED by plan name — a deposed
           // owner publishing here would clobber the winner's artifact even
-          // though its terminal-row write is fenced. Verify the claim
-          // against the job row before encoding/publishing; the master is
-          // job-id-named and harmless, but the listen goes through this
-          // gate. The terminal DB fence remains the second defense.
+          // though its terminal-row write is fenced. The claim is verified
+          // against the job row BEFORE encoding AND between staging and
+          // publishing (inside verifyStaged), so a takeover during the
+          // encode itself still cannot publish. The master is job-id-named
+          // and harmless; the terminal DB fence remains the second defense.
           const claimToken = this.ownerToken();
           if (!this.jobs.isClaimCurrent(job.id, claimToken)) {
             this.logger.warn(
@@ -1653,6 +1654,17 @@ export class RenderCoordinator {
                 listenAbs,
                 controller.signal,
                 async (stagedPath) => {
+                  // S5 publication-boundary fence: verifyStaged runs BETWEEN
+                  // staging and publishing — a takeover during the encode
+                  // itself is caught HERE, before the shared-name artifact
+                  // can be replaced. Throwing skips the publish.
+                  if (!this.jobs.isClaimCurrent(job.id, claimToken)) {
+                    throw new DomainError(
+                      "RENDER_FAILED",
+                      "Render claim lost to a takeover during listen publication; staged copy discarded",
+                      { retryable: true, details: { jobId: job.id } },
+                    );
+                  }
                   const measured = await measureLoudness(
                     this.runner,
                     binaries,
