@@ -697,9 +697,12 @@ export function buildEntries(
     const stamp = prevPrior?.transitionToNext?.parameters.incomingTrackId;
     return typeof stamp === "string" && stamp === track.id;
   });
-  const rates = tracks.map((track, index) =>
-    rateFromPrior[index] ? existing?.get(track.id)!.playbackRate! : 1,
-  );
+  const rates = tracks.map((track, index) => {
+    const prior = existing?.get(track.id);
+    // rateFromPrior[index] implies a truthy prior rate (see above), but the
+    // non-null assertion on an optional chain is both unsafe and banned.
+    return rateFromPrior[index] && prior?.playbackRate ? prior.playbackRate : 1;
+  });
   const chosen: Array<ChosenTransition | null> = [];
   let firstAlignedApplied = false;
   for (let index = 0; index < tracks.length; index += 1) {
