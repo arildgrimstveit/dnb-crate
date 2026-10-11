@@ -513,3 +513,16 @@ stage; the published copy must still measure within the ceiling (gate unchanged)
 the exact CI numbers reproduced in the regression test, and every subsequent CI
 run on both lanes is green. The in-test diagnostics that captured the numbers
 remain armed.
+
+## 11 October review - Batch B tail and documentation complete (12 October 2026)
+
+| Item                                                                                                                                                                                           | Status    | Commit(s) |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
+| S5 publication trial: two runtimes, delayed listen encode through the real boundary, takeover mid-encode, no shared-artifact clobber; verifyStaged claim check closes the during-encode window | Delivered | `5d86db0` |
+| Documentation reconciliation: single active-plan pointer (11 Oct review), truthful status headers, flake root cause recorded resolved, listen dither contract in rendering.md                  | Delivered | `17e0fce` |
+| S12/F10 scratch lifecycle: planning/render/analysis fixtures close AND remove their roots (verified no temp accumulation)                                                                      | Delivered | `19bef39` |
+
+Both CI lanes green on `19bef39`. Remaining from the 11 October review: Batch D
+steps 1-2 (broader alternative evaluation) and step 5 (held-out generalization),
+both gated on a real-library corpus baseline; and the optional approved-join
+library features explicitly deferred by the product direction.
