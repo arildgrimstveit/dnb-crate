@@ -282,3 +282,24 @@ Labeled joins from this session (all on 174 BPM material, all verified by ear):
   error, building the labeled set that separates the gray zone (Sakura
   106ms was audibly bad; Starchild's Theme 110ms auditioned clean — the
   band is genuinely mixed).
+
+### Audio regression corpus baseline (11 October 2026)
+
+`tools/scripts/audio-regression-corpus.mts` renders synthetic two-deck joins with
+known audio-vs-grid misalignments through the REAL renderer and measures the
+source-deck probe's verdicts (no saved joins, no history - cold catalog):
+
+| case              | expected | verdict    | measured    | outcome                                                                                                                                                                                                                                       |
+| ----------------- | -------- | ---------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| aligned           | pass     | pass       | 0.0 ms      | true negative                                                                                                                                                                                                                                 |
+| audio +40 ms      | flag     | review     | 40.0 ms     | true positive                                                                                                                                                                                                                                 |
+| audio +80 ms      | flag     | review     | 80.0 ms     | true positive                                                                                                                                                                                                                                 |
+| audio +140 ms     | flag     | fail       | 123.1 ms    | true positive (locking drops to 15/64 past the +-100 ms window)                                                                                                                                                                               |
+| whole-beat apart  | pass     | pass       | 0.0 ms      | true negative (phase equivalence holds)                                                                                                                                                                                                       |
+| half-beat apart   | flag     | unmeasured | -           | **FALSE PASS: 0/64 onsets lock - a 172 ms offset falls outside the own-grid +-100 ms lock window, so the verifier abstains instead of judging.** Known blind spot; needs downbeat/bar-aware evidence (item 6 above), not a wider lock window. |
+| +0.4% tempo drift | flag     | review     | drift 40 ms | true positive (start/end halves diverge)                                                                                                                                                                                                      |
+| kicks 1 bar only  | abstain  | unmeasured | -           | honest abstention                                                                                                                                                                                                                             |
+
+Plan-window placement errors are healed by the renderer's own alignment
+application, so the corpus injects defects as AUDIO offset against the stored
+grid - the stale-grid defect class the verifier exists to catch.
