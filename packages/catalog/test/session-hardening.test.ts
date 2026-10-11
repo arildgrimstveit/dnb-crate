@@ -658,5 +658,10 @@ describe("window edits invalidate recorded alignment pins", () => {
     expect(afterMove.alignmentMode).toBeUndefined();
     expect(afterMove.onsetLockBeats).toBeUndefined();
     expect(afterMove.alignmentInvalidated).toBe("window-edited");
+    // S1: the resolved-placement flag must drop together with the pins.
+    // While it survived, the renderer took its version-1 early exit and the
+    // recomputed placement was never applied — an invalidated join with no
+    // alignment at all.
+    expect(afterMove.recipeVersion).toBeUndefined();
   });
 });

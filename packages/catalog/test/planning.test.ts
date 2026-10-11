@@ -3327,6 +3327,162 @@ describe("join inspector (batch 9)", () => {
     }
   });
 
+  it("drops the resolved-placement flag when a window edit invalidates alignment (S1)", () => {
+    const catalog = runtime();
+    for (let i = 0; i < 12; i += 1) {
+      seedTrack(catalog, {
+        title: `S1 Fix ${i}`,
+        artist: `S1 Artist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    const created = createPlan(catalog, {
+      name: "S1 fixture",
+      targetDurationMs: 400_000,
+      seed: 5,
+      explorationWeight: 0,
+    });
+    const sorted = [...created.plan.entries].sort((a, b) => a.order - b.order);
+    // A normally generated aligned join carries the resolved marker.
+    const alignedIndex = sorted.findIndex(
+      (entry) => entry.transitionToNext?.parameters.recipeVersion === 1,
+    );
+    expect(alignedIndex).toBeGreaterThanOrEqual(0);
+    const aligned = sorted[alignedIndex]!;
+
+    // Edit the INCOMING side of that join (trim the next entry's window).
+    const edited = catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      setTrim: {
+        entryId: sorted[alignedIndex + 1]!.id,
+        sourceStartMs: 100,
+        sourceEndMs: 99_900,
+      },
+    });
+    const editedTransition = edited.plan.entries.find((e) => e.id === aligned.id)!
+      .transitionToNext!;
+    expect(editedTransition.parameters.alignmentInvalidated).toBe("window-edited");
+    // S1: the prior-parameters spread re-introduced recipeVersion alongside
+    // the invalidation marker, so the renderer kept taking its version-1
+    // early exit and never applied the recomputed placement. Resolved and
+    // invalidated placement must be mutually exclusive.
+    expect(editedTransition.parameters.recipeVersion).toBeUndefined();
+
+    // A no-op trim changes nothing: the invalidated join keeps its marker
+    // and stays without the resolved flag, and no other join is touched.
+    const before = catalog.service.getSetPlan(created.plan.id);
+    const untouched = catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      setTrim: {
+        entryId: sorted[alignedIndex + 1]!.id,
+        sourceStartMs: 100,
+        sourceEndMs: 99_900,
+      },
+    });
+    const stillInvalidated = untouched.plan.entries.find((e) => e.id === aligned.id)!
+      .transitionToNext!;
+    expect(stillInvalidated.parameters.alignmentInvalidated).toBe("window-edited");
+    expect(stillInvalidated.parameters.recipeVersion).toBeUndefined();
+    const otherAligned = sorted.findIndex(
+      (entry, i) =>
+        i !== alignedIndex &&
+        i !== alignedIndex + 1 &&
+        entry.transitionToNext?.parameters.recipeVersion === 1,
+    );
+    if (otherAligned >= 0) {
+      const other = untouched.plan.entries.find((e) => e.id === sorted[otherAligned]!.id)!
+        .transitionToNext!;
+      expect(other.parameters.alignmentInvalidated).toBeUndefined();
+    }
+    void before;
+  });
+
+  it("invalidates alignment on transition and rate edits, not on no-ops (S1)", () => {
+    const catalog = runtime();
+    for (let i = 0; i < 12; i += 1) {
+      seedTrack(catalog, {
+        title: `S1b ${i}`,
+        artist: `S1b Artist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 100_000,
+      });
+    }
+    const makePlan = (seed: number) =>
+      createPlan(catalog, {
+        name: `S1b fixture ${seed}`,
+        targetDurationMs: 400_000,
+        seed,
+        explorationWeight: 0,
+      });
+    const marker = (plan: { plan: { entries: Array<{ id: string }> } }, entryId: string) =>
+      plan.plan.entries.find((e) => e.id === entryId)!.transitionToNext?.parameters
+        .alignmentInvalidated;
+
+    // Transition edits: a no-op keeps the resolved state; a duration change
+    // invalidates that join's alignment.
+    const planA = makePlan(6);
+    const sortedA = [...planA.plan.entries].sort((a, b) => a.order - b.order);
+    const alignedA = sortedA.findIndex(
+      (entry) => entry.transitionToNext?.parameters.recipeVersion === 1,
+    );
+    expect(alignedA).toBeGreaterThanOrEqual(0);
+    const prior = sortedA[alignedA]!.transitionToNext!;
+    const noop = catalog.service.updateSetPlan({
+      setPlanId: planA.plan.id,
+      setTransition: {
+        entryId: sortedA[alignedA]!.id,
+        type: prior.type,
+        durationMs: prior.durationMs,
+      },
+    });
+    expect(marker(noop, sortedA[alignedA]!.id)).toBeUndefined();
+    const transitionEdited = catalog.service.updateSetPlan({
+      setPlanId: planA.plan.id,
+      setTransition: {
+        entryId: sortedA[alignedA]!.id,
+        type: prior.type,
+        durationMs: prior.durationMs + 1000,
+      },
+    });
+    expect(marker(transitionEdited, sortedA[alignedA]!.id)).toBe("transition-edited");
+    // Once invalidated, the resolved marker is gone and stays gone.
+    expect(
+      transitionEdited.plan.entries.find((e) => e.id === sortedA[alignedA]!.id)!.transitionToNext!
+        .parameters.recipeVersion,
+    ).toBeUndefined();
+
+    // Rate edits: a rate change invalidates BOTH joins touching the entry;
+    // a no-op rate keeps resolved state.
+    const planB = makePlan(7);
+    const sortedB = [...planB.plan.entries].sort((a, b) => a.order - b.order);
+    const alignedB = sortedB.findIndex(
+      (entry) => entry.transitionToNext?.parameters.recipeVersion === 1,
+    );
+    expect(alignedB).toBeGreaterThanOrEqual(0);
+    const rateEdited = catalog.service.updateSetPlan({
+      setPlanId: planB.plan.id,
+      setPlaybackRate: { entryId: sortedB[alignedB]!.id, playbackRate: 1.01 },
+    });
+    expect(marker(rateEdited, sortedB[alignedB]!.id)).toBe("rate-edited");
+    if (alignedB > 0) {
+      expect(marker(rateEdited, sortedB[alignedB - 1]!.id)).toBe("rate-edited");
+    }
+    const rateNoop = catalog.service.updateSetPlan({
+      setPlanId: planB.plan.id,
+      setPlaybackRate: { entryId: sortedB[alignedB]!.id, playbackRate: 1.01 },
+    });
+    // No new invalidation on an unrelated join from the no-op.
+    const lastJoin = sortedB[sortedB.length - 2]!.id;
+    if (lastJoin !== sortedB[alignedB]!.id) {
+      expect(marker(rateNoop, lastJoin)).toBeUndefined();
+    }
+  });
+
   it("evaluates variant feasibility on the saved join's windows, not fresh proposals (R14)", async () => {
     const catalog = runtime();
     // The structural gate compares the two sides' LOCAL syncopation at the

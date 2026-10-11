@@ -62,10 +62,12 @@ export type UpdateSetPlanInput = {
 
 /**
  * Recorded grid alignment is provenance for the windows it was measured on.
- * When a window moves, these pins go stale but the renderer still applies
- * them verbatim for stored recipe joins (2026-10 listening sessions: stale
- * offsets surfaced as audible flams). Dropping the keys lets render time
- * re-derive the alignment for the new windows.
+ * When join geometry moves (window trim, transition type/duration, playback
+ * rate), these pins go stale but the renderer still applies them verbatim
+ * for stored recipe joins (2026-10 listening sessions: stale offsets
+ * surfaced as audible flams). Dropping the keys lets render time re-derive
+ * the alignment for the new geometry; the reason records which edit kind
+ * invalidated it.
  */
 const ALIGNMENT_PIN_KEYS = [
   "downbeatOffsetMs",
@@ -76,7 +78,7 @@ const ALIGNMENT_PIN_KEYS = [
 
 type PlanEntryTransition = StoredSetPlan["plan"]["entries"][number]["transitionToNext"];
 
-function stripAlignmentPins(transition: PlanEntryTransition): void {
+function stripAlignmentPins(transition: PlanEntryTransition, reason = "window-edited"): void {
   if (!transition) {
     return;
   }
@@ -89,7 +91,7 @@ function stripAlignmentPins(transition: PlanEntryTransition): void {
     }
   }
   if (touched) {
-    transition.parameters.alignmentInvalidated = "window-edited";
+    transition.parameters.alignmentInvalidated = reason;
   }
 }
 
@@ -162,6 +164,16 @@ export function applySetPlanUpdate(
     if (entry.transitionToNext === null) {
       throw new DomainError("INVALID_SET_PLAN", "The last entry has no transition to next");
     }
+    // S1: a type or duration change moves the join's geometry — the recorded
+    // grid alignment is provenance for the OLD overlap and must not survive
+    // verbatim (stale pins become audible flams). No-op edits keep the
+    // resolved state.
+    const geometryChanged =
+      entry.transitionToNext.type !== input.setTransition.type ||
+      entry.transitionToNext.durationMs !== input.setTransition.durationMs;
+    if (geometryChanged) {
+      stripAlignmentPins(entry.transitionToNext, "transition-edited");
+    }
     entry.transitionToNext = {
       ...entry.transitionToNext,
       type: input.setTransition.type,
@@ -183,6 +195,17 @@ export function applySetPlanUpdate(
       throw new DomainError("INVALID_SET_PLAN", `No entry ${input.setPlaybackRate.entryId}`);
     }
     assertPlaybackRate(input.setPlaybackRate.playbackRate, { allowExcessive: true });
+    // S1: a rate change rescales this entry's source geometry on BOTH sides
+    // (its own overlap start and the previous join's incoming placement),
+    // so alignment provenance on both joins is invalidated. A no-op keeps
+    // the resolved state.
+    if (entry.playbackRate !== input.setPlaybackRate.playbackRate) {
+      stripAlignmentPins(entry.transitionToNext, "rate-edited");
+      const index = entries.indexOf(entry);
+      if (index > 0) {
+        stripAlignmentPins(entries[index - 1]!.transitionToNext, "rate-edited");
+      }
+    }
     entry.playbackRate = input.setPlaybackRate.playbackRate;
   }
   if (input.applyTransition) {

@@ -809,22 +809,34 @@ export function buildEntries(
           incomingCuePointId: null,
           parameters: { purpose: "timing-only" },
         });
-    const transitionToNext =
+    // S1 (11 October review): resolved and invalidated placement must be
+    // mutually exclusive BY CONSTRUCTION. The prior-parameters spread already
+    // carries recipeVersion from the original build, so merely omitting the
+    // re-stamp leaves the stale marker in place — the renderer kept taking
+    // its version-1 early exit and never applied the recomputed placement.
+    // The stale marker is removed explicitly instead.
+    const alignmentInvalidated = baseTransition?.parameters.alignmentInvalidated != null;
+    const priorParameters =
       baseTransition === null
+        ? null
+        : ({ ...baseTransition.parameters } as Record<string, number | string | boolean>);
+    if (alignmentInvalidated && priorParameters != null) {
+      delete priorParameters.recipeVersion;
+    }
+    const transitionToNext =
+      baseTransition === null || priorParameters === null
         ? null
         : {
             ...baseTransition,
             parameters: {
-              ...baseTransition.parameters,
-              // R4 fix: a transition whose alignment pins were stripped by
-              // the editor (alignmentInvalidated) must NOT get recipeVersion 1
-              // — that flag tells the renderer to skip alignment application,
+              ...priorParameters,
+              // R4: a transition whose alignment pins were stripped by the
+              // editor (alignmentInvalidated) must NOT get recipeVersion 1 —
+              // that flag tells the renderer to skip alignment application,
               // and with the pins gone the join would have no alignment at
               // all. Without the flag, the renderer's alignment loop runs
               // and recomputes for the new window.
-              ...(baseTransition.parameters.alignmentInvalidated == null
-                ? { recipeVersion: 1 }
-                : {}),
+              ...(alignmentInvalidated ? {} : { recipeVersion: 1 }),
               mixOutMs:
                 sourceEndMs -
                 outputToSourceMs(
