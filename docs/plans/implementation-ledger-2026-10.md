@@ -665,3 +665,5 @@ Both CI lanes green on `13b8565`. Q03 next slices: timeline stamps the
 contract at resolution; freeze validates feasibility against it; the
 renderer consumes it as the join authority (retiring recipeVersion as
 the alignment-validity flag).
+
+| Q03 slice 2: the timeline STAMPS the resolved-join contract at resolution (pre-generated pair ids, exact next-entry anchor, piecewise-validated geometry, alignment from the resolved window, evidence fingerprints/analyzer identity, gain provenance; unresolved outcomes recorded with stable reasons; invalidation strips stale contracts) and the renderer HONORS it as join authority (contract-only joins pin placement with no recipeVersion). Retirement test proves discrimination: off-grid incoming stays pinned under a contract-only join; the same plan without resolution evidence is healed by render-time alignment. Adoption keeps recipeVersion as the legacy equivalent; repo-wide lint narrowed two parameter stringifications the widened bag exposed | Delivered | `7051cd8`, `39847df` |
