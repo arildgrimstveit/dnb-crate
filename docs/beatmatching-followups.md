@@ -405,3 +405,32 @@ First run under the new contract surfaced two measurements the old labels hid:
   correct; the MEASUREMENT is biased. Follow-up: compensate onset dropout at
   window edges or widen the measurement window so deckOffsetMs tracks the
   injected offset within tolerance at all shift magnitudes.
+
+### Stretch-engine attribution COMPLETE - earlier inference corrected (12 October 2026, T7)
+
+The processed-deck corpus now records each case's manifest stretch engines, and
+the unequal-rate case that measures +24.8 ms ran the **R3 CLI path**
+(`rubberband -3 -T --centre-focus`), not the atempo fallback. Direct
+measurement of all three paths (same kick train, rate 175/174, residual vs each
+path's own stretched grid, picker bias subtracted):
+
+- ffmpeg rubberband filter: **+0.05 ms - clean**
+- R3 CLI: **+0.05 ms - clean**
+- ffmpeg atempo filter: **-14.2 ms group delay** (the only path that delays)
+
+This CORRECTS the earlier note below ("the corpus's +24.8 ms is consistent
+with atempo'd decks on this machine"): wrong attribution. No stretch engine in
+use delays audio by 24.8 ms, so the unequal-rate offset is NOT engine latency.
+The case's defect cluster sits at **+74.8 ms on 57% of onsets** (the incoming
+deck's share of the overlap) with the outgoing anchored near zero - evidence
+that unequal-rate PLACEMENT/SpLICE math (or rate-region handling under a fully
+pinned recipe) shifts the incoming deck late, and the +24.8 median is the
+mixed-population compromise between a clean outgoing deck and a late incoming
+deck.
+
+Next step (unchanged, now with a tighter target): per-deck stem capture during
+renderer preparation to measure the incoming deck's placement directly, then
+fix the unequal-rate placement math. Separately: when the atempo FALLBACK
+engages (no rubberband filter/CLI), its -14.2 ms group delay remains
+uncompensated - a small placement compensation or a manifest warning is still
+worth doing, but it is NOT the corpus case's cause.

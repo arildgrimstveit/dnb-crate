@@ -195,6 +195,11 @@ type CaseResult = {
   driftMs: number | null;
   onsetCount: number;
   offsetErrorVsInjectedMs: number | null;
+  /** Stretch engines the render manifest records for this case. atempo
+   * carries a measured +12.8 ms group delay vs its projected grid (see
+   * tools/scripts/measure-stretch-latency.mts), so off-grid measurements
+   * stratify by engine before they are read as renderer defects. */
+  stretchEngines: string[] | null;
   runtimeMs: number;
   detail: string | null;
 };
@@ -344,6 +349,17 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
       allowLowConfidence: true,
     });
     const done = await runtime.service.waitForRenderJob(render.job.id, 120_000);
+    // waitForRenderJob returns the public RenderJob view (no manifest); the
+    // manifest - including the stretch engines we stratify by - comes from
+    // the dedicated reader, available once the job succeeded.
+    let engines: string[] | null = null;
+    if (done.status === "succeeded") {
+      try {
+        engines = runtime.service.getRenderManifest(done.id).stretchEngines ?? null;
+      } catch {
+        engines = null;
+      }
+    }
     if (done.status !== "succeeded") {
       return {
         id: spec.id,
@@ -353,6 +369,7 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
         driftMs: null,
         onsetCount: 0,
         offsetErrorVsInjectedMs: null,
+        stretchEngines: engines,
         runtimeMs: Date.now() - started,
         detail: `render ${done.status}: ${done.errorMessage ?? ""}`,
       };
@@ -401,6 +418,7 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
         driftMs: null,
         onsetCount: onsets.length,
         offsetErrorVsInjectedMs: null,
+        stretchEngines: engines,
         runtimeMs: Date.now() - started,
         detail: `insufficient onsets (${onsets.length})`,
       };
@@ -470,11 +488,19 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
       onsetCount: onsets.length,
       offsetErrorVsInjectedMs:
         offsetErrorVsInjectedMs == null ? null : Number(offsetErrorVsInjectedMs.toFixed(1)),
+      stretchEngines: engines,
       runtimeMs: Date.now() - started,
       detail:
-        defectOffset != null
-          ? `defect cluster ${defectOffset.toFixed(1)} ms (${Math.round(outlierFraction * 100)}% of onsets)`
-          : null,
+        [
+          defectOffset != null
+            ? `defect cluster ${defectOffset.toFixed(1)} ms (${Math.round(outlierFraction * 100)}% of onsets)`
+            : null,
+          engines?.includes("atempo")
+            ? "atempo engine: +12.8 ms group delay expected vs projected grid (measured 2026-10-12)"
+            : null,
+        ]
+          .filter((part) => part != null)
+          .join("; ") || null,
     };
   } catch (error) {
     return {
@@ -485,6 +511,7 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
       driftMs: null,
       onsetCount: 0,
       offsetErrorVsInjectedMs: null,
+      stretchEngines: null,
       runtimeMs: Date.now() - started,
       detail: error instanceof Error ? error.message : String(error),
     };
@@ -507,7 +534,7 @@ for (const spec of CASES) {
   const result = await runCase(spec, harnessBiasMs);
   results.push(result);
   process.stdout.write(
-    `${result.verdict} (offset ${result.medianOffsetMs ?? "-"} ms, drift ${result.driftMs ?? "-"} ms, n=${result.onsetCount})\n`,
+    `${result.verdict} (offset ${result.medianOffsetMs ?? "-"} ms, drift ${result.driftMs ?? "-"} ms, n=${result.onsetCount}, engine ${(result.stretchEngines ?? ["?"]).join("+")})\n`,
   );
 }
 
@@ -523,6 +550,23 @@ const summary = {
     abstained: results.filter((r) => r.verdict === "ABSTAINED").length,
     infrastructureErrors: results.filter((r) => r.verdict === "INFRASTRUCTURE-ERROR").length,
   },
+  // Engine stratification: atempo carries a measured +12.8 ms group delay
+  // vs its projected grid, so a case's engine belongs next to any off-grid
+  // reading before it is read as a renderer defect.
+  byStretchEngine: Object.entries(
+    results.reduce<Record<string, { cases: number; maxAbsOffsetMs: number | null }>>((acc, r) => {
+      const key = (r.stretchEngines ?? ["unknown"]).join("+");
+      const prev = acc[key] ?? { cases: 0, maxAbsOffsetMs: null };
+      acc[key] = {
+        cases: prev.cases + 1,
+        maxAbsOffsetMs:
+          r.medianOffsetMs == null
+            ? prev.maxAbsOffsetMs
+            : Math.max(prev.maxAbsOffsetMs ?? 0, Math.abs(r.medianOffsetMs)),
+      };
+      return acc;
+    }, {}),
+  ).map(([engine, stats]) => ({ engine, ...stats })),
   offsetErrorsWithinTolerance: results
     .filter((r) => r.offsetErrorVsInjectedMs != null)
     .map((r) => ({

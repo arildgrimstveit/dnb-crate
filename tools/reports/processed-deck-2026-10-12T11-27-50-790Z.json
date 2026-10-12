@@ -1,0 +1,119 @@
+{
+  "summary": {
+    "generatedAt": "2026-10-12T11:27:50.789Z",
+    "suite": "processed-deck",
+    "measureToleranceMs": 15,
+    "counts": {
+      "truePositives": 3,
+      "trueNegatives": 2,
+      "falseAlarms": 1,
+      "defectEscapes": 0,
+      "abstained": 0,
+      "infrastructureErrors": 0
+    },
+    "byStretchEngine": [
+      {
+        "engine": "none",
+        "cases": 5,
+        "maxAbsOffsetMs": 24.4
+      },
+      {
+        "engine": "rubberband-r3",
+        "cases": 1,
+        "maxAbsOffsetMs": 24.8
+      }
+    ],
+    "offsetErrorsWithinTolerance": [
+      {
+        "id": "shift-40",
+        "error": 9.7,
+        "within": true
+      },
+      {
+        "id": "shift-80",
+        "error": 9.7,
+        "within": true
+      },
+      {
+        "id": "sparse-incoming",
+        "error": 55.9,
+        "within": false
+      }
+    ],
+    "totalRuntimeMs": 52274
+  },
+  "results": [
+    {
+      "id": "aligned-equal",
+      "expected": "pass",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": 0,
+      "driftMs": 3.4,
+      "onsetCount": 63,
+      "offsetErrorVsInjectedMs": null,
+      "stretchEngines": ["none"],
+      "runtimeMs": 7471,
+      "detail": "defect cluster -20.7 ms (19% of onsets)"
+    },
+    {
+      "id": "aligned-unequal",
+      "expected": "pass",
+      "verdict": "FALSE-ALARM",
+      "medianOffsetMs": 24.8,
+      "driftMs": 2.9,
+      "onsetCount": 65,
+      "offsetErrorVsInjectedMs": null,
+      "stretchEngines": ["rubberband-r3"],
+      "runtimeMs": 14935,
+      "detail": "defect cluster 74.8 ms (57% of onsets)"
+    },
+    {
+      "id": "shift-40",
+      "expected": "flag",
+      "verdict": "TRUE-POSITIVE",
+      "medianOffsetMs": -1.1,
+      "driftMs": 4.5,
+      "onsetCount": 64,
+      "offsetErrorVsInjectedMs": 9.7,
+      "stretchEngines": ["none"],
+      "runtimeMs": 7482,
+      "detail": "defect cluster -49.7 ms (56% of onsets)"
+    },
+    {
+      "id": "shift-80",
+      "expected": "flag",
+      "verdict": "TRUE-POSITIVE",
+      "medianOffsetMs": -1.1,
+      "driftMs": 4.1,
+      "onsetCount": 65,
+      "offsetErrorVsInjectedMs": 9.7,
+      "stretchEngines": ["none"],
+      "runtimeMs": 7478,
+      "detail": "defect cluster -89.7 ms (55% of onsets)"
+    },
+    {
+      "id": "rate-error",
+      "expected": "flag",
+      "verdict": "TRUE-POSITIVE",
+      "medianOffsetMs": 24.4,
+      "driftMs": 4.1,
+      "onsetCount": 64,
+      "offsetErrorVsInjectedMs": null,
+      "stretchEngines": ["none"],
+      "runtimeMs": 7468,
+      "detail": "defect cluster 111.7 ms (55% of onsets)"
+    },
+    {
+      "id": "sparse-incoming",
+      "expected": "pass",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": 11.7,
+      "driftMs": 3.4,
+      "onsetCount": 34,
+      "offsetErrorVsInjectedMs": 55.9,
+      "stretchEngines": ["none"],
+      "runtimeMs": 7440,
+      "detail": "defect cluster 24.1 ms (15% of onsets)"
+    }
+  ]
+}
