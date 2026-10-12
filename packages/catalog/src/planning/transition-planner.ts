@@ -308,7 +308,14 @@ function propose(
   if (window == null && firstDrop && outCueMs < firstDrop.endMs) {
     outCueMs = firstDrop.endMs;
   }
-  outCueMs = constrainMixOut(outCueMs, outAudio.audioEndMs);
+  // T5 (12 October review): a SAVED window's exact interval must FIT; the
+  // old path clamped the cue to audio end and reconstructed an earlier
+  // interval, silently validating geometry the plan does not render (a
+  // 190,000 ms mix-out on a 200 s track became 177,931–200,000 ms).
+  // Fresh proposals keep the clamping — they are choosing, not validating.
+  if (saved == null) {
+    outCueMs = constrainMixOut(outCueMs, outAudio.audioEndMs);
+  }
 
   const outgoingEnd = Math.min(outAudio.audioEndMs, Math.round(outCueMs + outSourceOverlap));
   const outgoingStart = Math.max(outAudio.audioStartMs, Math.round(outgoingEnd - outSourceOverlap));
@@ -318,9 +325,24 @@ function propose(
     Math.round(incomingStart + Math.max(inSourceOverlap, inAudio.audioEndMs - incomingStart)),
   );
 
+  if (saved != null) {
+    // Exact-fit validation for the stored interval: reject rather than
+    // quietly clamping into a different proposal.
+    if (saved.outgoingMixOutMs + outSourceOverlap > outAudio.audioEndMs + 250) {
+      blockers.push(
+        `Saved outgoing overlap does not fit: starts ${Math.round(saved.outgoingMixOutMs)} ms + ${Math.round(outSourceOverlap)} ms exceeds audio end ${Math.round(outAudio.audioEndMs)} ms`,
+      );
+    }
+    if (saved.incomingMixInMs + inSourceOverlap > inAudio.audioEndMs + 250) {
+      blockers.push(
+        `Saved incoming overlap does not fit: starts ${Math.round(saved.incomingMixInMs)} ms + ${Math.round(inSourceOverlap)} ms exceeds audio end ${Math.round(inAudio.audioEndMs)} ms`,
+      );
+    }
+  }
   if (
     outgoingEnd - outgoingStart < outSourceOverlap &&
-    outgoing.track.durationMs > outSourceOverlap
+    outgoing.track.durationMs > outSourceOverlap &&
+    saved == null
   ) {
     blockers.push("Outgoing window cannot fit the phrase overlap");
   }

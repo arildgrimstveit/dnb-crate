@@ -244,7 +244,13 @@ export async function runSourceDeckProbes(input: {
         beatPeriodMs,
       });
       deckProbed.add(join.order);
-      measured.add(join.order);
+      // T6 (12 October review): "measured" means an actual timing judgment
+      // was available. An unmeasured verdict (sparse/ambiguous evidence) is
+      // an ABSTENTION - attempted but not measured - so it stays out of the
+      // measured set and remains visible as the attempted/measured gap.
+      if (verification.status !== "unmeasured") {
+        measured.add(join.order);
+      }
       join.audioStatus = verification.status;
       join.audioUnmeasuredReason =
         verification.status === "unmeasured" ? (verification.reasons[0] ?? null) : null;

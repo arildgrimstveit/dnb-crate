@@ -3795,6 +3795,71 @@ describe("join inspector (batch 9)", () => {
     expect(transition.type).toBe("phrase_mix");
   });
 
+  it("rejects a saved overlap that does not fit instead of clamping it (T5)", () => {
+    const catalog = runtime();
+    // The review's reproduction shape: 200-second tracks, a stored
+    // 22,069 ms overlap starting at outgoing 190,000 ms (only 10 s of
+    // material) and incoming 199,000 ms (only 1 s). The old path silently
+    // reconstructed the outgoing interval as 177,931-200,000 and returned
+    // both aligned templates FEASIBLE with no blockers.
+    const outId = seedTrack(catalog, {
+      title: "T5 Out",
+      artist: "T5 Out Artist",
+      bpm: 174,
+      camelot: "8A",
+      energy: 5,
+      durationMs: 200_000,
+    });
+    const inId = seedTrack(catalog, {
+      title: "T5 In",
+      artist: "T5 In Artist",
+      bpm: 174,
+      camelot: "8A",
+      energy: 5,
+      durationMs: 200_000,
+    });
+    stubDescriptors(catalog, outId, {});
+    stubDescriptors(catalog, inId, {});
+    const planned = catalog.service.planTransition({
+      outgoingTrackId: outId,
+      incomingTrackId: inId,
+      preferredType: "any",
+      savedWindow: {
+        outgoingMixOutMs: 190_000,
+        incomingMixInMs: 199_000,
+        barCount: 16,
+        outgoingRate: 1,
+        incomingRate: 1,
+        durationMs: 22_069,
+      },
+    });
+    for (const proposal of planned.proposals) {
+      if (proposal.type === "crossfade") continue;
+      expect(proposal.feasible).toBe(false);
+      expect(proposal.blockers.join(" ")).toMatch(/does not fit/);
+    }
+    // The FIT interval also rejects: outgoing overlap fits but the incoming
+    // side has 1 s of material.
+    const fitPlanned = catalog.service.planTransition({
+      outgoingTrackId: outId,
+      incomingTrackId: inId,
+      preferredType: "any",
+      savedWindow: {
+        outgoingMixOutMs: 170_000,
+        incomingMixInMs: 199_000,
+        barCount: 16,
+        outgoingRate: 1,
+        incomingRate: 1,
+        durationMs: 22_069,
+      },
+    });
+    for (const proposal of fitPlanned.proposals) {
+      if (proposal.type === "crossfade") continue;
+      expect(proposal.feasible).toBe(false);
+      expect(proposal.blockers.some((b) => b.includes("incoming overlap does not fit"))).toBe(true);
+    }
+  });
+
   it("drops the resolved-placement flag when a window edit invalidates alignment (S1)", () => {
     const catalog = runtime();
     for (let i = 0; i < 12; i += 1) {

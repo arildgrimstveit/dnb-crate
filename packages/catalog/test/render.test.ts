@@ -505,6 +505,98 @@ describe("render jobs", () => {
     }
   });
 
+  it("counts abstention as attempted but not measured (T6)", async () => {
+    // The fake runner's deck decodes produce sparse kick-band onsets on
+    // plain sine fixtures, so the probe ABSTAINS on an aligned join — the
+    // exact case where coverage previously counted it as measured.
+    const { catalog, plan, alpha, bravo } = await seededLibrary();
+    void alpha;
+    void bravo;
+    const now = new Date().toISOString();
+    const upsertGrid = (trackId: string, beatTimesMs: number[], downbeatTimesMs: number[]) => {
+      catalog.analyses.upsert({
+        trackId,
+        analyzerName: DSP_ANALYZER_NAME,
+        analyzerVersion: DSP_ANALYZER_VERSION,
+        bpm: 174,
+        bpmConfidence: 0.9,
+        bpmRaw: 174,
+        referenceBpm: null,
+        beatTimesMs,
+        downbeatTimesMs,
+        gridRejected: false,
+        gridRejectionReason: null,
+        gridSource: "analyzed",
+        musicalKey: null,
+        keyConfidence: null,
+        keyMode: null,
+        camelotKey: null,
+        tempoStability: null,
+        downbeatConfidence: 0.9,
+        integratedLufs: null,
+        truePeakDb: null,
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        waveformSummary: null,
+        beatAnchorMs: null,
+        descriptors: null,
+        engineRuntimeMs: 1,
+        analyzedAt: now,
+        suggestedCues: [],
+        sections: [],
+      });
+    };
+    const tracks = catalog.service.searchTracks({ limit: 10 }).tracks;
+    const alphaRow = catalog.repository.findById(tracks[0]!.id)!;
+    const bravoRow = catalog.repository.findById(tracks[1]!.id)!;
+    upsertGrid(
+      alphaRow.id,
+      Array.from({ length: 21 }, (_, i) => 80 + i * 345),
+      Array.from({ length: 6 }, (_, i) => 80 + i * 4 * 345),
+    );
+    upsertGrid(
+      bravoRow.id,
+      Array.from({ length: 27 }, (_, i) => i * 345),
+      Array.from({ length: 7 }, (_, i) => i * 4 * 345),
+    );
+    catalog.service.updateSetPlan({
+      setPlanId: plan.id,
+      setTransition: {
+        entryId: plan.entries[0]!.id,
+        type: "phrase_mix",
+        durationMs: 1000,
+        parameters: {
+          barCount: 16,
+          targetBpm: 174,
+          downbeatOffsetMs: 400,
+          mixOutMs: 6_000,
+          mixInMs: 400,
+        },
+      },
+    });
+    const started = await catalog.service.startSetRender({
+      setPlanId: plan.id,
+      allowLowConfidence: true,
+    });
+    const done = await catalog.service.waitForRenderJob(started.job.id, 15_000);
+    expect(done.status).toBe("succeeded");
+    const checked = await catalog.service.checkRender(done.id, undefined, {
+      audioVerification: "full",
+    });
+    const join = checked.joins[0]!;
+    expect(join.sourceDeckProbe).not.toBeNull();
+    if (join.audioStatus === "unmeasured") {
+      // T6: the abstaining join is ATTEMPTED but NOT measured — the gap
+      // between the two sets is the visible abstention.
+      expect(checked.audioVerification.attemptedJoins).toContain(0);
+      expect(checked.audioVerification.measuredJoins).not.toContain(0);
+    } else {
+      // A measured verdict belongs to both sets.
+      expect(checked.audioVerification.measuredJoins).toContain(0);
+    }
+  });
+
   it("returns a cached preview for an identical second request", async () => {
     const { catalog, plan } = await seededLibrary();
     const transitionId = plan.entries[0]!.transitionToNext!.id;
