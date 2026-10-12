@@ -124,7 +124,11 @@ const CASES: CaseSpec[] = [
     incomingShiftMs: 0,
     sparseIncoming: true,
     expected: "pass",
-    injectedErrorMs: 80,
+    // No placement shift is injected: the kicks that DO exist are on-grid,
+    // and the case exercises coverage, not offset accuracy. The offset
+    // assertion must not compare against an 80 ms error nothing injected
+    // (roadmap Q07 fixture-truth: that produced a spurious numeric failure).
+    injectedErrorMs: null,
   },
 ];
 
