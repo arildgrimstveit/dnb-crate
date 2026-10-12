@@ -1288,9 +1288,10 @@ export class RenderCoordinator {
           pair.incoming,
           incomingTrack,
           sliced.incoming,
-          (sliced.outgoing.sourceEndMs - sliced.outgoing.sourceStartMs) /
-            pair.outgoing.playbackRate -
-            sliced.overlapMs,
+          // Q03/Q08: the piecewise join anchor from slicePreview - NOT the
+          // whole-window (sliced source / rate) formula, which misplaces
+          // the incoming deck by bodySource x (1/rate - 1) under version 2.
+          sliced.incomingTimelineStartMs,
           request,
         );
         outgoingSeg.overlapToNextMs = sliced.overlapMs;
@@ -2174,6 +2175,15 @@ function findTransitionPair(
   return null;
 }
 
+/**
+ * Q03/Q08 (12 October roadmap): the returned incomingTimelineStartMs is the
+ * incoming deck's timeline anchor in the PREVIEW's output timeline - the
+ * sliced outgoing's OUTPUT length minus the overlap, computed with the same
+ * rate geometry the slice used. Under version 2 that is piecewise (native
+ * body + stretched tail); dividing the sliced SOURCE length by the rate is
+ * only correct when the rate is 1 and misplaces the incoming deck by
+ * bodySource x (1/rate - 1) otherwise.
+ */
 export function slicePreview(
   pair: { outgoing: SetPlanEntry; incoming: SetPlanEntry },
   windowMs: number,
@@ -2182,6 +2192,7 @@ export function slicePreview(
   outgoing: { sourceStartMs: number; sourceEndMs: number; gainDb: number };
   incoming: { sourceStartMs: number; sourceEndMs: number; gainDb: number };
   overlapMs: number;
+  incomingTimelineStartMs: number;
 } {
   const overlap = Math.max(1, pair.outgoing.transitionToNext?.durationMs ?? 0);
   const target = pair.outgoing.transitionToNext?.parameters.targetBpm;
@@ -2223,6 +2234,7 @@ export function slicePreview(
         gainDb: pair.incoming.gainDb,
       },
       overlapMs,
+      incomingTimelineStartMs: outLen - overlap,
     };
   }
   const outPlayable = (pair.outgoing.sourceEndMs - pair.outgoing.sourceStartMs) / outRate;
@@ -2244,6 +2256,7 @@ export function slicePreview(
       gainDb: pair.incoming.gainDb,
     },
     overlapMs,
+    incomingTimelineStartMs: outLen - overlap,
   };
 }
 

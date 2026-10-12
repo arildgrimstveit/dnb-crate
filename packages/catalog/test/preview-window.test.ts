@@ -78,6 +78,10 @@ describe("contextual preview windows", () => {
     expect(preview.overlapMs).toBe(overlap);
     expect(preview.incoming.sourceStartMs).toBe(incoming.sourceStartMs);
     expect(preview.outgoing.sourceEndMs).toBe(outgoing.sourceEndMs);
+    // The piecewise join anchor (Q03/Q08): native preview body before the
+    // stretched overlap - NOT the whole-window slicedSource/rate value,
+    // which is 63.417 ms late at this rate.
+    expect(preview.incomingTimelineStartMs).toBeCloseTo((32 * 60_000) / 174, 3);
   });
 
   it("agrees on the middle join coordinate between a three-track chain and the extracted pair", () => {

@@ -472,6 +472,114 @@ describe("render jobs", () => {
     expect(secondDone.outputRootRelativePath).not.toBe(firstPath);
   });
 
+  it("anchors the version-2 preview incoming deck at the piecewise join position (Q03/Q08)", async () => {
+    // Roadmap reproduced defect: preview hydration computed the incoming
+    // timeline anchor with the whole-window stretch formula (sliced source
+    // length / rate), but version-2 geometry is piecewise - native body plus
+    // a stretched overlap tail. With this fixture (200 s source, 32-bar
+    // phrase overlap at 174, outgoing rate 174/175) the correct anchor is
+    // 11,034.483 ms (the native body before the join); the whole-window
+    // formula supplied 11,097.899 ms, placing every incoming event
+    // 63.417 ms late. 06371da made the band graph honor the supplied
+    // anchor, so the preview CALLER must supply the piecewise one.
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-q03-preview-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
+    await mkdir(library, { recursive: true });
+    const aPath = path.join(library, "alpha.wav");
+    const bPath = path.join(library, "bravo.wav");
+    await writeSineWav(aPath, { title: "Alpha", artist: "A", durationMs: 200_000 });
+    await writeSineWav(bPath, { title: "Bravo", artist: "B", durationMs: 200_000 });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 50 }).tracks;
+    const alpha = tracks.find((track) => track.title === "Alpha")!;
+    const bravo = tracks.find((track) => track.title === "Bravo")!;
+
+    const overlap = Math.round((128 * 60_000) / 174); // 32 bars at 174 BPM
+    const transitionId = crypto.randomUUID();
+    const plan: SetPlanV1 = {
+      schemaVersion: 1,
+      id: crypto.randomUUID(),
+      name: "q03-preview-anchor",
+      targetDurationMs: 300_000,
+      targetBpm: 174,
+      requestedArc: [
+        { atFraction: 0, targetEnergy: 5 },
+        { atFraction: 1, targetEnergy: 5 },
+      ],
+      entries: [
+        {
+          id: crypto.randomUUID(),
+          trackId: alpha.id,
+          order: 0,
+          sourceStartMs: 0,
+          sourceEndMs: 198_500,
+          timelineStartMs: 0,
+          playbackRate: 174 / 175,
+          gainDb: 0,
+          transitionToNext: {
+            id: transitionId,
+            type: "phrase_mix",
+            durationMs: overlap,
+            outgoingCuePointId: null,
+            incomingCuePointId: null,
+            parameters: {
+              targetBpm: 174,
+              rateRegionsVersion: 2,
+              // Fully resolved pin: render-time alignment must not move the
+              // windows, so the anchor under test is exactly the hydrated one.
+              recipeVersion: 1,
+              downbeatOffsetMs: 0,
+              alignmentMode: "bar",
+              alignmentPeriodMs: Number(((60_000 / 174) * 4).toFixed(3)),
+            },
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          trackId: bravo.id,
+          order: 1,
+          sourceStartMs: 0,
+          sourceEndMs: 198_500,
+          timelineStartMs: 198_500,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: null,
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    catalog.setPlans.save(plan, 1, {
+      seed: 1,
+      selected: [],
+      rejected: [],
+      harmonicCoverage: { knownJoins: 0, totalJoins: 0 },
+    });
+
+    const preview = await catalog.service.createTransitionPreview({
+      setPlanId: plan.id,
+      transitionId,
+      windowMs: 30_000,
+      allowLowConfidence: true,
+    });
+    const done = await catalog.service.waitForRenderJob(preview.job.id, 30_000);
+    expect(done.status).toBe("succeeded");
+    const manifest = catalog.service.getRenderManifest(done.id);
+    const incomingTrack = manifest.tracks[1]!;
+    // Piecewise join anchor: the native body (8 bars of preview context at
+    // 174) that precedes the stretched overlap. Whole-window division
+    // supplied 11,097.899 - 63.417 ms late.
+    expect(incomingTrack.timelineStartMs).toBeCloseTo(11_034.483, 1);
+  });
+
   it("reports cache hits as succeeded with their artifact at enqueue (S4)", async () => {
     // The reproduced defect: a cache hit was reported as "queued" with a
     // null artifact because the service discarded startPreview's returned
