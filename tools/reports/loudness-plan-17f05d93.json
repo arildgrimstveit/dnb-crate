@@ -1,0 +1,538 @@
+{
+  "generatedAt": "2026-10-12T21:15:16.494Z",
+  "setPlanId": "17f05d93-613c-4805-9f35-4d015afa9fd1",
+  "planName": "Full throttle",
+  "solution": {
+    "referenceLufs": -7.4,
+    "gains": [
+      {
+        "id": "eda36683-4467-40da-8f88-f14eea6489da",
+        "gainDb": -3.2,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "64cb448a-1abd-499c-94d6-0517e2f66a14",
+        "gainDb": -2.9,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "8e7b51f3-52ac-4efc-845e-808a952ef8c0",
+        "gainDb": -2.1,
+        "residualLufs": 1,
+        "matched": true
+      },
+      {
+        "id": "35f74b03-6975-4ef7-8540-97fbf5068c31",
+        "gainDb": -2,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "20d1439d-ad15-4ded-a096-5259fccbd609",
+        "gainDb": -2.9,
+        "residualLufs": 0.3,
+        "matched": true
+      },
+      {
+        "id": "08b4e721-d236-4104-80a5-8f17d16ef1fc",
+        "gainDb": -4.8,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "85081ee4-026b-4bdc-b58d-7b32df1f9582",
+        "gainDb": -4.3,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "0a5c0353-3770-4b3c-9b78-a48148665275",
+        "gainDb": -4.2,
+        "residualLufs": 2.6,
+        "matched": true
+      },
+      {
+        "id": "44cf830c-cbc6-40ec-b4fc-d2becebc023c",
+        "gainDb": -4.8,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "455bf3e2-3899-416b-914d-e26e42626acf",
+        "gainDb": -1.3,
+        "residualLufs": 0.2,
+        "matched": true
+      },
+      {
+        "id": "09b4fffa-9a10-4145-88ae-32f1247600c2",
+        "gainDb": -2,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "20ccf4d9-3830-49f7-832b-2200e95cf4be",
+        "gainDb": -2.8,
+        "residualLufs": 1.1,
+        "matched": true
+      },
+      {
+        "id": "531d1435-e798-40ce-8802-d88307dcd7d0",
+        "gainDb": -1.3,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "62d1891d-4418-46c1-bbcf-0c1af288fb9b",
+        "gainDb": -2.7,
+        "residualLufs": 2.7,
+        "matched": true
+      },
+      {
+        "id": "7a0d0a0f-2b73-492b-bf88-6b95f9b0f9f4",
+        "gainDb": -2.5,
+        "residualLufs": 0.5,
+        "matched": true
+      },
+      {
+        "id": "aae3d12e-06c7-4a1a-9abd-7b7b1db1aef9",
+        "gainDb": -3.4,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "85114ef8-8a70-49e5-8f35-e2a48a4f6eee",
+        "gainDb": -4.1,
+        "residualLufs": 2,
+        "matched": true
+      },
+      {
+        "id": "fc29f2f6-58f7-4613-93c5-d30568b352da",
+        "gainDb": -3.3,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "6427931f-0ce2-413d-883f-db9a7b29a6b5",
+        "gainDb": -2.7,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "af6775d8-87d8-4caf-b891-7be79e69147b",
+        "gainDb": -3.9,
+        "residualLufs": 0.6,
+        "matched": true
+      },
+      {
+        "id": "5ef7fcf0-f817-4949-8e80-520ec1347323",
+        "gainDb": -3.1,
+        "residualLufs": 1.1,
+        "matched": true
+      },
+      {
+        "id": "14fc2880-6f1b-436f-8de5-5f2b00254902",
+        "gainDb": -3.1,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "9e8c816c-359b-4c44-b31d-6f417218292b",
+        "gainDb": -2.7,
+        "residualLufs": 0.6,
+        "matched": true
+      },
+      {
+        "id": "c4fc1855-9f33-412e-8212-27c210d4ad4c",
+        "gainDb": -2.4,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "d1986013-76b9-4f00-a368-a73b615289f8",
+        "gainDb": -1.9,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "49c980e8-69f9-4973-bddc-6bfe1526046c",
+        "gainDb": -3.4,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "6570bd9a-447f-44d1-a259-8313e71fc6fe",
+        "gainDb": -3.6,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "160b070a-2c89-467d-bfac-e56abe13bf7e",
+        "gainDb": -4,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "be917bdd-b383-4603-84b0-f4e0136920ac",
+        "gainDb": -4.4,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "4a4c56c0-dc4b-4ae0-9754-6a11e68f0781",
+        "gainDb": -4.4,
+        "residualLufs": 3,
+        "matched": true
+      },
+      {
+        "id": "8f39afcf-d994-4ab5-a32c-4a55ebef7b92",
+        "gainDb": -2.3,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "24a1ab40-b504-4085-8322-c566c32c68fa",
+        "gainDb": -5.3,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "31377271-704f-4781-9dcb-c6245c56f837",
+        "gainDb": -3.8,
+        "residualLufs": 0,
+        "matched": true
+      },
+      {
+        "id": "7ba0ef6a-42f1-4366-8212-b740b52f4e55",
+        "gainDb": -3.4,
+        "residualLufs": 0.4,
+        "matched": true
+      },
+      {
+        "id": "7a8675ef-cdff-4793-a2e8-5a1f93389ffd",
+        "gainDb": -3.1,
+        "residualLufs": 0.4,
+        "matched": true
+      }
+    ],
+    "totalBoostDb": 0
+  },
+  "detail": [
+    {
+      "order": 0,
+      "title": "Take Me Away - Lexurus Remix",
+      "bodyMedianLufs": -4.2,
+      "bodyCoverage": 1,
+      "integratedLufs": -4.5,
+      "currentGainDb": -2.3,
+      "id": "eda36683-4467-40da-8f88-f14eea6489da"
+    },
+    {
+      "order": 1,
+      "title": "Get Down",
+      "bodyMedianLufs": -4.5,
+      "bodyCoverage": 1,
+      "integratedLufs": -4.8,
+      "currentGainDb": -0.9,
+      "id": "64cb448a-1abd-499c-94d6-0517e2f66a14"
+    },
+    {
+      "order": 2,
+      "title": "Dive",
+      "bodyMedianLufs": -6.3,
+      "bodyCoverage": 1,
+      "integratedLufs": -7.3,
+      "currentGainDb": -2,
+      "id": "8e7b51f3-52ac-4efc-845e-808a952ef8c0"
+    },
+    {
+      "order": 3,
+      "title": "New Beginning",
+      "bodyMedianLufs": -5.4,
+      "bodyCoverage": 1,
+      "integratedLufs": -6.9,
+      "currentGainDb": -0.7,
+      "id": "35f74b03-6975-4ef7-8540-97fbf5068c31"
+    },
+    {
+      "order": 4,
+      "title": "Ultraviolet (feat. Katy Alex)",
+      "bodyMedianLufs": -4.8,
+      "bodyCoverage": 1,
+      "integratedLufs": -4.3,
+      "currentGainDb": -2.8,
+      "id": "20d1439d-ad15-4ded-a096-5259fccbd609"
+    },
+    {
+      "order": 5,
+      "title": "Elevate",
+      "bodyMedianLufs": -2.6,
+      "bodyCoverage": 1,
+      "integratedLufs": -2.9,
+      "currentGainDb": -4.3,
+      "id": "08b4e721-d236-4104-80a5-8f17d16ef1fc"
+    },
+    {
+      "order": 6,
+      "title": "Say My Name - Sub Focus Remix",
+      "bodyMedianLufs": -3.1,
+      "bodyCoverage": 1,
+      "integratedLufs": -3.7,
+      "currentGainDb": -3.5,
+      "id": "85081ee4-026b-4bdc-b58d-7b32df1f9582"
+    },
+    {
+      "order": 7,
+      "title": "Into Your Arms",
+      "bodyMedianLufs": -5.8,
+      "bodyCoverage": 1,
+      "integratedLufs": -5.1,
+      "currentGainDb": -4.1,
+      "id": "0a5c0353-3770-4b3c-9b78-a48148665275"
+    },
+    {
+      "order": 8,
+      "title": "Cut Em Down",
+      "bodyMedianLufs": -2.6,
+      "bodyCoverage": 1,
+      "integratedLufs": -3.5,
+      "currentGainDb": -2.1,
+      "id": "44cf830c-cbc6-40ec-b4fc-d2becebc023c"
+    },
+    {
+      "order": 9,
+      "title": "Like a Memory",
+      "bodyMedianLufs": -6.3,
+      "bodyCoverage": 1,
+      "integratedLufs": -6.8,
+      "currentGainDb": -1.2,
+      "id": "455bf3e2-3899-416b-914d-e26e42626acf"
+    },
+    {
+      "order": 10,
+      "title": "The Cure",
+      "bodyMedianLufs": -5.4,
+      "bodyCoverage": 1,
+      "integratedLufs": -6.1,
+      "currentGainDb": -1.6,
+      "id": "09b4fffa-9a10-4145-88ae-32f1247600c2"
+    },
+    {
+      "order": 11,
+      "title": "You And Me - S.P.Y Summer Chill Remix",
+      "bodyMedianLufs": -5.7,
+      "bodyCoverage": 1,
+      "integratedLufs": -6.1,
+      "currentGainDb": -2.7,
+      "id": "20ccf4d9-3830-49f7-832b-2200e95cf4be"
+    },
+    {
+      "order": 12,
+      "title": "New Wave",
+      "bodyMedianLufs": -6.1,
+      "bodyCoverage": 1,
+      "integratedLufs": -6.9,
+      "currentGainDb": -1,
+      "id": "531d1435-e798-40ce-8802-d88307dcd7d0"
+    },
+    {
+      "order": 13,
+      "title": "Raincoat",
+      "bodyMedianLufs": -7.4,
+      "bodyCoverage": 1,
+      "integratedLufs": -7.7,
+      "currentGainDb": -2.6,
+      "id": "62d1891d-4418-46c1-bbcf-0c1af288fb9b"
+    },
+    {
+      "order": 14,
+      "title": "All Makes Sense",
+      "bodyMedianLufs": -5.4,
+      "bodyCoverage": 1,
+      "integratedLufs": -5.1,
+      "currentGainDb": -2.4,
+      "id": "7a0d0a0f-2b73-492b-bf88-6b95f9b0f9f4"
+    },
+    {
+      "order": 15,
+      "title": "Escape",
+      "bodyMedianLufs": -4,
+      "bodyCoverage": 1,
+      "integratedLufs": -4.7,
+      "currentGainDb": -2.1,
+      "id": "aae3d12e-06c7-4a1a-9abd-7b7b1db1aef9"
+    },
+    {
+      "order": 16,
+      "title": "Ready to Fly",
+      "bodyMedianLufs": -5.3,
+      "bodyCoverage": 1,
+      "integratedLufs": -5.3,
+      "currentGainDb": -4,
+      "id": "85114ef8-8a70-49e5-8f35-e2a48a4f6eee"
+    },
+    {
+      "order": 17,
+      "title": "Like Home",
+      "bodyMedianLufs": -4.1,
+      "bodyCoverage": 1,
+      "integratedLufs": -4.6,
+      "currentGainDb": -2.9,
+      "id": "fc29f2f6-58f7-4613-93c5-d30568b352da"
+    },
+    {
+      "order": 18,
+      "title": "Give & Take",
+      "bodyMedianLufs": -4.7,
+      "bodyCoverage": 1,
+      "integratedLufs": -5.9,
+      "currentGainDb": -1.4,
+      "id": "6427931f-0ce2-413d-883f-db9a7b29a6b5"
+    },
+    {
+      "order": 19,
+      "title": "Time Is Fading",
+      "bodyMedianLufs": -4.1,
+      "bodyCoverage": 1,
+      "integratedLufs": -4.6,
+      "currentGainDb": -3.8,
+      "id": "af6775d8-87d8-4caf-b891-7be79e69147b"
+    },
+    {
+      "order": 20,
+      "title": "Heartburn",
+      "bodyMedianLufs": -5.4,
+      "bodyCoverage": 1,
+      "integratedLufs": -5,
+      "currentGainDb": -3,
+      "id": "5ef7fcf0-f817-4949-8e80-520ec1347323"
+    },
+    {
+      "order": 21,
+      "title": "Faster",
+      "bodyMedianLufs": -4.3,
+      "bodyCoverage": 1,
+      "integratedLufs": -5.1,
+      "currentGainDb": -1.6,
+      "id": "14fc2880-6f1b-436f-8de5-5f2b00254902"
+    },
+    {
+      "order": 22,
+      "title": "Calling for a Sign (feat. Kelli-Leigh)",
+      "bodyMedianLufs": -5.3,
+      "bodyCoverage": 1,
+      "integratedLufs": -5.6,
+      "currentGainDb": -2.6,
+      "id": "9e8c816c-359b-4c44-b31d-6f417218292b"
+    },
+    {
+      "order": 23,
+      "title": "Discotheque",
+      "bodyMedianLufs": -5,
+      "bodyCoverage": 1,
+      "integratedLufs": -5.5,
+      "currentGainDb": -1.7,
+      "id": "c4fc1855-9f33-412e-8212-27c210d4ad4c"
+    },
+    {
+      "order": 24,
+      "title": "Heater",
+      "bodyMedianLufs": -5.5,
+      "bodyCoverage": 1,
+      "integratedLufs": -6.1,
+      "currentGainDb": 0.1,
+      "id": "d1986013-76b9-4f00-a368-a73b615289f8"
+    },
+    {
+      "order": 25,
+      "title": "Delirium",
+      "bodyMedianLufs": -4,
+      "bodyCoverage": 1,
+      "integratedLufs": -4.4,
+      "currentGainDb": -2.8,
+      "id": "49c980e8-69f9-4973-bddc-6bfe1526046c"
+    },
+    {
+      "order": 26,
+      "title": "Heartbeat Loud - Extended Version",
+      "bodyMedianLufs": -3.8,
+      "bodyCoverage": 1,
+      "integratedLufs": -4.9,
+      "currentGainDb": -2.6,
+      "id": "6570bd9a-447f-44d1-a259-8313e71fc6fe"
+    },
+    {
+      "order": 27,
+      "title": "Positions",
+      "bodyMedianLufs": -3.4,
+      "bodyCoverage": 1,
+      "integratedLufs": -4,
+      "currentGainDb": -3.8,
+      "id": "160b070a-2c89-467d-bfac-e56abe13bf7e"
+    },
+    {
+      "order": 28,
+      "title": "Release Me",
+      "bodyMedianLufs": -3,
+      "bodyCoverage": 1,
+      "integratedLufs": -3.4,
+      "currentGainDb": -2.7,
+      "id": "be917bdd-b383-4603-84b0-f4e0136920ac"
+    },
+    {
+      "order": 29,
+      "title": "Amnesia (Bring It Back)",
+      "bodyMedianLufs": -6,
+      "bodyCoverage": 1,
+      "integratedLufs": -5.8,
+      "currentGainDb": -4.3,
+      "id": "4a4c56c0-dc4b-4ae0-9754-6a11e68f0781"
+    },
+    {
+      "order": 30,
+      "title": "Escape",
+      "bodyMedianLufs": -5.1,
+      "bodyCoverage": 1,
+      "integratedLufs": -6.1,
+      "currentGainDb": -2,
+      "id": "8f39afcf-d994-4ab5-a32c-4a55ebef7b92"
+    },
+    {
+      "order": 31,
+      "title": "Tour",
+      "bodyMedianLufs": -2.1,
+      "bodyCoverage": 1,
+      "integratedLufs": -2.7,
+      "currentGainDb": -4.6,
+      "id": "24a1ab40-b504-4085-8322-c566c32c68fa"
+    },
+    {
+      "order": 32,
+      "title": "Out My Head",
+      "bodyMedianLufs": -3.6,
+      "bodyCoverage": 1,
+      "integratedLufs": -4.7,
+      "currentGainDb": -2.8,
+      "id": "31377271-704f-4781-9dcb-c6245c56f837"
+    },
+    {
+      "order": 33,
+      "title": "Elemental",
+      "bodyMedianLufs": -4.4,
+      "bodyCoverage": 1,
+      "integratedLufs": -4.8,
+      "currentGainDb": -3.3,
+      "id": "7ba0ef6a-42f1-4366-8212-b740b52f4e55"
+    },
+    {
+      "order": 34,
+      "title": "Rhythm House",
+      "bodyMedianLufs": -4.7,
+      "bodyCoverage": 1,
+      "integratedLufs": -5.4,
+      "currentGainDb": -3,
+      "id": "7a8675ef-cdff-4793-a2e8-5a1f93389ffd"
+    }
+  ]
+}

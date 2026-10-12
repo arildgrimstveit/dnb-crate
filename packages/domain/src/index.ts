@@ -190,6 +190,12 @@ export {
   snapToNearestBeat,
   type NormalizedDnbBpm,
 } from "./tempo.ts";
+export {
+  solveSetGains,
+  windowShortTermLoudness,
+  type SetGainEntry,
+  type SetGainSolution,
+} from "./loudness.ts";
 export type {
   AnalysisJob,
   AnalysisJobStatus,
