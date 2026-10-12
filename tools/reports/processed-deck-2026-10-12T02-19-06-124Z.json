@@ -1,0 +1,85 @@
+{
+  "summary": {
+    "generatedAt": "2026-10-12T02:19:06.123Z",
+    "suite": "processed-deck",
+    "measureToleranceMs": 15,
+    "counts": {
+      "truePositives": 0,
+      "trueNegatives": 0,
+      "falseAlarms": 0,
+      "defectEscapes": 0,
+      "abstained": 0,
+      "infrastructureErrors": 6
+    },
+    "offsetErrorsWithinTolerance": [],
+    "totalRuntimeMs": 8064
+  },
+  "results": [
+    {
+      "id": "aligned-equal",
+      "expected": "pass",
+      "verdict": "INFRASTRUCTURE-ERROR",
+      "medianOffsetMs": null,
+      "driftMs": null,
+      "onsetCount": 0,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 1395,
+      "detail": "outgoing is missing intro/drop/outro cues required for aligned mixes; incoming is missing intro/drop/outro cues required for aligned mixes"
+    },
+    {
+      "id": "aligned-unequal",
+      "expected": "pass",
+      "verdict": "INFRASTRUCTURE-ERROR",
+      "medianOffsetMs": null,
+      "driftMs": null,
+      "onsetCount": 0,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 1324,
+      "detail": "outgoing is missing intro/drop/outro cues required for aligned mixes; incoming is missing intro/drop/outro cues required for aligned mixes"
+    },
+    {
+      "id": "shift-40",
+      "expected": "flag",
+      "verdict": "INFRASTRUCTURE-ERROR",
+      "medianOffsetMs": null,
+      "driftMs": null,
+      "onsetCount": 0,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 1337,
+      "detail": "outgoing is missing intro/drop/outro cues required for aligned mixes; incoming is missing intro/drop/outro cues required for aligned mixes"
+    },
+    {
+      "id": "shift-80",
+      "expected": "flag",
+      "verdict": "INFRASTRUCTURE-ERROR",
+      "medianOffsetMs": null,
+      "driftMs": null,
+      "onsetCount": 0,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 1337,
+      "detail": "outgoing is missing intro/drop/outro cues required for aligned mixes; incoming is missing intro/drop/outro cues required for aligned mixes"
+    },
+    {
+      "id": "rate-error",
+      "expected": "flag",
+      "verdict": "INFRASTRUCTURE-ERROR",
+      "medianOffsetMs": null,
+      "driftMs": null,
+      "onsetCount": 0,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 1337,
+      "detail": "outgoing is missing intro/drop/outro cues required for aligned mixes; incoming is missing intro/drop/outro cues required for aligned mixes"
+    },
+    {
+      "id": "sparse",
+      "expected": "abstain",
+      "verdict": "INFRASTRUCTURE-ERROR",
+      "medianOffsetMs": null,
+      "driftMs": null,
+      "onsetCount": 0,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 1334,
+      "detail": "outgoing is missing intro/drop/outro cues required for aligned mixes; incoming is missing intro/drop/outro cues required for aligned mixes"
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "summary": {
+    "generatedAt": "2026-10-12T02:21:10.591Z",
+    "suite": "processed-deck",
+    "measureToleranceMs": 15,
+    "counts": {
+      "truePositives": 3,
+      "trueNegatives": 1,
+      "falseAlarms": 2,
+      "defectEscapes": 0,
+      "abstained": 0,
+      "infrastructureErrors": 0
+    },
+    "offsetErrorsWithinTolerance": [
+      {
+        "id": "shift-40",
+        "error": 16.6,
+        "within": false
+      },
+      {
+        "id": "shift-80",
+        "error": 56.6,
+        "within": false
+      },
+      {
+        "id": "sparse",
+        "error": 68.3,
+        "within": false
+      }
+    ],
+    "totalRuntimeMs": 51554
+  },
+  "results": [
+    {
+      "id": "aligned-equal",
+      "expected": "pass",
+      "verdict": "FALSE-ALARM",
+      "medianOffsetMs": -23.4,
+      "driftMs": 3.4,
+      "onsetCount": 63,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 7374,
+      "detail": null
+    },
+    {
+      "id": "aligned-unequal",
+      "expected": "pass",
+      "verdict": "FALSE-ALARM",
+      "medianOffsetMs": -22.9,
+      "driftMs": 0,
+      "onsetCount": 64,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 14717,
+      "detail": null
+    },
+    {
+      "id": "shift-40",
+      "expected": "flag",
+      "verdict": "TRUE-POSITIVE",
+      "medianOffsetMs": -23.4,
+      "driftMs": 3.4,
+      "onsetCount": 63,
+      "offsetErrorVsInjectedMs": 16.6,
+      "runtimeMs": 7380,
+      "detail": null
+    },
+    {
+      "id": "shift-80",
+      "expected": "flag",
+      "verdict": "TRUE-POSITIVE",
+      "medianOffsetMs": -23.4,
+      "driftMs": 3.4,
+      "onsetCount": 63,
+      "offsetErrorVsInjectedMs": 56.6,
+      "runtimeMs": 7376,
+      "detail": null
+    },
+    {
+      "id": "rate-error",
+      "expected": "flag",
+      "verdict": "TRUE-POSITIVE",
+      "medianOffsetMs": -24.5,
+      "driftMs": 4.1,
+      "onsetCount": 65,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 7360,
+      "detail": null
+    },
+    {
+      "id": "sparse",
+      "expected": "abstain",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": -11.7,
+      "driftMs": 3.4,
+      "onsetCount": 34,
+      "offsetErrorVsInjectedMs": 68.3,
+      "runtimeMs": 7347,
+      "detail": null
+    }
+  ]
+}

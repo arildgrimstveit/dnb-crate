@@ -1,13 +1,10 @@
 # Implementation review and recommended next steps — 11 October 2026
 
-> **Status: ACTIVE BACKLOG** (updated 12 October 2026). Delivery per the ledger:
-> Batches A (S1–S3, S6, S7 stage 1), B core (S4, S5 evidence + publication gates
-> including the delayed two-runtime trial, S8), C (S9 both stages — probe identity/
-> coverage plus the synthetic-controls regression corpus), and Batch D step 3
-> (whole-phrase window recovery) are fixed/delivered with commits and failing-first
-> regressions. Open: Batch B scratch lifecycle, Batch D steps 1–2 and 5, and the
-> documentation reconciliation this update belongs to. The corpus found one real
-> verifier defect (half-beat false abstention) — recorded in beatmatching-followups.
+> **Status: HISTORICAL REVIEW.** The original findings and acceptance criteria below
+> describe the 11 October review baseline. The [12 October implementation review](implementation-review-2026-10-12.md)
+> assesses the follow-up commits, distinguishes fixed subcases from remaining gaps,
+> and is the active implementation backlog. Use its T1–T8 findings and delivery plan
+> for current priorities; the ledger records implementation history.
 
 ## Recommendation
 
