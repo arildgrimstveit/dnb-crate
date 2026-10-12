@@ -1,15 +1,25 @@
 /**
- * Audio regression corpus (S9 stage 2, 11 October review).
+ * Audio regression corpus (S9 stage 2, 11 October review; T7 taxonomy
+ * alignment, 12 October review).
  *
  * Repeatable local verification of the source-deck probe against SYNTHETIC
  * ground truth: each case renders a two-deck join whose true misalignment is
  * known by construction, then measures what the verifier reports. The report
- * separates:
- *   - TRUE POSITIVES  (defect injected, verifier flags: fail/review)
- *   - TRUE NEGATIVES  (aligned or whole-beat-equivalent, verifier passes)
- *   - ABSTENTIONS     (sparse evidence, verifier declines to judge)
- *   - FALSE PASS/FAIL (verdict disagrees with the known ground truth)
- * plus measured offsets vs the injected ones, coverage, and per-case runtime.
+ * uses the same outcome taxonomy as the processed-deck corpus
+ * (tools/scripts/processed-deck-corpus.mts):
+ *   - TRUE-POSITIVE      (defect injected, verifier flags: fail/review)
+ *   - TRUE-NEGATIVE      (aligned or whole-beat-equivalent, verifier passes)
+ *   - ABSTAINED          (no measurement; split by whether abstention was
+ *                         expected - unexpected abstention on clean audio is
+ *                         uncertainty to investigate, not a verifier error)
+ *   - DEFECT-ESCAPE      (a defect went undetected - passed, or escaped
+ *                         through abstention when a flag was expected)
+ *   - FALSE-ALARM        (verdict rendered on clean audio)
+ *   - INFRASTRUCTURE-ERROR (render/check machinery failed - never a
+ *                         verifier outcome)
+ * Measured offsets are asserted against the injected offsets (phase-reduced
+ * to the beat grid) within OFFSET_TOLERANCE_MS, drift measurements against
+ * the injected tempo error, plus coverage and per-case runtime.
  *
  * The corpus uses NO saved joins, NO listening history, and NO approved
  * transitions - a cold catalog built entirely from generated fixtures, per
@@ -17,7 +27,8 @@
  * are technical timing/processing labels only.
  *
  * Usage: pnpm tsx tools/scripts/audio-regression-corpus.mts [--json]
- * Requires ffmpeg on PATH. Writes a dated JSON report to tools/reports/.
+ * Requires ffmpeg on PATH. Writes a uniquely-stamped JSON report to
+ * tools/reports/ (same-day reruns never overwrite).
  */
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -169,12 +180,44 @@ type CaseResult = {
   status: string;
   measuredOffsetMs: number | null;
   driftMs: number | null;
+  /** Ground truth actually injected by the fixture, phase-reduced to the
+   * beat grid (a whole-beat injection is phase-equivalent to zero). */
+  injectedOffsetMs: number;
+  /** Phase-wrapped difference measured - injected; the verifier's measured
+   * offset is only trustworthy if it tracks what the fixture injected. */
+  offsetErrorMs: number | null;
+  /** Null when no offset assertion applies (unmeasured, or a drift case
+   * whose onsets legitimately spread across the window). */
+  offsetErrorOk: boolean | null;
+  /** True when the fixture injected a tempo error, so the drift measurement
+   * carries the assertion instead of the offset. */
+  driftExpected: boolean;
+  driftOk: boolean | null;
   outgoingLocked: number | null;
   incomingLocked: number | null;
   sourceIdentity: string | null;
   runtimeMs: number;
-  classification: "true-positive" | "true-negative" | "abstention" | "FALSE-PASS" | "FALSE-FAIL";
+  classification:
+    | "TRUE-POSITIVE"
+    | "TRUE-NEGATIVE"
+    | "ABSTAINED"
+    | "DEFECT-ESCAPE"
+    | "FALSE-ALARM"
+    | "INFRASTRUCTURE-ERROR";
 };
+
+/** Picker resolution is a 5 ms hop and observed noise stays under ~6 ms;
+ * 10 ms bounds a trustworthy offset measurement. */
+const OFFSET_TOLERANCE_MS = 10;
+/** Injected drift (0.4% over the overlap) spreads onsets by tens of ms;
+ * anything this small is indistinguishable from noise. */
+const DRIFT_FLOOR_MS = 15;
+
+/** Reduce an offset to its beat-phase residual in (-beat/2, beat/2]. */
+function phaseResidualMs(offsetMs: number, beatMs: number): number {
+  const d = ((offsetMs % beatMs) + beatMs) % beatMs;
+  return d > beatMs / 2 ? d - beatMs : d;
+}
 
 async function runCase(spec: CaseSpec): Promise<CaseResult> {
   const root = path.join(os.tmpdir(), `dnb-corpus-${spec.id}-${crypto.randomUUID()}`);
@@ -321,11 +364,16 @@ async function runCase(spec: CaseSpec): Promise<CaseResult> {
         status: `render-${done.status}`,
         measuredOffsetMs: null,
         driftMs: null,
+        injectedOffsetMs: phaseResidualMs(spec.incomingOffsetMs, BEAT_MS),
+        offsetErrorMs: null,
+        offsetErrorOk: null,
+        driftExpected: spec.incomingTempoError != null,
+        driftOk: null,
         outgoingLocked: null,
         incomingLocked: null,
         sourceIdentity: null,
         runtimeMs: Date.now() - startedAt,
-        classification: "FALSE-FAIL",
+        classification: "INFRASTRUCTURE-ERROR",
       };
     }
     const checked = await runtime.service.checkRender(done.id, undefined, {
@@ -339,13 +387,27 @@ async function runCase(spec: CaseSpec): Promise<CaseResult> {
       probe?.verification.startHalfOffsetMs != null && probe?.verification.endHalfOffsetMs != null
         ? Math.abs(probe.verification.endHalfOffsetMs - probe.verification.startHalfOffsetMs)
         : null;
+    // T7 taxonomy (12 October review): exhaustive status model separating
+    // the review's named confusions. An unexpected ABSTENTION is a
+    // DEFECT-ESCAPE (the defect escaped detection, not a "false pass" of
+    // clean audio); a verdict on clean audio is a FALSE-ALARM; render and
+    // check failures are INFRASTRUCTURE-ERROR, never verifier verdicts.
     let classification: CaseResult["classification"];
-    if (status === "unmeasured") {
-      classification = spec.expected === "abstain" ? "abstention" : "FALSE-PASS";
+    if (status === "none") {
+      // The join row was absent - infrastructure, not a verifier outcome.
+      classification = "INFRASTRUCTURE-ERROR";
+    } else if (status === "unmeasured") {
+      classification =
+        spec.expected === "abstain"
+          ? "ABSTAINED"
+          : spec.expected === "flag"
+            ? "DEFECT-ESCAPE" // the defect escaped through abstention
+            : "ABSTAINED"; // expected pass but abstained: uncertainty, not error
     } else if (status === "pass") {
-      classification = spec.expected === "pass" ? "true-negative" : ("FALSE-PASS" as const);
+      classification = spec.expected === "pass" ? "TRUE-NEGATIVE" : "DEFECT-ESCAPE";
     } else {
-      classification = spec.expected === "flag" ? "true-positive" : ("FALSE-FAIL" as const);
+      // review | fail: an actual timing judgment was produced
+      classification = spec.expected === "flag" ? "TRUE-POSITIVE" : "FALSE-ALARM";
     }
     return {
       id: spec.id,
@@ -354,6 +416,19 @@ async function runCase(spec: CaseSpec): Promise<CaseResult> {
       status,
       measuredOffsetMs: measured,
       driftMs: drift,
+      injectedOffsetMs: phaseResidualMs(spec.incomingOffsetMs, BEAT_MS),
+      offsetErrorMs:
+        measured == null
+          ? null
+          : phaseResidualMs(measured - phaseResidualMs(spec.incomingOffsetMs, BEAT_MS), BEAT_MS),
+      offsetErrorOk:
+        measured == null || spec.incomingTempoError != null
+          ? null
+          : Math.abs(
+              phaseResidualMs(measured - phaseResidualMs(spec.incomingOffsetMs, BEAT_MS), BEAT_MS),
+            ) <= OFFSET_TOLERANCE_MS,
+      driftExpected: spec.incomingTempoError != null,
+      driftOk: spec.incomingTempoError != null ? drift != null && drift > DRIFT_FLOOR_MS : null,
       outgoingLocked: probe?.outgoingLockedCount ?? null,
       incomingLocked: probe?.incomingLockedCount ?? null,
       sourceIdentity: probe?.sourceIdentity ?? null,
@@ -381,11 +456,16 @@ for (const spec of CASES) {
       status: `error: ${error instanceof Error ? error.message : String(error)}`,
       measuredOffsetMs: null,
       driftMs: null,
+      injectedOffsetMs: phaseResidualMs(spec.incomingOffsetMs, BEAT_MS),
+      offsetErrorMs: null,
+      offsetErrorOk: null,
+      driftExpected: spec.incomingTempoError != null,
+      driftOk: null,
       outgoingLocked: null,
       incomingLocked: null,
       sourceIdentity: null,
       runtimeMs: 0,
-      classification: "FALSE-FAIL",
+      classification: "INFRASTRUCTURE-ERROR",
     };
     results.push(result);
     process.stdout.write(`ERROR ${result.status}\n`);
@@ -394,11 +474,31 @@ for (const spec of CASES) {
 
 const summary = {
   cases: results.length,
-  truePositives: results.filter((r) => r.classification === "true-positive").length,
-  trueNegatives: results.filter((r) => r.classification === "true-negative").length,
-  abstentions: results.filter((r) => r.classification === "abstention").length,
-  falsePasses: results.filter((r) => r.classification === "FALSE-PASS").length,
-  falseFails: results.filter((r) => r.classification === "FALSE-FAIL").length,
+  truePositives: results.filter((r) => r.classification === "TRUE-POSITIVE").length,
+  trueNegatives: results.filter((r) => r.classification === "TRUE-NEGATIVE").length,
+  // Abstentions split by expectation: an unexpected abstention on expected
+  // clean audio is uncertainty worth investigating, not a verifier error.
+  expectedAbstentions: results.filter(
+    (r) => r.classification === "ABSTAINED" && r.expected === "abstain",
+  ).length,
+  unexpectedAbstentions: results.filter(
+    (r) => r.classification === "ABSTAINED" && r.expected === "pass",
+  ).length,
+  defectEscapes: results.filter((r) => r.classification === "DEFECT-ESCAPE").length,
+  falseAlarms: results.filter((r) => r.classification === "FALSE-ALARM").length,
+  infrastructureErrors: results.filter((r) => r.classification === "INFRASTRUCTURE-ERROR").length,
+  offsetAssertions: {
+    applicable: results.filter((r) => r.offsetErrorOk != null).length,
+    passed: results.filter((r) => r.offsetErrorOk === true).length,
+    failed: results.filter((r) => r.offsetErrorOk === false).length,
+    toleranceMs: OFFSET_TOLERANCE_MS,
+  },
+  driftAssertions: {
+    applicable: results.filter((r) => r.driftOk != null).length,
+    passed: results.filter((r) => r.driftOk === true).length,
+    failed: results.filter((r) => r.driftOk === false).length,
+    floorMs: DRIFT_FLOOR_MS,
+  },
   totalRuntimeMs: results.reduce((sum, r) => sum + r.runtimeMs, 0),
 };
 
@@ -410,9 +510,11 @@ console.log(
     "expected".padEnd(8),
     "status".padEnd(11),
     "meas".padEnd(7),
+    "inj".padEnd(7),
+    "err".padEnd(7),
     "drift".padEnd(7),
     "locked".padEnd(9),
-    "class".padEnd(15),
+    "class".padEnd(21),
     "ms",
   ].join(" "),
 );
@@ -422,10 +524,20 @@ for (const r of results) {
       r.id.padEnd(width),
       r.expected.padEnd(8),
       r.status.padEnd(11),
-      r.measuredOffsetMs == null ? "-" : r.measuredOffsetMs.toFixed(1).padEnd(7),
-      r.driftMs == null ? "-" : r.driftMs.toFixed(1).padEnd(7),
+      r.measuredOffsetMs == null ? "-".padEnd(7) : r.measuredOffsetMs.toFixed(1).padEnd(7),
+      r.injectedOffsetMs.toFixed(1).padEnd(7),
+      r.offsetErrorMs == null
+        ? r.offsetErrorOk === false
+          ? "FAIL".padEnd(7)
+          : "-".padEnd(7)
+        : r.offsetErrorMs.toFixed(1).padEnd(7),
+      r.driftMs == null
+        ? r.driftOk === false
+          ? "FAIL".padEnd(7)
+          : "-".padEnd(7)
+        : r.driftMs.toFixed(1).padEnd(7),
       `${r.outgoingLocked ?? "-"}/${r.incomingLocked ?? "-"}`.padEnd(9),
-      r.classification.padEnd(15),
+      r.classification.padEnd(21),
       String(r.runtimeMs),
     ].join(" "),
   );
@@ -442,8 +554,8 @@ const report = {
 };
 const reportDir = path.join(import.meta.dirname, "..", "reports");
 await mkdir(reportDir, { recursive: true });
-await writeFile(
-  path.join(reportDir, `audio-regression-${new Date().toISOString().slice(0, 10)}.json`),
-  JSON.stringify(report, null, 2),
-);
-console.log(`report written to tools/reports/`);
+// Unique per run: a UTC date filename silently overwrote same-day reruns.
+const stamp = `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid.toString(36)}`;
+const reportPath = path.join(reportDir, `audio-regression-${stamp}.json`);
+await writeFile(reportPath, JSON.stringify(report, null, 2));
+console.log(`report written to ${path.relative(process.cwd(), reportPath)}`);

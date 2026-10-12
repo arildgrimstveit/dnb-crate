@@ -382,3 +382,26 @@ machine's engine availability determines which engine ran). Follow-up: either
 compensate placement by the measured atempo delay when the fallback engages, or
 surface the engine choice in the manifest so the corpus can stratify by engine.
 Per-deck stem capture (T7 next stage) separates the two decks' contributions.
+
+### Source-probe corpus taxonomy alignment (12 October 2026, T7)
+
+`tools/scripts/audio-regression-corpus.mts` now uses the processed-deck corpus's
+outcome taxonomy (TRUE-POSITIVE / TRUE-NEGATIVE / ABSTAINED / DEFECT-ESCAPE /
+FALSE-ALARM / INFRASTRUCTURE-ERROR), splits abstentions by expectation, asserts
+measured offsets against injected offsets (phase-reduced to the beat grid,
+10 ms tolerance), asserts drift against the injected tempo error (15 ms floor),
+and writes uniquely-stamped reports (same-day reruns no longer overwrite).
+
+First run under the new contract surfaced two measurements the old labels hid:
+
+- **half-beat** relabeled from FALSE-PASS to **DEFECT-ESCAPE** - the known
+  false-abstention finding now carries its correct name (defect injected,
+  verifier abstained instead of flagging).
+- **shift-140 NEW FINDING**: measured 123.1 ms vs 140 injected (**-16.9 ms
+  error, outside the 10 ms tolerance**), with incoming lock coverage collapsed
+  to 15/64 onsets (vs 63/64 at shift-40/80). The offset estimator under-reports
+  at large shifts - consistent with the shifted onsets truncating out of the
+  measurement half-windows, biasing the median low. The verdict (fail) is still
+  correct; the MEASUREMENT is biased. Follow-up: compensate onset dropout at
+  window edges or widen the measurement window so deckOffsetMs tracks the
+  injected offset within tolerance at all shift magnitudes.
