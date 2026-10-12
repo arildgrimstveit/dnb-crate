@@ -638,3 +638,11 @@ versioning and CI wiring.
 Both CI lanes green on `7c4f269`. Q02 remainder: strong tier in stale-scope
 selection and workflow scheduling (explicit-track path covered), decode
 canonicalization, always-rehash verification mode.
+
+## Quality roadmap - Stage A, fifth tranche (12 October 2026)
+
+| Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Status    | Commit(s) |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
+| Q02 remainder (selection/scheduling): statDriftedTrackIds() - a synchronous, hashing-free stat pass - unions strong-identity stat drift into the stale scope; strongStale() extracted and shared; the mix workflow consults it after the weak contract, so mid-byte edits send the workflow back to analysis instead of planning on a stale grid. Failing-first verified with keyAnalysis off (pre-fix: "No tracks to analyze"; post-fix: selected and re-analyzed) | Delivered | `b949400` |
+
+Both CI lanes green on `b949400`.
