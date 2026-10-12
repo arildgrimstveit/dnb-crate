@@ -6,7 +6,12 @@ import {
   detectFfmpeg,
   measureLoudnessSeries,
 } from "../../packages/audio-renderer/src/index.ts";
-import { loadConfig, solveSetGains, windowShortTermLoudness, type SetPlanV1 } from "../../packages/domain/src/index.ts";
+import {
+  loadConfig,
+  solveSetGains,
+  windowShortTermLoudness,
+  type SetPlanV1,
+} from "../../packages/domain/src/index.ts";
 import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
 
 /**
@@ -73,7 +78,9 @@ try {
     byId.set(entry.id, { title: track.title, bodyLufs: body?.medianLufs ?? null });
   }
   const solution = solveSetGains(solverEntries);
-  console.log(`solver reference: ${solution.referenceLufs} LUFS, total boost ${solution.totalBoostDb} dB`);
+  console.log(
+    `solver reference: ${solution.referenceLufs} LUFS, total boost ${solution.totalBoostDb} dB`,
+  );
   const gainById = new Map(solution.gains.map((g) => [g.id, g.gainDb]));
 
   // Clone the plan under a clear A/B name with the proposed gains.
@@ -84,9 +91,7 @@ try {
     entries: sorted.map((entry) => ({
       ...entry,
       gainDb: gainById.get(entry.id) ?? entry.gainDb,
-      transitionToNext: entry.transitionToNext
-        ? { ...entry.transitionToNext }
-        : null,
+      transitionToNext: entry.transitionToNext ? { ...entry.transitionToNext } : null,
     })),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -120,7 +125,10 @@ try {
   }
 
   // Publish friendly-named copies of the master and listen artifacts.
-  const slug = plan.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const slug = plan.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
   const rendersRoot = config.outputRoot;
   await mkdir(rendersRoot, { recursive: true });
   const masterSrc = path.join(rendersRoot, done.outputRootRelativePath);
