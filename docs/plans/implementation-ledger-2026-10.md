@@ -603,3 +603,15 @@ Both CI lanes green on `ce79212`. Open in Stage A: Q01 remainder
 (generation-owned staging paths, cache-entry publication, one-transaction
 analysis commit), Q02 identity + the reproduced in-flight anchor-revision
 race, Q09 early capability/docs, Q07 exit/calibration/assertion gates.
+
+## Quality roadmap - Stage A, second tranche (12 October 2026)
+
+| Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Status    | Commit(s) |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- | --------- |
+| Q02 reproduced anchor race closed failing-first: analysis captures an input revision (beat anchor, fingerprint observed at prefetch-queue time, manual/published reference BPM) before the expensive work; superseded results are discarded unwritten and retried once under current inputs (fresh decode when the file changed); the DSP stage identity/fingerprint are stamped from the CAPTURED revision, never reread post-computation. Roadmap repro (anchor null->100 during loudness window) verified red (stored beatAnchorMs null, stale scope excluded) then green (re-analyzed under anchor=100, genuinely current) | Fixed     | `612a47b` |
+| Q07 harness gates: both synthetic corpora now exit with documented codes (2 infra / 3 unexpected escape-or-alarm / 4 numeric / 5 calibration), record the gate decision in the report, fail calibration explicitly (no silent zero-bias fallback), retain raw uncalibrated medians, and enumerate KNOWN_FAILURES explicitly (source: half-beat abstention, shift-140 under-reporting) instead of accepting red outcomes globally. Verified live: processed exits 0 clean; source exits 0 with both known failures recorded                                                                                                     | Delivered | `cee0541` |
+
+Both CI lanes green on `cee0541`. Remaining Stage A: Q01 staging/cache
+remainder + one-transaction analysis commit; Q02 strong content identity
+and decode canonicalization; Q09 preflight/docs; wider Q07 report-schema
+versioning and CI wiring.
