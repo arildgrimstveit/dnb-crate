@@ -86,11 +86,21 @@ try {
   // Clone the plan under a clear A/B name with the proposed gains. Entry
   // IDs are re-minted (they are primary keys across plans) and the
   // stamped resolved-join contracts follow the re-minted pair identity.
+  const variantName = `${plan.name} (body-gain A/B)`;
+  // Idempotent: replace any previous clone with the same name (the tool
+  // mints a fresh plan each run, so stale clones would otherwise pile up).
+  const existing = runtime.setPlans.list(100, undefined);
+  for (const summary of existing.plans) {
+    if (summary.name === variantName) {
+      runtime.service.deleteSetPlan(summary.id, true);
+      console.log(`replaced previous variant plan ${summary.id}`);
+    }
+  }
   const idMap = new Map(sorted.map((entry) => [entry.id, crypto.randomUUID()]));
   const variant: SetPlanV1 = {
     ...plan,
     id: crypto.randomUUID(),
-    name: `${plan.name} (body-gain A/B)`,
+    name: variantName,
     entries: sorted.map((entry, index) => {
       const next = sorted[index + 1];
       const transition = entry.transitionToNext;
@@ -133,9 +143,8 @@ try {
   console.log(`variant plan saved: ${variant.name}`);
 
   let changed = 0;
-  for (const entry of variant.entries) {
-    const original = sorted.find((e) => e.id === entry.id)!;
-    if (Math.abs(entry.gainDb - original.gainDb) > 0.05) {
+  for (let i = 0; i < variant.entries.length; i += 1) {
+    if (Math.abs(variant.entries[i]!.gainDb - sorted[i]!.gainDb) > 0.05) {
       changed += 1;
     }
   }
