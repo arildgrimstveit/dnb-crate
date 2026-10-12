@@ -964,6 +964,97 @@ describe("render jobs", () => {
     }
   });
 
+  it("comparison reports the stored variant infeasible when entries drift from the stamped contract (Q03 slice 3)", async () => {
+    // Q03/T5: feasibility for a SAVED join is evaluated against its frozen
+    // resolved-join contract. When the entries are edited so the contract
+    // no longer describes them, the stored variant must report infeasible
+    // with the drift reason and enqueue NOTHING - instead of previewing a
+    // silently clamped or re-derived window.
+    const { catalog, plan } = await seededLibrary();
+    const transition = plan.entries[0]!.transitionToNext!;
+    const outgoingEntry = plan.entries[0]!;
+    const incomingEntry = plan.entries[1]!;
+    const { resolveJoinInputs } = await import("@dnb-crate/domain");
+    const alphaRow = catalog.repository.findById(outgoingEntry.trackId)!;
+    const bravoRow = catalog.repository.findById(incomingEntry.trackId)!;
+    const resolution = resolveJoinInputs({
+      outgoingEntryId: outgoingEntry.id,
+      incomingEntryId: incomingEntry.id,
+      transitionId: transition.id,
+      geometry: {
+        outgoingSourceStartMs: outgoingEntry.sourceStartMs,
+        outgoingSourceEndMs: outgoingEntry.sourceEndMs,
+        incomingSourceStartMs: incomingEntry.sourceStartMs,
+        incomingSourceEndMs: incomingEntry.sourceEndMs,
+        joinOutputAnchorMs: incomingEntry.timelineStartMs,
+        overlapMs: transition.durationMs,
+        outgoingRate: outgoingEntry.playbackRate,
+        incomingRate: incomingEntry.playbackRate,
+        phraseBarCount: null,
+      },
+      outgoingDurationMs: alphaRow.durationMs,
+      incomingDurationMs: bravoRow.durationMs,
+      alignment: {
+        mode: "bar",
+        periodMs: (4 * 60_000) / 174,
+        downbeatOffsetMs: 0,
+        onsetLockBeats: null,
+        confidence: null,
+        coverage: null,
+      },
+      evidence: {
+        outgoingFingerprint: alphaRow.fileFingerprint ?? "",
+        incomingFingerprint: bravoRow.fileFingerprint ?? "",
+        analyzerVersion: null,
+        gridSource: null,
+      },
+      treatment: { type: transition.type, params: { purpose: "fixture" } },
+      gain: { gainDb: outgoingEntry.gainDb, source: "derived" },
+    });
+    expect(resolution.status).toBe("resolved");
+    const stamped = plan;
+    stamped.entries[0]!.transitionToNext = {
+      ...transition,
+      parameters: {
+        ...transition.parameters,
+        resolvedJoin: (resolution as { context: ResolvedJoinContext }).context,
+      },
+    };
+    catalog.setPlans.save(stamped, 1, {
+      seed: 1,
+      selected: [],
+      rejected: [],
+      harmonicCoverage: { knownJoins: 0, totalJoins: 0 },
+    });
+
+    // Sanity: with entries matching the contract, the stored variant
+    // enqueues normally.
+    const intact = await catalog.service.compareTransitionVariants({
+      setPlanId: stamped.id,
+      transitionId: transition.id,
+    });
+    const intactStored = intact.variants.find((v) => v.isStored)!;
+    expect(intactStored.jobId).not.toBeNull();
+
+    // Drift: trim the incoming window so the contract no longer fits.
+    const drifted = structuredClone(stamped);
+    drifted.entries[1]!.sourceStartMs = incomingEntry.sourceStartMs + 500;
+    catalog.setPlans.save(drifted, 1, {
+      seed: 1,
+      selected: [],
+      rejected: [],
+      harmonicCoverage: { knownJoins: 0, totalJoins: 0 },
+    });
+    const compared = await catalog.service.compareTransitionVariants({
+      setPlanId: drifted.id,
+      transitionId: transition.id,
+    });
+    const stored = compared.variants.find((v) => v.isStored)!;
+    expect(stored.feasible).toBe(false);
+    expect(stored.jobId).toBeNull();
+    expect(stored.blockers.some((b) => b.includes("entries-drifted-from-contract"))).toBe(true);
+  });
+
   it("counts abstention as attempted but not measured (T6)", async () => {
     // The fake runner's deck decodes produce sparse kick-band onsets on
     // plain sine fixtures, so the probe ABSTAINS on an aligned join — the

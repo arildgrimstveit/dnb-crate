@@ -31,7 +31,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { loadConfig } from "../../packages/domain/src/index.ts";
+import { loadConfig, resolveJoinInputs } from "../../packages/domain/src/index.ts";
 import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
 import { lowpass, onsetTimesMs } from "../../packages/catalog/src/render/audio-diagnostics.ts";
 
@@ -293,6 +293,51 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
     const alignedInStart = Math.round(4 * ((60_000 / spec.incomingBpm) * 4));
     const inStartMs = alignedInStart + spec.incomingShiftMs;
     const inSourceEnd = Math.round(inRow.durationMs - 1500);
+    // Q03: the fully resolved pin is the stamped contract - the renderer
+    // honors it verbatim and does not re-derive, so the injected geometry
+    // survives into the master. (recipeVersion is retired as the
+    // alignment-validity flag.)
+    const joinResolution = resolveJoinInputs({
+      outgoingEntryId: "corpus-out",
+      incomingEntryId: "corpus-in",
+      transitionId: "corpus-join",
+      geometry: {
+        outgoingSourceStartMs: 0,
+        outgoingSourceEndMs: outMixOutMs + OVERLAP_MS,
+        incomingSourceStartMs: inStartMs,
+        incomingSourceEndMs: inSourceEnd,
+        joinOutputAnchorMs: outMixOutMs,
+        overlapMs: OVERLAP_MS,
+        outgoingRate: outRate,
+        incomingRate: inRate,
+        phraseBarCount:
+          OVERLAP_BARS === 8 || OVERLAP_BARS === 16 || OVERLAP_BARS === 32 ? OVERLAP_BARS : 16,
+      },
+      outgoingDurationMs: outRow.durationMs,
+      incomingDurationMs: inRow.durationMs,
+      alignment: {
+        mode: "bar",
+        periodMs: Number(((60_000 / target) * 4).toFixed(3)),
+        downbeatOffsetMs: 0,
+        onsetLockBeats: null,
+        confidence: null,
+        coverage: null,
+      },
+      evidence: {
+        outgoingFingerprint: outRow.fileFingerprint ?? "",
+        incomingFingerprint: inRow.fileFingerprint ?? "",
+        analyzerVersion: null,
+        gridSource: null,
+      },
+      treatment: { type: "phrase_mix", params: { targetBpm: target } },
+      gain: { gainDb: 0, source: "derived" },
+    });
+    if (joinResolution.status !== "resolved") {
+      throw new Error(
+        `corpus join did not resolve: ${joinResolution.reason} (${joinResolution.detail})`,
+      );
+    }
+    const resolvedJoin = joinResolution.context;
     const plan = {
       schemaVersion: 1 as const,
       id: crypto.randomUUID(),
@@ -325,13 +370,10 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
               mixOutMs: outMixOutMs,
               mixInMs: inStartMs,
               incomingTrackId: inRow.id,
-              // Fully resolved pin (as buildEntries stamps): the renderer's
-              // resolved-placement branch honors these verbatim and does not
-              // re-derive, so the injected shift survives into the master.
               downbeatOffsetMs: 0,
               alignmentMode: "bar",
               alignmentPeriodMs: Number(((60_000 / target) * 4).toFixed(3)),
-              recipeVersion: 1,
+              resolvedJoin,
             },
           },
         },

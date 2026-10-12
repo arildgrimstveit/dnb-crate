@@ -161,6 +161,44 @@ export type JoinResolution =
       detail: string;
     };
 
+/**
+ * Q03 slice 3: does a stamped contract still describe the CURRENT plan
+ * entries? Comparison/freeze feasibility for a saved join is evaluated
+ * against its frozen coordinates — if the entries (or the transition's
+ * overlap) have drifted from the contract, the saved variant is reported
+ * infeasible with this reason instead of enqueueing a preview that would
+ * silently clamp or re-derive different geometry.
+ */
+export function resolvedJoinStillFits(
+  context: ResolvedJoinContext,
+  current: {
+    outgoingSourceStartMs: number;
+    outgoingSourceEndMs: number;
+    incomingSourceStartMs: number;
+    incomingSourceEndMs: number;
+    outgoingRate: number;
+    incomingRate: number;
+    overlapMs: number;
+  },
+): { fits: boolean; reason: string | null } {
+  const g = context.geometry;
+  if (
+    current.outgoingSourceStartMs !== g.outgoingSourceStartMs ||
+    current.outgoingSourceEndMs !== g.outgoingSourceEndMs ||
+    current.incomingSourceStartMs !== g.incomingSourceStartMs ||
+    current.incomingSourceEndMs !== g.incomingSourceEndMs ||
+    current.outgoingRate !== g.outgoingRate ||
+    current.incomingRate !== g.incomingRate ||
+    current.overlapMs !== g.overlapMs
+  ) {
+    return {
+      fits: false,
+      reason: "entries-drifted-from-contract",
+    };
+  }
+  return { fits: true, reason: null };
+}
+
 function unresolved(
   reason: JoinUnresolvedReason,
   detail: string,

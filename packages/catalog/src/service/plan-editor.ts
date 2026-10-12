@@ -68,12 +68,18 @@ export type UpdateSetPlanInput = {
  * surfaced as audible flams). Dropping the keys lets render time re-derive
  * the alignment for the new geometry; the reason records which edit kind
  * invalidated it.
+ *
+ * Q03: the stamped resolved-join contract (and any recorded unresolved
+ * outcome) describes the SAME frozen coordinates - it is stripped with the
+ * pins so an edited join cannot render a stale contract.
  */
 const ALIGNMENT_PIN_KEYS = [
   "downbeatOffsetMs",
   "alignmentPeriodMs",
   "alignmentMode",
   "onsetLockBeats",
+  "resolvedJoin",
+  "joinResolution",
 ] as const;
 
 type PlanEntryTransition = StoredSetPlan["plan"]["entries"][number]["transitionToNext"];

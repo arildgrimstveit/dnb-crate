@@ -683,7 +683,12 @@ describe("planner tempo matching", () => {
     const entries = buildEntries([a, b]);
     expect(entries[1]!.sourceStartMs).toBe(120_000);
     expect(entries[0]!.transitionToNext!.parameters.mixInMs).toBe(120_000);
-    expect(entries[0]!.transitionToNext!.parameters.recipeVersion).toBe(1);
+    // gridTrack fixtures carry no fingerprints, so the contract records an
+    // explicit unresolved outcome - a join DECISION exists either way.
+    expect(
+      entries[0]!.transitionToNext!.parameters.resolvedJoin != null ||
+        entries[0]!.transitionToNext!.parameters.joinResolution != null,
+    ).toBe(true);
   });
 
   it("stamps the resolved-join contract at resolution (Q03)", () => {
@@ -707,8 +712,8 @@ describe("planner tempo matching", () => {
     expect(context!.evidence.outgoingFingerprint).toBe("fp-alpha");
     expect(context!.schemaVersion).toBe(1);
     expect(context!.policyVersion).toBe(1);
-    // During adoption the legacy flag is stamped beside the contract.
-    expect(params.recipeVersion).toBe(1);
+    // Retired: the legacy flag is no longer stamped beside the contract.
+    expect(params.recipeVersion).toBeUndefined();
   });
 
   it("records an unresolved outcome when join evidence is missing (Q03)", () => {
@@ -3916,9 +3921,9 @@ describe("join inspector (batch 9)", () => {
       explorationWeight: 0,
     });
     const sorted = [...created.plan.entries].sort((a, b) => a.order - b.order);
-    // A normally generated aligned join carries the resolved marker.
+    // A normally generated aligned join carries the resolved contract.
     const alignedIndex = sorted.findIndex(
-      (entry) => entry.transitionToNext?.parameters.recipeVersion === 1,
+      (entry) => entry.transitionToNext?.parameters.resolvedJoin != null,
     );
     expect(alignedIndex).toBeGreaterThanOrEqual(0);
     const aligned = sorted[alignedIndex]!;
@@ -3936,11 +3941,11 @@ describe("join inspector (batch 9)", () => {
       (e) => e.id === aligned.id,
     )!.transitionToNext!;
     expect(editedTransition.parameters.alignmentInvalidated).toBe("window-edited");
-    // S1: the prior-parameters spread re-introduced recipeVersion alongside
-    // the invalidation marker, so the renderer kept taking its version-1
+    // S1: the prior-parameters spread re-introduced the resolved marker
+    // alongside the invalidation marker, so the renderer kept taking its
     // early exit and never applied the recomputed placement. Resolved and
     // invalidated placement must be mutually exclusive.
-    expect(editedTransition.parameters.recipeVersion).toBeUndefined();
+    expect(editedTransition.parameters.resolvedJoin).toBeUndefined();
 
     // A no-op trim changes nothing: the invalidated join keeps its marker
     // and stays without the resolved flag, and no other join is touched.
@@ -3957,12 +3962,12 @@ describe("join inspector (batch 9)", () => {
       (e) => e.id === aligned.id,
     )!.transitionToNext!;
     expect(stillInvalidated.parameters.alignmentInvalidated).toBe("window-edited");
-    expect(stillInvalidated.parameters.recipeVersion).toBeUndefined();
+    expect(stillInvalidated.parameters.resolvedJoin).toBeUndefined();
     const otherAligned = sorted.findIndex(
       (entry, i) =>
         i !== alignedIndex &&
         i !== alignedIndex + 1 &&
-        entry.transitionToNext?.parameters.recipeVersion === 1,
+        entry.transitionToNext?.parameters.resolvedJoin != null,
     );
     if (otherAligned >= 0) {
       const other = untouched.plan.entries.find(
@@ -4081,7 +4086,7 @@ describe("join inspector (batch 9)", () => {
     // phase-shifted drop-anchored incoming).
     const joinIndex = sorted.findIndex(
       (entry, i) =>
-        entry.transitionToNext?.parameters.recipeVersion === 1 &&
+        entry.transitionToNext?.parameters.resolvedJoin != null &&
         lowIds.has(entry.trackId) &&
         i + 1 < sorted.length &&
         highIds.has(sorted[i + 1]!.trackId),
@@ -4139,7 +4144,7 @@ describe("join inspector (batch 9)", () => {
     const planA = makePlan(6);
     const sortedA = [...planA.plan.entries].sort((a, b) => a.order - b.order);
     const alignedA = sortedA.findIndex(
-      (entry) => entry.transitionToNext?.parameters.recipeVersion === 1,
+      (entry) => entry.transitionToNext?.parameters.resolvedJoin != null,
     );
     expect(alignedA).toBeGreaterThanOrEqual(0);
     const prior = sortedA[alignedA]!.transitionToNext!;
@@ -4172,7 +4177,7 @@ describe("join inspector (batch 9)", () => {
     const planB = makePlan(7);
     const sortedB = [...planB.plan.entries].sort((a, b) => a.order - b.order);
     const alignedB = sortedB.findIndex(
-      (entry) => entry.transitionToNext?.parameters.recipeVersion === 1,
+      (entry) => entry.transitionToNext?.parameters.resolvedJoin != null,
     );
     expect(alignedB).toBeGreaterThanOrEqual(0);
     const rateEdited = catalog.service.updateSetPlan({

@@ -1,0 +1,137 @@
+{
+  "summary": {
+    "generatedAt": "2026-10-12T18:02:48.704Z",
+    "suite": "processed-deck",
+    "measureToleranceMs": 15,
+    "counts": {
+      "truePositives": 3,
+      "trueNegatives": 3,
+      "falseAlarms": 0,
+      "defectEscapes": 0,
+      "abstained": 0,
+      "infrastructureErrors": 0
+    },
+    "byStretchEngine": [
+      {
+        "engine": "none",
+        "cases": 5,
+        "maxAbsOffsetMs": 24.4
+      },
+      {
+        "engine": "rubberband-r3",
+        "cases": 1,
+        "maxAbsOffsetMs": 0.5
+      }
+    ],
+    "offsetErrorsWithinTolerance": [
+      {
+        "id": "shift-40",
+        "error": 9.7,
+        "within": true
+      },
+      {
+        "id": "shift-80",
+        "error": 9.7,
+        "within": true
+      }
+    ],
+    "totalRuntimeMs": 57739
+  },
+  "gate": {
+    "exitCode": 0,
+    "reasons": [],
+    "knownFailures": {}
+  },
+  "results": [
+    {
+      "id": "aligned-equal",
+      "expected": "pass",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": 0,
+      "rawMedianOffsetMs": -23.4,
+      "driftMs": 3.4,
+      "onsetCount": 63,
+      "offsetErrorVsInjectedMs": null,
+      "stretchEngines": [
+        "none"
+      ],
+      "runtimeMs": 8345,
+      "detail": "defect cluster -20.7 ms (19% of onsets)"
+    },
+    {
+      "id": "aligned-unequal",
+      "expected": "pass",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": 0.5,
+      "rawMedianOffsetMs": -22.9,
+      "driftMs": 0,
+      "onsetCount": 64,
+      "offsetErrorVsInjectedMs": null,
+      "stretchEngines": [
+        "rubberband-r3"
+      ],
+      "runtimeMs": 16506,
+      "detail": "defect cluster -20.9 ms (20% of onsets)"
+    },
+    {
+      "id": "shift-40",
+      "expected": "flag",
+      "verdict": "TRUE-POSITIVE",
+      "medianOffsetMs": -1.1,
+      "rawMedianOffsetMs": -24.5,
+      "driftMs": 4.5,
+      "onsetCount": 64,
+      "offsetErrorVsInjectedMs": 9.7,
+      "stretchEngines": [
+        "none"
+      ],
+      "runtimeMs": 8218,
+      "detail": "defect cluster -49.7 ms (56% of onsets)"
+    },
+    {
+      "id": "shift-80",
+      "expected": "flag",
+      "verdict": "TRUE-POSITIVE",
+      "medianOffsetMs": -1.1,
+      "rawMedianOffsetMs": -24.5,
+      "driftMs": 4.1,
+      "onsetCount": 65,
+      "offsetErrorVsInjectedMs": 9.7,
+      "stretchEngines": [
+        "none"
+      ],
+      "runtimeMs": 8227,
+      "detail": "defect cluster -89.7 ms (55% of onsets)"
+    },
+    {
+      "id": "rate-error",
+      "expected": "flag",
+      "verdict": "TRUE-POSITIVE",
+      "medianOffsetMs": 24.4,
+      "rawMedianOffsetMs": 1,
+      "driftMs": 4.1,
+      "onsetCount": 64,
+      "offsetErrorVsInjectedMs": null,
+      "stretchEngines": [
+        "none"
+      ],
+      "runtimeMs": 8225,
+      "detail": "defect cluster 111.7 ms (55% of onsets)"
+    },
+    {
+      "id": "sparse-incoming",
+      "expected": "pass",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": 11.7,
+      "rawMedianOffsetMs": -11.7,
+      "driftMs": 3.4,
+      "onsetCount": 34,
+      "offsetErrorVsInjectedMs": null,
+      "stretchEngines": [
+        "none"
+      ],
+      "runtimeMs": 8218,
+      "detail": "defect cluster 24.1 ms (15% of onsets)"
+    }
+  ]
+}

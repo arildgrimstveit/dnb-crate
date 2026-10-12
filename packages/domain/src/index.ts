@@ -347,6 +347,8 @@ export type {
   SetPlanEntry,
   SetPlanSummary,
   SetPlanV1,
+  TransitionParameterBag,
+  TransitionParameterValue,
   TransitionPlan,
   TransitionType,
   ValidateSetPlanResult,
@@ -367,6 +369,7 @@ export {
   resolvedJoinEvidenceSchema,
   resolvedJoinGainSchema,
   resolvedJoinGeometrySchema,
+  resolvedJoinStillFits,
   resolvedJoinTreatmentSchema,
 } from "./contracts/resolved-join.ts";
 export {

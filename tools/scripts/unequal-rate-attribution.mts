@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 
-import { loadConfig } from "../../packages/domain/src/index.ts";
+import { loadConfig, resolveJoinInputs } from "../../packages/domain/src/index.ts";
 import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
 import { lowpass, onsetTimesMs } from "../../packages/catalog/src/render/audio-diagnostics.ts";
 import { resolveRubberbandCli } from "../../packages/audio-renderer/src/rubberband-cli.ts";
@@ -180,6 +180,46 @@ async function renderCase(incomingBpm: number, targetBpm: number): Promise<Rende
     gridFor(inRow.id, inKicks, incomingBpm);
     const outRate = targetBpm / BPM;
     const inRate = targetBpm / incomingBpm;
+    const inSourceEnd = Math.round(inRow.durationMs - 1500);
+    // Q03: the resolved pin is the stamped contract (recipeVersion retired).
+    const attrResolution = resolveJoinInputs({
+      outgoingEntryId: "attr-out",
+      incomingEntryId: "attr-in",
+      transitionId: "attr-join",
+      geometry: {
+        outgoingSourceStartMs: 0,
+        outgoingSourceEndMs: OUT_MIX_OUT_MS + OVERLAP_MS,
+        incomingSourceStartMs: inStartMs,
+        incomingSourceEndMs: inSourceEnd,
+        joinOutputAnchorMs: OUT_MIX_OUT_MS,
+        overlapMs: OVERLAP_MS,
+        outgoingRate: outRate,
+        incomingRate: inRate,
+        phraseBarCount:
+          OVERLAP_BARS === 8 || OVERLAP_BARS === 16 || OVERLAP_BARS === 32 ? OVERLAP_BARS : 16,
+      },
+      outgoingDurationMs: outRow.durationMs,
+      incomingDurationMs: inRow.durationMs,
+      alignment: {
+        mode: "bar",
+        periodMs: Number(((60_000 / targetBpm) * 4).toFixed(3)),
+        downbeatOffsetMs: 0,
+        onsetLockBeats: null,
+        confidence: null,
+        coverage: null,
+      },
+      evidence: {
+        outgoingFingerprint: outRow.fileFingerprint ?? "",
+        incomingFingerprint: inRow.fileFingerprint ?? "",
+        analyzerVersion: null,
+        gridSource: null,
+      },
+      treatment: { type: "phrase_mix", params: { targetBpm } },
+      gain: { gainDb: 0, source: "derived" },
+    });
+    if (attrResolution.status !== "resolved") {
+      throw new Error(`attribution join did not resolve: ${attrResolution.detail}`);
+    }
     const plan = {
       schemaVersion: 1 as const,
       id: randomUUID(),
@@ -215,7 +255,7 @@ async function renderCase(incomingBpm: number, targetBpm: number): Promise<Rende
               downbeatOffsetMs: 0,
               alignmentMode: "bar",
               alignmentPeriodMs: Number(((60_000 / targetBpm) * 4).toFixed(3)),
-              recipeVersion: 1,
+              resolvedJoin: attrResolution.context,
             },
           },
         },
@@ -224,7 +264,7 @@ async function renderCase(incomingBpm: number, targetBpm: number): Promise<Rende
           trackId: inRow.id,
           order: 1,
           sourceStartMs: inStartMs,
-          sourceEndMs: Math.round(inRow.durationMs - 1500),
+          sourceEndMs: inSourceEnd,
           timelineStartMs: OUT_MIX_OUT_MS,
           playbackRate: inRate,
           gainDb: 0,

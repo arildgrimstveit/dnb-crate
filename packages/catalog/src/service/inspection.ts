@@ -1,6 +1,7 @@
 import {
   DomainError,
   isDomainError,
+  resolvedJoinStillFits,
   type SetPlanV1,
   type Track,
   type TransitionProposal,
@@ -349,6 +350,33 @@ export async function compareTransitionVariants(
     ...(savedWindow ? { savedWindow } : {}),
   });
 
+  // Q03 slice 3: the STORED variant's feasibility is validated against its
+  // stamped resolved-join contract — the frozen coordinates the previews
+  // would render. Entries (or the overlap) edited away from the contract
+  // make the stored variant infeasible with the drift reason, instead of
+  // enqueueing a preview that silently clamps or re-derives different
+  // geometry. Legacy joins without a contract keep the historical
+  // isStored enqueue path.
+  const stampedValue = transition.parameters.resolvedJoin;
+  const stampedContract =
+    stampedValue != null && typeof stampedValue === "object" && "geometry" in stampedValue
+      ? stampedValue
+      : null;
+  const storedFit = stampedContract
+    ? resolvedJoinStillFits(stampedContract, {
+        outgoingSourceStartMs: outgoingEntry.sourceStartMs,
+        outgoingSourceEndMs: outgoingEntry.sourceEndMs,
+        incomingSourceStartMs: incomingEntry.sourceStartMs,
+        incomingSourceEndMs: incomingEntry.sourceEndMs,
+        outgoingRate: outRate,
+        incomingRate: inRate,
+        overlapMs: transition.durationMs,
+      })
+    : { fits: true, reason: null };
+  const storedBlockers = storedFit.fits
+    ? []
+    : [`saved join no longer fits its contract: ${storedFit.reason}`];
+
   const templates: Array<"crossfade" | "phrase_mix" | "bass_swap"> = [
     "phrase_mix",
     "bass_swap",
@@ -381,13 +409,13 @@ export async function compareTransitionVariants(
   for (const template of templates) {
     const proposal = planned.proposals.find((item) => item.type === template);
     const isStored = transition.type === template;
-    const feasible = proposal?.feasible ?? false;
-    const blockers = proposal?.blockers ?? [];
+    const feasible = (proposal?.feasible ?? false) && (storedFit.fits || !isStored);
+    const blockers = [...(proposal?.blockers ?? []), ...(isStored ? storedBlockers : [])];
     let jobId: string | null = null;
     let outputPath: string | null = null;
     let enqueueStatus = "not-started";
     let enqueueError: { code: string; message: string } | null = null;
-    if (feasible || isStored) {
+    if ((feasible || isStored) && storedFit.fits) {
       try {
         const started = await service.renders.startPreview({
           setPlanId: input.setPlanId,

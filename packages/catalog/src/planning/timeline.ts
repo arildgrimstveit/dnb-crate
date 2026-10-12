@@ -1000,73 +1000,78 @@ export function buildEntries(
     const joinResolutionOutcome =
       baseTransition === null || priorParameters === null || !nextTrack || isLast
         ? null
-        : resolveJoinInputs({
-            outgoingEntryId: entryIds[index]!,
-            incomingEntryId: entryIds[index + 1]!,
-            transitionId: baseTransition.id,
-            geometry: {
-              outgoingSourceStartMs: sourceStartMs,
-              outgoingSourceEndMs: sourceEndMs,
-              incomingSourceStartMs: incomingStartMs ?? 0,
-              incomingSourceEndMs: incomingEndMs ?? 0,
-              joinOutputAnchorMs: joinAnchorMs,
-              overlapMs: baseTransition.durationMs,
-              outgoingRate: playbackRate,
-              incomingRate: rateFromPrior[index + 1]
-                ? ((existing?.get(nextTrack.id)?.playbackRate as number) ?? 1)
-                : (rates[index + 1] ?? 1),
-              phraseBarCount:
-                paramNum("barCount") === 8 ||
-                paramNum("barCount") === 16 ||
-                paramNum("barCount") === 32
-                  ? (paramNum("barCount") as 8 | 16 | 32)
-                  : null,
-            },
-            outgoingDurationMs: track.durationMs,
-            incomingDurationMs: nextTrack.durationMs,
-            alignment: {
-              mode:
-                priorParameters.alignmentMode === "beat" ||
-                priorParameters.alignmentMode === "phrase"
-                  ? priorParameters.alignmentMode
-                  : "bar",
-              periodMs:
-                paramNum("alignmentPeriodMs") ??
-                (targetBpmNum != null && targetBpmNum > 0
-                  ? (4 * 60_000) / targetBpmNum
-                  : (4 * 60_000) / 174),
-              downbeatOffsetMs: paramNum("downbeatOffsetMs") ?? 0,
-              onsetLockBeats:
-                typeof priorParameters.onsetLockBeats === "number"
-                  ? priorParameters.onsetLockBeats
-                  : null,
-              confidence: null,
-              coverage: null,
-            },
-            evidence: {
-              outgoingFingerprint: track.fileFingerprint ?? "",
-              incomingFingerprint: nextTrack.fileFingerprint ?? "",
-              analyzerVersion: track.analysis?.analyzerVersion ?? null,
-              gridSource: track.analysis?.gridSource ?? null,
-            },
-            treatment: {
-              type: baseTransition.type,
-              params: stripJoinResolution(priorParameters),
-            },
-            // The join context records the OUTGOING deck's gain decision;
-            // the joint two-deck gain policy is Q04.
-            gain: {
-              gainDb:
-                typeof prior?.gainDb === "number"
-                  ? prior.gainDb
-                  : levelMatchGainDb(
-                      track.analysis?.integratedLufs,
-                      referenceLufs,
-                      track.analysis?.truePeakDb,
-                    ).gainDb,
-              source: typeof prior?.gainDb === "number" ? "pinned" : "derived",
-            },
-          });
+        : alignmentInvalidated
+          ? // S1/Q03: an invalidated placement re-derives at render time -
+            // stamping a fresh contract would pin the planner's bar-mode
+            // math over the renderer's onset-aware recomputation.
+            null
+          : resolveJoinInputs({
+              outgoingEntryId: entryIds[index]!,
+              incomingEntryId: entryIds[index + 1]!,
+              transitionId: baseTransition.id,
+              geometry: {
+                outgoingSourceStartMs: sourceStartMs,
+                outgoingSourceEndMs: sourceEndMs,
+                incomingSourceStartMs: incomingStartMs ?? 0,
+                incomingSourceEndMs: incomingEndMs ?? 0,
+                joinOutputAnchorMs: joinAnchorMs,
+                overlapMs: baseTransition.durationMs,
+                outgoingRate: playbackRate,
+                incomingRate: rateFromPrior[index + 1]
+                  ? ((existing?.get(nextTrack.id)?.playbackRate as number) ?? 1)
+                  : (rates[index + 1] ?? 1),
+                phraseBarCount:
+                  paramNum("barCount") === 8 ||
+                  paramNum("barCount") === 16 ||
+                  paramNum("barCount") === 32
+                    ? (paramNum("barCount") as 8 | 16 | 32)
+                    : null,
+              },
+              outgoingDurationMs: track.durationMs,
+              incomingDurationMs: nextTrack.durationMs,
+              alignment: {
+                mode:
+                  priorParameters.alignmentMode === "beat" ||
+                  priorParameters.alignmentMode === "phrase"
+                    ? priorParameters.alignmentMode
+                    : "bar",
+                periodMs:
+                  paramNum("alignmentPeriodMs") ??
+                  (targetBpmNum != null && targetBpmNum > 0
+                    ? (4 * 60_000) / targetBpmNum
+                    : (4 * 60_000) / 174),
+                downbeatOffsetMs: paramNum("downbeatOffsetMs") ?? 0,
+                onsetLockBeats:
+                  typeof priorParameters.onsetLockBeats === "number"
+                    ? priorParameters.onsetLockBeats
+                    : null,
+                confidence: null,
+                coverage: null,
+              },
+              evidence: {
+                outgoingFingerprint: track.fileFingerprint ?? "",
+                incomingFingerprint: nextTrack.fileFingerprint ?? "",
+                analyzerVersion: track.analysis?.analyzerVersion ?? null,
+                gridSource: track.analysis?.gridSource ?? null,
+              },
+              treatment: {
+                type: baseTransition.type,
+                params: stripJoinResolution(priorParameters),
+              },
+              // The join context records the OUTGOING deck's gain decision;
+              // the joint two-deck gain policy is Q04.
+              gain: {
+                gainDb:
+                  typeof prior?.gainDb === "number"
+                    ? prior.gainDb
+                    : levelMatchGainDb(
+                        track.analysis?.integratedLufs,
+                        referenceLufs,
+                        track.analysis?.truePeakDb,
+                      ).gainDb,
+                source: typeof prior?.gainDb === "number" ? "pinned" : "derived",
+              },
+            });
     const transitionToNext =
       baseTransition === null || priorParameters === null
         ? null
@@ -1074,17 +1079,11 @@ export function buildEntries(
             ...baseTransition,
             parameters: {
               ...priorParameters,
-              // R4: a transition whose alignment pins were stripped by the
-              // editor (alignmentInvalidated) must NOT get recipeVersion 1 —
-              // that flag tells the renderer to skip alignment application,
-              // and with the pins gone the join would have no alignment at
-              // all. Without the flag, the renderer's alignment loop runs
-              // and recomputes for the new window.
-              ...(alignmentInvalidated ? {} : { recipeVersion: 1 }),
-              // Q03 slice 2: the versioned resolved-join contract, stamped
-              // at resolution. During adoption the legacy recipeVersion flag
-              // is still stamped beside it; the renderer accepts EITHER as
-              // resolution evidence, and a later slice retires the flag.
+              // Q03 slice 3: recipeVersion is RETIRED as the
+              // alignment-validity flag. The stamped resolved-join
+              // contract is the join authority; alignment-invalidated
+              // joins carry neither (S1 mutual exclusion) and re-align at
+              // render time.
               ...(joinResolutionOutcome?.status === "resolved"
                 ? { resolvedJoin: joinResolutionOutcome.context }
                 : {}),
