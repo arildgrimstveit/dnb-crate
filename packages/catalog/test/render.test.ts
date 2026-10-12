@@ -580,6 +580,149 @@ describe("render jobs", () => {
     expect(incomingTrack.timelineStartMs).toBeCloseTo(11_034.483, 1);
   });
 
+  it("previews render under job-owned staging and publish only under the claim (Q01)", async () => {
+    // The shared cache path must never be the render target: concurrent
+    // jobs with one cache key would collide on the artifact AND its
+    // intermediates, and a deposed owner finishing late could clobber a
+    // successor's entry. Previews render under cache/previews/staging/{job}
+    // and the cache entry is created only by the claim-guarded rename.
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-q01-staging-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    const { createFakeFfmpegRunner } = await import("@dnb-crate/audio-renderer");
+    const base = createFakeFfmpegRunner({ probeDurationSec: 15 });
+    let mixOutputPath: string | null = null;
+    let releaseMix: (() => void) | null = null;
+    const mixGate = new Promise<void>((resolve) => {
+      releaseMix = resolve;
+    });
+    let sawMix = false;
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      processRunner: {
+        run: async (request) => {
+          const args = request.args.map(String);
+          const isMix =
+            (args.includes("-filter_complex") || args.includes("-filter_complex_script")) &&
+            args.includes("-i");
+          if (isMix) {
+            sawMix = true;
+            mixOutputPath = args.at(-1) ?? null;
+            await mixGate;
+          }
+          return base.run(request);
+        },
+      },
+    });
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
+    await mkdir(library, { recursive: true });
+    await writeSineWav(path.join(library, "alpha.wav"), {
+      title: "Alpha",
+      artist: "A",
+      durationMs: 8000,
+    });
+    await writeSineWav(path.join(library, "bravo.wav"), {
+      title: "Bravo",
+      artist: "B",
+      durationMs: 8000,
+    });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 10 }).tracks;
+    const alpha = tracks.find((item) => item.title === "Alpha")!;
+    const bravo = tracks.find((item) => item.title === "Bravo")!;
+    const transitionId = crypto.randomUUID();
+    const plan: SetPlanV1 = {
+      schemaVersion: 1,
+      id: crypto.randomUUID(),
+      name: "q01-staging",
+      targetDurationMs: 15_000,
+      targetBpm: 174,
+      requestedArc: [
+        { atFraction: 0, targetEnergy: 3 },
+        { atFraction: 1, targetEnergy: 6 },
+      ],
+      entries: [
+        {
+          id: crypto.randomUUID(),
+          trackId: alpha.id,
+          order: 0,
+          sourceStartMs: 0,
+          sourceEndMs: 8000,
+          timelineStartMs: 0,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: {
+            id: transitionId,
+            type: "crossfade",
+            durationMs: 1000,
+            outgoingCuePointId: null,
+            incomingCuePointId: null,
+            parameters: { purpose: "fixture" },
+          },
+        },
+        {
+          id: crypto.randomUUID(),
+          trackId: bravo.id,
+          order: 1,
+          sourceStartMs: 0,
+          sourceEndMs: 8000,
+          timelineStartMs: 8000,
+          playbackRate: 1,
+          gainDb: 0,
+          transitionToNext: null,
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    catalog.setPlans.save(plan, 1, {
+      seed: 1,
+      selected: [],
+      rejected: [],
+      harmonicCoverage: { knownJoins: 0, totalJoins: 0 },
+    });
+
+    const started = await catalog.service.createTransitionPreview({
+      setPlanId: plan.id,
+      transitionId,
+      windowMs: 30_000,
+    });
+    // Wait for the mix invocation to be captured and gated.
+    await new Promise<void>((resolve) => {
+      const timer = setInterval(() => {
+        if (sawMix) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 10);
+    });
+    // The render target is the JOB-OWNED staging path, never the shared
+    // cache entry (pre-fix: this IS the cache path).
+    expect(mixOutputPath).toContain(path.join("cache", "previews", "staging"));
+    expect(mixOutputPath).toContain(started.job.id);
+    expect(mixOutputPath).not.toMatch(/[\\/]previews[\\/][^.]+\.flac$/);
+
+    // Takeover recovery deposes the owner mid-render, then the render
+    // finishes: publication must be refused and the staged copy cleaned.
+    catalog.renderJobs.failRunningAsInterrupted();
+    (releaseMix as unknown as () => void)();
+    const done = await catalog.service.waitForRenderJob(started.job.id, 30_000);
+    expect(done.status).toBe("failed");
+    // No cache entry was created by the deposed owner, and no staged file
+    // survived its job (the finally cleanup races waitForRenderJob's poll).
+    const cacheDir = path.join(root, "output", "cache", "previews");
+    const stagingDir = path.join(cacheDir, "staging");
+    const cacheEntries = await readdir(cacheDir);
+    expect(cacheEntries).toEqual(["staging"]);
+    await expect
+      .poll(async () => readdir(stagingDir).catch(() => [] as string[]), { timeout: 5_000 })
+      .toEqual([]);
+  });
+
   it("reports cache hits as succeeded with their artifact at enqueue (S4)", async () => {
     // The reproduced defect: a cache hit was reported as "queued" with a
     // null artifact because the service discarded startPreview's returned

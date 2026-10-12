@@ -1,4 +1,4 @@
-import { access, mkdir, stat, readFile, unlink } from "node:fs/promises";
+import { access, mkdir, rename, stat, readFile, unlink } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 
@@ -1239,6 +1239,10 @@ export class RenderCoordinator {
   private async execute(job: StoredRenderJob): Promise<void> {
     const controller = new AbortController();
     this.aborts.set(job.id, controller);
+    // Q01: when set, this job is rendering a preview under its own staging
+    // path; it is renamed into the shared cache entry only by the guarded
+    // publication, and never survives its job on failure.
+    let previewStagedAbs: string | null = null;
     try {
       const current = this.jobs.findById(job.id);
       if (!current || current.status === "cancelled") {
@@ -1454,9 +1458,25 @@ export class RenderCoordinator {
       }
 
       await mkdir(this.config.outputRoot, { recursive: true });
-      const absOut = path.resolve(this.config.outputRoot, relPath);
-      if (!isPathInsideRoot(absOut, path.resolve(this.config.outputRoot))) {
+      const finalAbsOut = path.resolve(this.config.outputRoot, relPath);
+      if (!isPathInsideRoot(finalAbsOut, path.resolve(this.config.outputRoot))) {
         throw new DomainError("PATH_OUTSIDE_LIBRARY_ROOT", "Refusing to write outside outputRoot");
+      }
+      // Q01 (12 October roadmap): previews render under a JOB-OWNED staging
+      // path so concurrent jobs sharing a cache key cannot collide on the
+      // shared artifact or on the render intermediates (partial output,
+      // filter script, CLI stretch temps all derive from outputPath). The
+      // cache entry itself is created only by the claim-guarded publication
+      // before markSucceeded. Full renders already write a job-unique path.
+      let renderOut = finalAbsOut;
+      if (job.kind === "preview") {
+        renderOut = path.join(
+          path.dirname(finalAbsOut),
+          "staging",
+          `${job.id}${path.extname(finalAbsOut)}`,
+        );
+        await mkdir(path.dirname(renderOut), { recursive: true });
+        previewStagedAbs = renderOut;
       }
       this.jobs.updateProgress(job.id, 0.02, "mixing");
       const timing = resolvePlanRateRegionsVersion(plan);
@@ -1483,7 +1503,7 @@ export class RenderCoordinator {
         segments,
         overlapMs: overlaps,
         transitions: mixTypes,
-        outputPath: absOut,
+        outputPath: renderOut,
         sampleRateHz: frozenSettings?.sampleRateHz ?? this.settings.sampleRateHz,
         truePeakCeilingDb: frozenSettings?.truePeakCeilingDb ?? this.settings.truePeakCeilingDb,
         loudnessTargetLufs: frozenSettings?.loudnessTargetLufs ?? this.settings.loudnessTargetLufs,
@@ -1509,7 +1529,7 @@ export class RenderCoordinator {
         }),
       });
       warnings.push(...mix.warnings);
-      const checksum = mix.checksumSha256 || (await sha256File(absOut));
+      const checksum = mix.checksumSha256 || (await sha256File(renderOut));
       const posixRel = relPath.split(path.sep).join("/");
       const automation = collectAutomation(segments, mixTypes, rateRegionsVersion);
       const manifest: RenderManifestV1 = {
@@ -1651,7 +1671,7 @@ export class RenderCoordinator {
               await encodeListenFlac(
                 this.runner,
                 binaries,
-                absOut,
+                finalAbsOut,
                 listenAbs,
                 controller.signal,
                 async (stagedPath) => {
@@ -1771,6 +1791,26 @@ export class RenderCoordinator {
         );
         return;
       }
+      // Q01: preview publication - the job-owned staged artifact becomes
+      // the shared cache entry only under the claim guard, so a deposed
+      // owner cannot clobber a successor's artifact, and no half-rendered
+      // cache file exists before this point.
+      if (previewStagedAbs != null) {
+        const staged = previewStagedAbs;
+        const published = await this.jobs.publishUnderClaim(job.id, token, async () => {
+          await mkdir(path.dirname(finalAbsOut), { recursive: true });
+          await rename(staged, finalAbsOut);
+        });
+        if (!published) {
+          await unlink(staged).catch(() => undefined);
+          throw new DomainError(
+            "RENDER_FAILED",
+            "Render claim lost to a takeover at preview publication; staged copy discarded",
+            { retryable: true, details: { jobId: job.id } },
+          );
+        }
+        previewStagedAbs = null;
+      }
       this.jobs.markSucceeded(
         job.id,
         {
@@ -1808,6 +1848,21 @@ export class RenderCoordinator {
         undefined,
         this.ownerToken(),
       );
+    } finally {
+      // Q01: a job-owned staged preview never survives its job - on ANY
+      // exit (throw, cancellation, deposed-owner early return, or a
+      // publication that never happened). Successful publication clears
+      // the marker first. Derived intermediates (filter script, partial
+      // output) sit next to the staged path and belong to this job alone.
+      if (previewStagedAbs != null) {
+        const staged = previewStagedAbs;
+        previewStagedAbs = null;
+        await Promise.allSettled([
+          unlink(staged),
+          unlink(`${staged}.filter.txt`),
+          unlink(`${staged}.partial.wav`),
+        ]);
+      }
     }
   }
 
