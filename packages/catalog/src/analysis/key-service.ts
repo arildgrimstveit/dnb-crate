@@ -13,7 +13,15 @@ export class KeyAnalysisService {
     private runner: ProcessRunner,
   ) {}
 
-  async analyze(trackId: string, probe: KeyEngineProbe, abortSignal?: AbortSignal): Promise<void> {
+  async analyze(
+    trackId: string,
+    probe: KeyEngineProbe,
+    abortSignal?: AbortSignal,
+    /** T2: gate result writes on the caller's claim - the KeyFinder
+     * subprocess can straddle a takeover, and a deposed owner must not
+     * write key evidence for work nobody owns. */
+    claimCurrent?: () => boolean,
+  ): Promise<void> {
     const track = this.tracks.findById(trackId)!;
     const identity = probe.identity ?? "unavailable";
     const fingerprint = track.fileFingerprint;
@@ -71,6 +79,11 @@ export class KeyAnalysisService {
         probe,
         abortSignal,
       );
+      if (claimCurrent && !claimCurrent()) {
+        // T2: the subprocess finished after a takeover; discard the result
+        // without writing key evidence or selection.
+        return;
+      }
       this.analyses.upsert({
         ...result,
         suggestedCues: [],
@@ -96,6 +109,9 @@ export class KeyAnalysisService {
       }
       write("succeeded", null);
     } catch (error) {
+      if (claimCurrent && !claimCurrent()) {
+        return;
+      }
       write(
         "failed",
         probe.reason ??
@@ -105,7 +121,9 @@ export class KeyAnalysisService {
             : "Key detection failed. Check native dependencies and source readability, then retry analysis."),
       );
     } finally {
-      this.tracks.setAnalysisStatus(trackId, track.analysisStatus);
+      if (!claimCurrent || claimCurrent()) {
+        this.tracks.setAnalysisStatus(trackId, track.analysisStatus);
+      }
     }
   }
 }

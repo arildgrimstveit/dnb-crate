@@ -298,14 +298,11 @@ export class AnalysisCoordinator {
         }
         try {
           if (job.forceDsp || !this.dspCurrent(trackId)) {
-            await this.analyzeTrack(trackId, binaries, pcmCache.get(trackId));
-            // S5: the expensive DSP ran while we (may have) lost the claim;
-            // persist rows/stage ONLY while the claim is still current.
+            // T2: the claim predicate travels INTO analyzeTrack - every
+            // evidence write (analysis row, metadata, cues) is gated after
+            // the expensive work, inside the method that performs it.
+            await this.analyzeTrack(trackId, binaries, pcmCache.get(trackId), claimCurrent);
             if (!claimCurrent()) {
-              this.logger.warn(
-                { jobId: job.id, trackId },
-                "Analysis claim lost during DSP; discarding result without writing evidence",
-              );
               pcmCache.delete(trackId);
               return;
             }
@@ -329,7 +326,7 @@ export class AnalysisCoordinator {
           this.logger.warn({ err: error, trackId }, "Track analysis failed");
         }
         if (this.tracks.findById(trackId) && !this.abort.signal.aborted && claimCurrent())
-          await keys.analyze(trackId, keyProbe, this.abort.signal);
+          await keys.analyze(trackId, keyProbe, this.abort.signal, claimCurrent);
         pcmCache.delete(trackId);
         this.jobs.updateProgress(job.id, (i + 1) / job.trackIds.length, completed, failed);
         if ((i + 1) % 25 === 0) {
@@ -399,6 +396,7 @@ export class AnalysisCoordinator {
     trackId: string,
     binaries: FfmpegBinaries | null,
     preloaded?: Promise<PcmAudio>,
+    claimCurrent?: () => boolean,
   ): Promise<void> {
     const track = this.tracks.findById(trackId);
     if (!track) {
@@ -450,6 +448,18 @@ export class AnalysisCoordinator {
       const parsed = parseEbur128(loudness.stderr);
       integratedLufs = parsed.integratedLufs;
       truePeakDb = parsed.truePeakDb;
+    }
+    // T2 (12 October review): ALL catalog evidence writes for this track
+    // happen after the expensive decode/DSP/loudness work, gated on the
+    // claim. A takeover during the subprocess window leaves no analysis
+    // row, no analyzed metadata, no cues - the recovery owner's job is the
+    // only writer.
+    if (claimCurrent && !claimCurrent()) {
+      this.logger.warn(
+        { trackId },
+        "Analysis claim lost during DSP/loudness; discarding result without writing evidence",
+      );
+      return;
     }
     this.storeResult(trackId, dsp, anchor, integratedLufs, truePeakDb, referenceBpm ?? null);
     const preferred =

@@ -431,4 +431,77 @@ describe("worker ownership fencing (review item 5)", () => {
     expect(rogueListen).toEqual([]);
     winner.release();
   }, 30_000);
+
+  it("a deposed analysis owner writes no evidence when the subprocess straddles takeover (T2)", async () => {
+    const { createFakeFfmpegRunner } = await import("@dnb-crate/audio-renderer");
+    const root = path.join(os.tmpdir(), `dnb-t2-${crypto.randomUUID()}`);
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const config = testConfig(root);
+
+    // Runtime A: active worker whose LOUDNESS measurement (the ebur128
+    // subprocess inside analyzeTrack) blocks until released — the exact
+    // T2 window where the old code wrote the analysis row after the await.
+    let releaseLoudness: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      releaseLoudness = resolve;
+    });
+    const base = createFakeFfmpegRunner();
+    const delayedRunner = {
+      run: async (request: {
+        executable: string;
+        args: string[];
+        abortSignal?: AbortSignal;
+        onStdout?: (chunk: string) => void;
+        onStderr?: (chunk: string) => void;
+      }) => {
+        const result = await base.run(request);
+        if (request.args.some((arg) => String(arg).includes("ebur128=peak=true"))) {
+          await gate;
+        }
+        return result;
+      },
+    };
+    const ownerA = createCatalogRuntime(config, undefined, { processRunner: delayedRunner });
+    cleanups.push(() => ownerA.close());
+    const { writeSineWav: writeWav } = await import("../src/index.ts");
+    await writeWav(path.join(library, "a.wav"), { title: "Alpha", durationMs: 2000 });
+    await ownerA.service.scanLibrary();
+    const trackId = ownerA.repository.listAll()[0]!.id;
+
+    const started = ownerA.service.startTrackAnalysis({ trackIds: [trackId] });
+    // Wait until A is INSIDE the delayed loudness measurement.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    // Runtime B takes over mid-subprocess.
+    const ownerB = createCatalogRuntime(config, undefined, {
+      passive: true,
+      useFakeFfmpeg: true,
+    });
+    cleanups.push(() => ownerB.close());
+    const bdb = (ownerB as unknown as { db: Database }).db;
+    backdateHeartbeat(bdb);
+    const winner = new WorkerOwner(bdb);
+    expect(winner.acquire()).toBe(true);
+    expect(ownerB.analysisJobs.failRunningAsInterrupted()).toBe(1);
+
+    // Release A: the DSP/loudness work completes, but every evidence write
+    // is gated — no analysis row, no metadata, no cues, no stage.
+    (releaseLoudness as unknown as () => void)();
+    await ownerA.service.waitForAnalysisJob(started.job.id, 10_000).catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const row = ownerB.analyses.findByTrackId(trackId);
+    expect(row).toBeNull();
+    const stages = (
+      bdb.prepare("SELECT COUNT(*) AS n FROM analysis_stages WHERE track_id = ?").get(trackId) as {
+        n: number;
+      }
+    ).n;
+    expect(stages).toBe(0);
+    expect(ownerB.repository.findById(trackId)!.analysisStatus).not.toBe("complete");
+    const job = ownerB.analysisJobs.findById(started.job.id)!;
+    expect(job.status).toBe("failed");
+    winner.release();
+  }, 30_000);
 });

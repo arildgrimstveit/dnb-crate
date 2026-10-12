@@ -235,7 +235,7 @@ export class EnrichmentCoordinator {
         }
         const trackId = job.trackIds[i]!;
         try {
-          await this.enrichTrack(trackId, job.dryRun, clients, binaries);
+          await this.enrichTrack(trackId, job.dryRun, clients, binaries, claimCurrent);
           completed.push(trackId);
         } catch (error) {
           failed.push(trackId);
@@ -276,6 +276,9 @@ export class EnrichmentCoordinator {
     dryRun: boolean,
     clients: ReturnType<EnrichmentCoordinator["clients"]>,
     binaries: FfmpegBinaries | null,
+    /** T2: gate ALL result writes (enrichment rows and published metadata)
+     * on the caller's claim - the HTTP lookups can straddle a takeover. */
+    claimCurrent?: () => boolean,
   ): Promise<void> {
     const track = this.tracks.findById(trackId);
     if (!track) {
@@ -469,6 +472,15 @@ export class EnrichmentCoordinator {
     raw.dryRun = dryRun;
     const storedMethod = accepted ? method : null;
     const storedScore = accepted ? score : null;
+
+    // T2: the lookups finished; write results only while the claim holds.
+    if (claimCurrent && !claimCurrent()) {
+      this.logger.warn(
+        { trackId },
+        "Enrichment claim lost during lookups; discarding result without applying metadata",
+      );
+      return;
+    }
 
     if (dryRun) {
       this.enrichments.upsert({

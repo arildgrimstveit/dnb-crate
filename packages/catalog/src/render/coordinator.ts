@@ -1654,17 +1654,23 @@ export class RenderCoordinator {
                 listenAbs,
                 controller.signal,
                 async (stagedPath) => {
-                  // S5 publication-boundary fence: verifyStaged runs BETWEEN
-                  // staging and publishing — a takeover during the encode
-                  // itself is caught HERE, before the shared-name artifact
-                  // can be replaced. Throwing skips the publish.
-                  if (!this.jobs.isClaimCurrent(job.id, claimToken)) {
-                    throw new DomainError(
-                      "RENDER_FAILED",
-                      "Render claim lost to a takeover during listen publication; staged copy discarded",
-                      { retryable: true, details: { jobId: job.id } },
-                    );
-                  }
+                  // S5/T3 publication-boundary fence: verifyStaged runs
+                  // BETWEEN staging and publishing. The claim is checked
+                  // BEFORE the awaits (takeover during the encode) and AGAIN
+                  // AFTER measurement/hashing (takeover during verification)
+                  // — the second check sits immediately before publication,
+                  // so the shared-name artifact cannot be replaced by a
+                  // deposed owner that lost the race mid-measurement.
+                  const requireClaim = (when: string) => {
+                    if (!this.jobs.isClaimCurrent(job.id, claimToken)) {
+                      throw new DomainError(
+                        "RENDER_FAILED",
+                        `Render claim lost to a takeover ${when} listen publication; staged copy discarded`,
+                        { retryable: true, details: { jobId: job.id } },
+                      );
+                    }
+                  };
+                  requireClaim("during");
                   const measured = await measureLoudness(
                     this.runner,
                     binaries,
@@ -1674,6 +1680,7 @@ export class RenderCoordinator {
                   manifest.listenChecksumSha256 = await sha256File(stagedPath);
                   manifest.listenIntegratedLufs = measured.integratedLufs;
                   manifest.listenTruePeakDb = measured.truePeakDb;
+                  requireClaim("after");
                   const failure = listenCopyFailureReason(measured, ceilingDb);
                   if (failure) {
                     const overshoot =
