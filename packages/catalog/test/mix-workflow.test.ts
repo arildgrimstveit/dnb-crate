@@ -281,6 +281,21 @@ describe("durable mix workflows", () => {
       ),
     ).toBe(true);
   });
+  it("fails the early capability check when Rubber Band R3 is unusable (Q09)", async () => {
+    // The default workflow stamps rate-regions v2, whose tempo-matched
+    // joins need the standalone CLI. A user without a working R3 must
+    // learn it HERE - before scan/analysis/planning - with the exact next
+    // action, not from checkPlan after the expensive stages.
+    const { runtime, config, root } = await fixture();
+    const dummy = path.join(root, "not-a-cli");
+    await writeFile(dummy, "definitely not an executable");
+    config.rubberbandPath = dummy;
+    const result = await runtime.workflows.preflight.check();
+    const issue = result.issues.find((i) => i.code === "RUBBERBAND_REQUIRED");
+    expect(issue?.severity).toBe("error");
+    expect(issue?.nextAction).toMatch(/rubberbandPath/);
+    expect(result.ready).toBe(false);
+  });
   it("rolls plan creation back if its checkpoint fails, then resumes without duplicate plans", async () => {
     const { runtime } = await fixture();
     const row = runtime.workflows.start({ brief, requestToken: "plan-crash" });

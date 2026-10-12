@@ -78,6 +78,22 @@ export function createFakeFfmpegRunner(
       if (request.abortSignal?.aborted) {
         return { exitCode: 1, signal: "SIGTERM", stdout: "", stderr: "aborted" };
       }
+      // Rubber Band R3 capability probe (preflight --help): answer with
+      // plausible banner text so the default-workflow check passes under
+      // the fake runner exactly as it would with the real CLI.
+      if (
+        request.args.length === 1 &&
+        request.args[0] === "--help" &&
+        /rubber.?band/i.test(request.executable)
+      ) {
+        return {
+          exitCode: 0,
+          signal: null,
+          stdout:
+            "Rubber Band Library, Rubber Band CLI. R3 engine, fine and finer R3 forms,\n--centre-focus, --fine (-3) and --finer options. Tempo and pitch stretching.\n",
+          stderr: "",
+        };
+      }
       if (options.hangUntilAbort) {
         const isMeta =
           request.args.includes("-encoders") ||

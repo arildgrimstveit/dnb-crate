@@ -37,25 +37,32 @@ export class PreflightService {
     }
   }
 
+  /** Shared R3 CLI validation (checkPlan and the early capability check
+   * must agree on what "usable" means). */
+  private async rubberbandReady(): Promise<boolean> {
+    const executable = resolveRubberbandCli(this.config.rubberbandPath);
+    if (!executable) {
+      return false;
+    }
+    try {
+      const result = await this.runner.run({ executable, args: ["--help"], timeoutMs: 10_000 });
+      const out = result.stdout + result.stderr;
+      return (
+        !result.timedOut && /rubber.?band/i.test(out) && /fine|finer|R3|--centre-focus/i.test(out)
+      );
+    } catch {
+      return false;
+    }
+  }
+
   async checkPlan(plan: SetPlanV1): Promise<MixIssue[]> {
     if (
       resolvePlanRateRegionsVersion(plan).version !== 2 &&
       !plan.entries.some((entry) => Math.abs(entry.playbackRate - 1) > 0.000001)
     )
       return [];
-    const executable = resolveRubberbandCli(this.config.rubberbandPath);
-    if (executable) {
-      try {
-        const result = await this.runner.run({ executable, args: ["--help"], timeoutMs: 10_000 });
-        if (
-          !result.timedOut &&
-          /rubber.?band/i.test(result.stdout + result.stderr) &&
-          /fine|finer|R3|--centre-focus/i.test(result.stdout + result.stderr)
-        )
-          return [];
-      } catch {
-        /* report actionable prerequisite */
-      }
+    if (await this.rubberbandReady()) {
+      return [];
     }
     return [
       {
@@ -111,6 +118,7 @@ export class PreflightService {
       keyfinder: null,
       ffmpeg: null,
       ffprobe: null,
+      rubberband: null,
     };
     const issue = (
       code: string,
@@ -219,6 +227,20 @@ export class PreflightService {
           "Correct keyfinderPath or DNB_CRATE_KEYFINDER_PATH.",
         );
       }
+    }
+    // Q09 (12 October roadmap): R3 is a DEFAULT-WORKFLOW requirement, not
+    // an optional nicety - newly generated plans stamp rate-regions v2,
+    // whose tempo-matched joins render through the standalone CLI. Surface
+    // it HERE, before scan/analysis/planning, with the exact next action,
+    // instead of letting checkPlan fail after the expensive stages.
+    const rubberbandExecutable = resolveRubberbandCli(this.config.rubberbandPath);
+    dependencies.rubberband = rubberbandExecutable;
+    if (!(await this.rubberbandReady())) {
+      issue(
+        "RUBBERBAND_REQUIRED",
+        "Standalone Rubber Band R3 is required for the default tempo-matching policy (join-only timing v2).",
+        "Restore the bundled tools/rubberband-cli executable, or install Rubber Band 3+ and configure rubberbandPath.",
+      );
     }
     return { ready: !issues.some((item) => item.severity === "error"), issues, dependencies };
   }

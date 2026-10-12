@@ -326,19 +326,17 @@ export class AnalysisCoordinator {
                 return;
               }
               if (retry.superseded) {
-                // Inputs moved again (continuous editing): leave the
-                // evidence unpublished. The scope machinery rediscovers the
+                // Inputs moved again (continuous editing): the evidence
+                // stays unpublished. The scope machinery rediscovers the
                 // track on the next run; nothing stale is stamped current.
                 this.logger.warn(
                   { trackId },
                   "Analysis inputs changed again; leaving evidence unpublished for the next run",
                 );
-              } else {
-                this.stampDspStage(trackId, retry);
               }
-            } else {
-              this.stampDspStage(trackId, revision);
             }
+            // The stage is stamped inside analyzeTrack's commit transaction
+            // together with every other evidence write (Q01).
           }
           completed.push(trackId);
         } catch (error) {
@@ -502,46 +500,63 @@ export class AnalysisCoordinator {
     // claim. A takeover during the subprocess window leaves no analysis
     // row, no analyzed metadata, no cues - the recovery owner's job is the
     // only writer.
-    if (claimCurrent && !claimCurrent()) {
+    //
+    // Q01 (12 October roadmap): the checks and the writes commit under ONE
+    // synchronous transaction on the runtime's shared connection. No await
+    // runs inside it, and a cross-process editor cannot interleave between
+    // the checks and the writes (BEGIN IMMEDIATE excludes them). If the
+    // claim was lost or any input the evidence was computed under changed
+    // during the subprocess window, NOTHING is written - the caller
+    // discards and retries under the current inputs (Q02).
+    let published = false;
+    this.tracks.withTransaction(() => {
+      if (claimCurrent && !claimCurrent()) {
+        return;
+      }
+      const currentTrack = this.tracks.findById(trackId);
+      const currentReferenceBpm =
+        currentTrack?.bpm != null &&
+        (currentTrack.bpmSource === "published" || currentTrack.bpmSource === "manual")
+          ? currentTrack.bpm
+          : undefined;
+      const superseded =
+        this.analyses.getBeatAnchorMs(trackId) !== inputRevision.beatAnchorMs ||
+        currentTrack?.fileFingerprint !== inputRevision.fileFingerprint ||
+        currentReferenceBpm !== referenceBpm;
+      if (superseded) {
+        return;
+      }
+      this.storeResult(trackId, dsp, anchor, integratedLufs, truePeakDb, referenceBpm ?? null);
+      const preferred =
+        this.analyses.findByTrackId(trackId) ??
+        this.analyses.findByTrackId(trackId, dsp.analyzerName);
+      if (preferred) {
+        this.tracks.applyAnalyzedMetadata(trackId, {
+          bpm: preferred.gridRejected ? null : preferred.bpm,
+          musicalKey: null,
+          preserveKey: true,
+          gridRejected: preferred.gridRejected,
+        });
+        this.tracks.insertAnalyzedCuesIfAbsent(trackId, preferred.suggestedCues);
+      } else {
+        this.tracks.setAnalysisStatus(trackId, "complete");
+      }
+      this.stampDspStage(trackId, inputRevision);
+      published = true;
+    });
+    if (!published) {
+      if (claimCurrent && !claimCurrent()) {
+        this.logger.warn(
+          { trackId },
+          "Analysis claim lost during DSP/loudness; discarding result without writing evidence",
+        );
+        return { ...inputRevision, superseded: false };
+      }
       this.logger.warn(
         { trackId },
-        "Analysis claim lost during DSP/loudness; discarding result without writing evidence",
+        "Analysis inputs changed during computation; discarding result",
       );
-      return { ...inputRevision, superseded: false };
-    }
-    // Q02 (12 October roadmap): if any input the evidence was computed
-    // under changed during the subprocess window, DISCARD the result
-    // instead of publishing it under a post-hoc identity. The caller
-    // retries under the current inputs.
-    const currentTrack = this.tracks.findById(trackId);
-    const currentReferenceBpm =
-      currentTrack?.bpm != null &&
-      (currentTrack.bpmSource === "published" || currentTrack.bpmSource === "manual")
-        ? currentTrack.bpm
-        : undefined;
-    const superseded =
-      this.analyses.getBeatAnchorMs(trackId) !== inputRevision.beatAnchorMs ||
-      currentTrack?.fileFingerprint !== inputRevision.fileFingerprint ||
-      currentReferenceBpm !== referenceBpm;
-    if (superseded) {
       return { ...inputRevision, superseded: true };
-    }
-    this.storeResult(trackId, dsp, anchor, integratedLufs, truePeakDb, referenceBpm ?? null);
-    const preferred =
-      this.analyses.findByTrackId(trackId) ??
-      this.analyses.findByTrackId(trackId, dsp.analyzerName);
-    if (preferred) {
-      this.tracks.applyAnalyzedMetadata(trackId, {
-        bpm: preferred.gridRejected ? null : preferred.bpm,
-        musicalKey: null,
-        preserveKey: true,
-        gridRejected: preferred.gridRejected,
-      });
-    } else {
-      this.tracks.setAnalysisStatus(trackId, "complete");
-    }
-    if (preferred) {
-      this.tracks.insertAnalyzedCuesIfAbsent(trackId, preferred.suggestedCues);
     }
     return { ...inputRevision, superseded: false };
   }
