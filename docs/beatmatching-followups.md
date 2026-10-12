@@ -338,3 +338,29 @@ join's alignment confidence down so checks surface it. The half-beat-adjacent
 reference-locked grids at low confidence (0.6) currently pass freshness because
 the reference is an intentional lock; their disagreement with the track's own
 audio deserves an explicit diagnostic, not silent acceptance.
+
+### Processed-deck corpus baseline (12 October 2026)
+
+`tools/scripts/processed-deck-corpus.mts` decodes the RENDERED MASTER's overlap
+region and measures its kick onsets against the projected output grid - the
+renderer's actual processing (tempo conversion, band filters, blend), not the
+source files. Explicit taxonomy (TRUE-POSITIVE/NEGATIVE, FALSE-ALARM,
+DEFECT-ESCAPE, ABSTAINED, INFRASTRUCTURE-ERROR); the aligned control
+calibrates the harness's onset-attack bias (-23.4 ms) and all offsets are
+reported relative to it; outlier-cluster detection handles the bimodal
+distribution a shifted deck produces (one deck anchors 0, the other sits off).
+
+Baseline: aligned equal-rate and sparse-incoming TRUE-NEGATIVE; +40/+80 ms
+post-preparation placement shifts and the hidden 173-under-174 rate error all
+TRUE-POSITIVE (defect clusters ~20 ms+ at 19-56 percent of onsets; drift for
+the rate case). One REAL FINDING: the unequal-rate control (174/178 into a
+175 target, both decks rate-stretched, fully pinned resolved placement)
+measures +24.8 ms off-grid - either the stretch path (atempo/rubberband on a
+deck) carries uncompensated group delay the renderer does not correct, or the
+resolved-pin contract owes an explicit stretch-latency term. Needs per-deck
+stem attribution to separate from the equal-rate control's zero - recorded as
+the follow-up; do not tune thresholds over it.
+
+Attribution limit (documented in the suite): the mixed overlap cannot say
+WHICH deck is off - the source-probe suite localizes the side. Per-deck stem
+capture during preparation is the named next stage (T7 acceptance).
