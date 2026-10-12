@@ -64,6 +64,72 @@ describe("track analysis and aligned transitions", () => {
     expect(analysis.descriptors?.danceability).toBeTypeOf("number");
   });
 
+  it("re-analyzes under the new inputs when the beat anchor moves during the loudness window (Q02)", async () => {
+    // Roadmap reproduced race: stage publication rereads the beat anchor and
+    // fingerprint AFTER the awaited analysis, so an anchor edit landing in
+    // the loudness subprocess window stamps the OLD-anchor DSP result
+    // current under the NEW anchor identity - the stale grid looks fresh
+    // forever. The fix captures the inputs the evidence was actually
+    // computed under, discards superseded results, and re-runs once under
+    // the current inputs.
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-q02-anchor-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const { createFakeFfmpegRunner } = await import("@dnb-crate/audio-renderer");
+    const base = createFakeFfmpegRunner();
+    let releaseLoudness: (() => void) | null = null;
+    const loudnessGate = new Promise<void>((resolve) => {
+      releaseLoudness = resolve;
+    });
+    let sawLoudness = false;
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      processRunner: {
+        run: async (request) => {
+          if (request.args.some((arg) => String(arg).includes("ebur128"))) {
+            sawLoudness = true;
+            await loudnessGate;
+          }
+          return base.run(request);
+        },
+      },
+    });
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
+    const pcm = buildClickTrackPcm({ bpm: 174, durationMs: 12_000 });
+    await writeFile(path.join(library, "click.wav"), encodeMonoWav(pcm));
+    await catalog.service.scanLibrary();
+    const track = catalog.service.searchTracks({ query: "click", limit: 1 }).tracks[0]!;
+
+    const started = catalog.service.startTrackAnalysis({ trackIds: [track.id] });
+    // Wait for the loudness subprocess window to open.
+    await new Promise<void>((resolve) => {
+      const timer = setInterval(() => {
+        if (sawLoudness) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 10);
+    });
+    // Edit the anchor mid-computation (null -> 100 ms), exactly the
+    // roadmap reproduction.
+    catalog.service.setCuePoints(track.id, [], 100);
+    (releaseLoudness as unknown as () => void)();
+    const done = await catalog.service.waitForAnalysisJob(started.job.id, 60_000);
+    expect(done.status).toBe("succeeded");
+
+    // The published evidence was recomputed under the NEW anchor - never an
+    // old-anchor grid stamped current under anchor=100.
+    const analysis = catalog.service.getTrackAnalysis(track.id);
+    expect(analysis.beatAnchorMs).toBe(100);
+    // And it is GENUINELY current: recomputed, not merely relabeled.
+    expect(catalog.analyses.listIdsForScope("stale")).not.toContain(track.id);
+  });
+
   it("ranks bass_swap when energy rises and blocks aligned render on a rejected grid", async () => {
     const root = path.join(
       os.tmpdir(),

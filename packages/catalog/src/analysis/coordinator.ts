@@ -219,7 +219,10 @@ export class AnalysisCoordinator {
   private async execute(job: AnalysisJob): Promise<void> {
     const completed: string[] = [];
     const failed: string[] = [];
-    const pcmCache = new Map<string, Promise<PcmAudio>>();
+    // Q02: prefetched PCM carries the fingerprint observed when its decode
+    // was QUEUED, so a file change between decode and analysis is detected
+    // even when the prefetch window is long.
+    const pcmCache = new Map<string, { pcm: Promise<PcmAudio>; fingerprint: string }>();
     // S5: the claim context captured at claim time. The job ROW is the
     // authority: after a takeover, recovery marks this job interrupted (or
     // the new owner re-claims it under a different token), so
@@ -264,7 +267,7 @@ export class AnalysisCoordinator {
         );
         // Observe failures immediately, but preserve the rejection for this track's turn.
         void decoded.catch(() => undefined);
-        pcmCache.set(trackId, decoded);
+        pcmCache.set(trackId, { pcm: decoded, fingerprint: track.fileFingerprint });
       };
       for (let i = 0; i < job.trackIds.length; i += 1) {
         if (this.stopped || this.jobs.require(job.id).status === "cancelled") {
@@ -301,21 +304,41 @@ export class AnalysisCoordinator {
             // T2: the claim predicate travels INTO analyzeTrack - every
             // evidence write (analysis row, metadata, cues) is gated after
             // the expensive work, inside the method that performs it.
-            await this.analyzeTrack(trackId, binaries, pcmCache.get(trackId), claimCurrent);
+            // Q02: the stage is stamped with the inputs the evidence was
+            // ACTUALLY computed under (captured before the expensive work,
+            // never reread after it), and superseded results are discarded
+            // and retried once under the current inputs.
+            const prefetched = pcmCache.get(trackId);
+            const revision = await this.analyzeTrack(trackId, binaries, prefetched, claimCurrent);
             if (!claimCurrent()) {
               pcmCache.delete(trackId);
               return;
             }
-            this.analyses.setStage(trackId, "dsp", {
-              state: "succeeded",
-              fingerprint: this.tracks.findById(trackId)!.fileFingerprint,
-              identity: dspInputIdentity({
-                beatAnchorMs: this.analyses.getBeatAnchorMs(trackId),
-                bpmMin: this.config.analysis?.bpmMin,
-                bpmMax: this.config.analysis?.bpmMax,
-              }),
-              reason: null,
-            });
+            if (revision.superseded) {
+              this.logger.warn(
+                { trackId },
+                "Analysis inputs changed during computation; discarding result and retrying under current inputs",
+              );
+              // A file change also invalidates the prefetched PCM: decode fresh.
+              pcmCache.delete(trackId);
+              const retry = await this.analyzeTrack(trackId, binaries, undefined, claimCurrent);
+              if (!claimCurrent()) {
+                return;
+              }
+              if (retry.superseded) {
+                // Inputs moved again (continuous editing): leave the
+                // evidence unpublished. The scope machinery rediscovers the
+                // track on the next run; nothing stale is stamped current.
+                this.logger.warn(
+                  { trackId },
+                  "Analysis inputs changed again; leaving evidence unpublished for the next run",
+                );
+              } else {
+                this.stampDspStage(trackId, retry);
+              }
+            } else {
+              this.stampDspStage(trackId, revision);
+            }
           }
           completed.push(trackId);
         } catch (error) {
@@ -363,7 +386,7 @@ export class AnalysisCoordinator {
       );
     } finally {
       // Pending decodes own temporary files and must settle before shutdown completes.
-      await Promise.allSettled(pcmCache.values());
+      await Promise.allSettled([...pcmCache.values()].map((entry) => entry.pcm));
     }
   }
 
@@ -392,12 +415,30 @@ export class AnalysisCoordinator {
     }).current;
   }
 
+  /** Q02: stamp the DSP stage with the inputs the evidence was actually
+   * computed under - captured values, never reread post-computation. */
+  private stampDspStage(
+    trackId: string,
+    revision: { beatAnchorMs: number | null; fileFingerprint: string },
+  ): void {
+    this.analyses.setStage(trackId, "dsp", {
+      state: "succeeded",
+      fingerprint: revision.fileFingerprint,
+      identity: dspInputIdentity({
+        beatAnchorMs: revision.beatAnchorMs,
+        bpmMin: this.config.analysis?.bpmMin,
+        bpmMax: this.config.analysis?.bpmMax,
+      }),
+      reason: null,
+    });
+  }
+
   private async analyzeTrack(
     trackId: string,
     binaries: FfmpegBinaries | null,
-    preloaded?: Promise<PcmAudio>,
+    preloaded?: { pcm: Promise<PcmAudio>; fingerprint: string },
     claimCurrent?: () => boolean,
-  ): Promise<void> {
+  ): Promise<{ beatAnchorMs: number | null; fileFingerprint: string; superseded: boolean }> {
     const track = this.tracks.findById(trackId);
     if (!track) {
       throw new DomainError("TRACK_NOT_FOUND", `No track with id ${trackId}`);
@@ -405,9 +446,16 @@ export class AnalysisCoordinator {
     if (track.fileMissing) {
       throw new DomainError("AUDIO_FILE_UNAVAILABLE", `${track.title} is marked missing`);
     }
-    const pcm = await (preloaded ??
+    // Q02: capture the input revision BEFORE any expensive work. The
+    // prefetched fingerprint (observed when its decode was queued) is
+    // authoritative when present - the PCM belongs to those bytes.
+    const inputRevision = {
+      beatAnchorMs: this.analyses.getBeatAnchorMs(trackId),
+      fileFingerprint: preloaded?.fingerprint ?? track.fileFingerprint,
+    };
+    const pcm = await (preloaded?.pcm ??
       loadPcmForAnalysis(track.filePath, this.runner, binaries, this.abort.signal));
-    const anchor = this.analyses.getBeatAnchorMs(trackId);
+    const anchor = inputRevision.beatAnchorMs;
     // Reference locks are manual/published assertions only. The analyzed
     // writeback echo is the analyzer's own result — passing it back as a
     // reference would store an input the freshness contract (correctly)
@@ -459,7 +507,24 @@ export class AnalysisCoordinator {
         { trackId },
         "Analysis claim lost during DSP/loudness; discarding result without writing evidence",
       );
-      return;
+      return { ...inputRevision, superseded: false };
+    }
+    // Q02 (12 October roadmap): if any input the evidence was computed
+    // under changed during the subprocess window, DISCARD the result
+    // instead of publishing it under a post-hoc identity. The caller
+    // retries under the current inputs.
+    const currentTrack = this.tracks.findById(trackId);
+    const currentReferenceBpm =
+      currentTrack?.bpm != null &&
+      (currentTrack.bpmSource === "published" || currentTrack.bpmSource === "manual")
+        ? currentTrack.bpm
+        : undefined;
+    const superseded =
+      this.analyses.getBeatAnchorMs(trackId) !== inputRevision.beatAnchorMs ||
+      currentTrack?.fileFingerprint !== inputRevision.fileFingerprint ||
+      currentReferenceBpm !== referenceBpm;
+    if (superseded) {
+      return { ...inputRevision, superseded: true };
     }
     this.storeResult(trackId, dsp, anchor, integratedLufs, truePeakDb, referenceBpm ?? null);
     const preferred =
@@ -478,6 +543,7 @@ export class AnalysisCoordinator {
     if (preferred) {
       this.tracks.insertAnalyzedCuesIfAbsent(trackId, preferred.suggestedCues);
     }
+    return { ...inputRevision, superseded: false };
   }
 
   private storeResult(
