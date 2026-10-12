@@ -212,8 +212,9 @@ try {
           chosen.transition.type !== storedType &&
           !entries[i]!.transitionToNext?.parameters.appliedRecipeId
         ) {
+          const reason = chosen.transition.parameters.reason;
           console.log(
-            `  ${plan.name}: join ${i} ${out.title} → ${inc.title}: stored ${storedType} → fresh plan would choose ${chosen.transition.type} (${chosen.transition.parameters.reason})  ← AUDITION if replanned`,
+            `  ${plan.name}: join ${i} ${out.title} → ${inc.title}: stored ${storedType} → fresh plan would choose ${chosen.transition.type} (${typeof reason === "string" ? reason : "-"})  ← AUDITION if replanned`,
           );
         }
       }

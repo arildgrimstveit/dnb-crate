@@ -1,10 +1,7 @@
 import * as z from "zod/v4";
 import { transitionTypeSchema } from "../transition-type.ts";
 import { renderReadinessSchema } from "../render-contracts.ts";
-import {
-  joinUnresolvedOutcomeSchema,
-  resolvedJoinContextSchema,
-} from "./resolved-join.ts";
+import { joinUnresolvedOutcomeSchema, resolvedJoinContextSchema } from "./resolved-join.ts";
 import {
   descriptorFiltersSchema,
   genreFiltersSchema,

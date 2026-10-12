@@ -282,7 +282,11 @@ describe("required transitions and strict quality", () => {
     expect(join?.recipeStatus).toBe("applied");
     expect(join?.constraintSatisfaction).toBe("satisfied");
     expect(
-      String(created.plan.entries[0]?.transitionToNext?.parameters.selectionReason ?? ""),
+      String(
+        typeof created.plan.entries[0]?.transitionToNext?.parameters.selectionReason === "string"
+          ? created.plan.entries[0]?.transitionToNext?.parameters.selectionReason
+          : "",
+      ),
     ).toContain("approved");
     const entry = created.plan.entries[0]!;
     const edited = catalog.service.updateSetPlan({

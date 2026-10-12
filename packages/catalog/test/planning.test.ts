@@ -692,7 +692,12 @@ describe("planner tempo matching", () => {
     const entries = buildEntries([a, b]);
     const params = entries[0]!.transitionToNext!.parameters;
     const context = params.resolvedJoin as
-      | { schemaVersion: number; policyVersion: number; geometry: { joinOutputAnchorMs: number; outgoingRate: number }; evidence: { outgoingFingerprint: string } }
+      | {
+          schemaVersion: number;
+          policyVersion: number;
+          geometry: { joinOutputAnchorMs: number; outgoingRate: number };
+          evidence: { outgoingFingerprint: string };
+        }
       | undefined;
     expect(context).toBeTruthy();
     // The stamped join anchor IS the next entry's timeline position - the
@@ -711,8 +716,7 @@ describe("planner tempo matching", () => {
     // explicit unresolved reason rather than stamp a resolved-looking join.
     const entries = buildEntries([gridTrack(174), gridTrack(174)]);
     const outcome = entries[0]!.transitionToNext!.parameters.joinResolution as
-      | { status: string; reason: string }
-      | undefined;
+      { status: string; reason: string } | undefined;
     expect(outcome).toBeTruthy();
     expect(outcome!.status).toBe("unresolved");
     expect(outcome!.reason).toBe("missing-evidence");

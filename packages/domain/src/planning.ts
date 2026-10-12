@@ -15,11 +15,7 @@ import type { JoinUnresolvedOutcome, ResolvedJoinContext } from "./contracts/res
 /** Q03: transition parameter values may include the stamped resolved-join
  * context or its unresolved outcome; legacy rows carry only primitives. */
 export type TransitionParameterValue =
-  | number
-  | string
-  | boolean
-  | ResolvedJoinContext
-  | JoinUnresolvedOutcome;
+  number | string | boolean | ResolvedJoinContext | JoinUnresolvedOutcome;
 export type TransitionParameterBag = Record<string, TransitionParameterValue>;
 
 export type TransitionPlan = {
