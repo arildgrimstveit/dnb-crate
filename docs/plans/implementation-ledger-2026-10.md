@@ -628,3 +628,13 @@ Both CI lanes green on `8e210fe`. Remaining Stage A: Q01 staging/cache
 remainder; Q02 strong content identity + decode canonicalization; Q09
 Windows bootstrap recipe + config initializer; wider Q07 report-schema
 versioning and CI wiring.
+
+## Quality roadmap - Stage A, fourth tranche (12 October 2026)
+
+| Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Status    | Commit(s) |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
+| Q02 strong content identity (migration 026): DSP stages carry the full-file SHA-256 + stat observed at analysis time; captured in the input revision, re-verified immediately before the commit transaction (hashing outside the Q01 boundary), stamped with every evidence write. Freshness gains a stat-assisted strong tier: trust while size/whole-ms mtime match, re-hash on drift, stale on mismatch, stat refreshed on unchanged bytes (moves do not re-analyze). Legacy rows stay weak until upgraded. Failing-first verified (stage contentHash null pre-fix); mid-byte edit with preserved weak fingerprint now re-analyzes | Delivered | `7c4f269` |
+
+Both CI lanes green on `7c4f269`. Q02 remainder: strong tier in stale-scope
+selection and workflow scheduling (explicit-track path covered), decode
+canonicalization, always-rehash verification mode.
