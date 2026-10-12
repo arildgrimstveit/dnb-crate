@@ -1,18 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  solveSetGains,
-  windowShortTermLoudness,
-  type SetGainEntry,
-} from "../src/loudness.ts";
+import { solveSetGains, windowShortTermLoudness, type SetGainEntry } from "../src/loudness.ts";
 
 describe("window-aware loudness reading (Q04)", () => {
   const series = {
     hopMs: 100,
     shortTermLufs: [
-      -13.6, -13.4, null, null, // quiet, partly silent intro
-      -8.0, -7.9, -8.1, -8.0, // body
-      -6.7, -6.8, // hot tail
+      -13.6,
+      -13.4,
+      null,
+      null, // quiet, partly silent intro
+      -8.0,
+      -7.9,
+      -8.1,
+      -8.0, // body
+      -6.7,
+      -6.8, // hot tail
     ],
   };
 

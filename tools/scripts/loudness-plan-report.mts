@@ -29,7 +29,10 @@ const Database = req("better-sqlite3") as new (
   path: string,
   options?: { readonly: boolean },
 ) => {
-  prepare: (sql: string) => { get: (...args: unknown[]) => unknown; all: (...args: unknown[]) => unknown[] };
+  prepare: (sql: string) => {
+    get: (...args: unknown[]) => unknown;
+    all: (...args: unknown[]) => unknown[];
+  };
 };
 
 const planId = process.argv[2];
@@ -62,8 +65,7 @@ if (entries.length === 0) {
   process.exit(1);
 }
 const nameRow = db.prepare(`SELECT name FROM set_plans WHERE id = ?`).get(planId) as
-  | { name: string }
-  | undefined;
+  { name: string } | undefined;
 console.log(`plan: ${nameRow?.name ?? planId} (${entries.length} entries)`);
 
 const runner = createNodeProcessRunner();
@@ -77,7 +79,15 @@ if (!binaries) {
 }
 
 const solverEntries: SetGainEntry[] = [];
-const detail: Array<Record<string, unknown>> = [];
+const detail: Array<{
+  id: string;
+  order: number;
+  title: string;
+  bodyMedianLufs: number | null;
+  bodyCoverage: number | null;
+  integratedLufs: number | null;
+  currentGainDb: number;
+}> = [];
 for (const entry of entries) {
   const track = db
     .prepare(`SELECT title, file_path, duration_ms FROM tracks WHERE id = ?`)
@@ -90,10 +100,13 @@ for (const entry of entries) {
   }
   const series = await measureLoudnessSeries(runner, binaries, track.file_path);
   const shortTermLufs = series.frames.map((frame) => frame.shortTermLufs);
-  const body = windowShortTermLoudness({ hopMs: series.hopMs, shortTermLufs }, {
-    startMs: entry.source_start_ms,
-    endMs: entry.source_end_ms,
-  });
+  const body = windowShortTermLoudness(
+    { hopMs: series.hopMs, shortTermLufs },
+    {
+      startMs: entry.source_start_ms,
+      endMs: entry.source_end_ms,
+    },
+  );
   solverEntries.push({
     id: entry.id,
     bodyShortTermLufs: body?.medianLufs ?? null,
@@ -101,6 +114,7 @@ for (const entry of entries) {
     currentGainDb: entry.gain_db,
   });
   const row = {
+    id: entry.id,
     order: entry.order_index,
     title: track.title,
     bodyMedianLufs: body?.medianLufs ?? null,
@@ -119,28 +133,40 @@ console.log(`\nsolver reference: ${solution.referenceLufs ?? "none (no loudness)
 console.log("proposed changes (attenuate-first, -6..+3 dB, peak-capped boosts):");
 let changes = 0;
 for (const gain of solution.gains) {
-  const row = detail.find((d) => d.id === gain.id || d.order === solverEntries.findIndex((e) => e.id === gain.id));
+  const row = detail.find((d) => d.id === gain.id);
   const current = solverEntries.find((e) => e.id === gain.id)!.currentGainDb;
+  if (!row) {
+    continue;
+  }
   if (!gain.matched) {
-    console.log(`  ${String(row?.order ?? "?").padStart(2)} ${row?.title ?? gain.id}: no loudness - passthrough ${current} dB`);
+    console.log(
+      `  ${String(row.order).padStart(2)} ${row.title}: no loudness - passthrough ${current} dB`,
+    );
     continue;
   }
   if (Math.abs(gain.gainDb - current) > 0.05) {
     changes += 1;
   }
   console.log(
-    `  ${String(row?.order ?? "?").padStart(2)} ${row?.title ?? gain.id}: ${current > 0 ? "+" : ""}${current} -> ${gain.gainDb > 0 ? "+" : ""}${gain.gainDb} dB${Math.abs(gain.residualLufs) > 0.05 ? `  (residual ${gain.residualLufs} LU)` : ""}`,
+    `  ${String(row.order).padStart(2)} ${row.title}: ${current > 0 ? "+" : ""}${current} -> ${gain.gainDb > 0 ? "+" : ""}${gain.gainDb} dB${Math.abs(gain.residualLufs) > 0.05 ? `  (residual ${gain.residualLufs} LU)` : ""}`,
   );
 }
-console.log(`\nentries changed: ${changes}/${solution.gains.length}  total boost: ${solution.totalBoostDb} dB`);
+console.log(
+  `\nentries changed: ${changes}/${solution.gains.length}  total boost: ${solution.totalBoostDb} dB`,
+);
 
 const report = {
   generatedAt: new Date().toISOString(),
   setPlanId: planId,
   planName: nameRow?.name ?? null,
   solution,
-  detail: detail.map((d, i) => ({ ...d, id: solverEntries[i]?.id })),
+  detail,
 };
-const out = path.join(import.meta.dirname, "..", "reports", `loudness-plan-${planId.slice(0, 8)}.json`);
+const out = path.join(
+  import.meta.dirname,
+  "..",
+  "reports",
+  `loudness-plan-${planId.slice(0, 8)}.json`,
+);
 await writeFile(out, JSON.stringify(report, null, 2));
 console.log(`report: ${path.relative(process.cwd(), out)}`);

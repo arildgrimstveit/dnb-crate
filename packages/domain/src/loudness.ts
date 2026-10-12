@@ -16,7 +16,13 @@ import type { TimeIndexedLoudness } from "./analysis-contracts.ts";
 export function windowShortTermLoudness(
   series: Pick<TimeIndexedLoudness, "hopMs" | "shortTermLufs">,
   window: { startMs: number; endMs: number },
-): { medianLufs: number; p10Lufs: number; p90Lufs: number; coverage: number; frameCount: number } | null {
+): {
+  medianLufs: number;
+  p10Lufs: number;
+  p90Lufs: number;
+  coverage: number;
+  frameCount: number;
+} | null {
   const hopMs = series.hopMs > 0 ? series.hopMs : 100;
   const first = Math.max(0, Math.ceil(window.startMs / hopMs));
   const lastExcl = Math.min(series.shortTermLufs.length, Math.ceil(window.endMs / hopMs));
@@ -131,7 +137,7 @@ export function solveSetGains(
   }
   // Candidate references: every known body value (attenuation to the
   // quiet end and everything between are covered by these extremes).
-  let best: { referenceLufs: number } & ReturnType<typeof solveFor> | null = null;
+  let best: ({ referenceLufs: number } & ReturnType<typeof solveFor>) | null = null;
   for (const candidate of known) {
     const solved = solveFor(candidate.bodyShortTermLufs);
     if (
