@@ -1,0 +1,91 @@
+{
+  "summary": {
+    "generatedAt": "2026-10-12T02:25:02.408Z",
+    "suite": "processed-deck",
+    "measureToleranceMs": 15,
+    "counts": {
+      "truePositives": 0,
+      "trueNegatives": 3,
+      "falseAlarms": 0,
+      "defectEscapes": 3,
+      "abstained": 0,
+      "infrastructureErrors": 0
+    },
+    "offsetErrorsWithinTolerance": [
+      {
+        "id": "sparse-incoming",
+        "error": 68.3,
+        "within": false
+      }
+    ],
+    "totalRuntimeMs": 51675
+  },
+  "results": [
+    {
+      "id": "aligned-equal",
+      "expected": "pass",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": 0,
+      "driftMs": 3.4,
+      "onsetCount": 63,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 7366,
+      "detail": null
+    },
+    {
+      "id": "aligned-unequal",
+      "expected": "pass",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": 0.5,
+      "driftMs": 0,
+      "onsetCount": 64,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 14842,
+      "detail": null
+    },
+    {
+      "id": "shift-40",
+      "expected": "flag",
+      "verdict": "DEFECT-ESCAPE",
+      "medianOffsetMs": 0,
+      "driftMs": 3.4,
+      "onsetCount": 63,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 7363,
+      "detail": null
+    },
+    {
+      "id": "shift-80",
+      "expected": "flag",
+      "verdict": "DEFECT-ESCAPE",
+      "medianOffsetMs": 0,
+      "driftMs": 3.4,
+      "onsetCount": 63,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 7353,
+      "detail": null
+    },
+    {
+      "id": "rate-error",
+      "expected": "flag",
+      "verdict": "DEFECT-ESCAPE",
+      "medianOffsetMs": -1.1,
+      "driftMs": 4.1,
+      "onsetCount": 65,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 7370,
+      "detail": null
+    },
+    {
+      "id": "sparse-incoming",
+      "expected": "pass",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": 11.7,
+      "driftMs": 3.4,
+      "onsetCount": 34,
+      "offsetErrorVsInjectedMs": 68.3,
+      "runtimeMs": 7381,
+      "detail": null
+    }
+  ]
+}

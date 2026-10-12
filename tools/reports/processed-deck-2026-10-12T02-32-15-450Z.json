@@ -1,0 +1,101 @@
+{
+  "summary": {
+    "generatedAt": "2026-10-12T02:32:15.450Z",
+    "suite": "processed-deck",
+    "measureToleranceMs": 15,
+    "counts": {
+      "truePositives": 1,
+      "trueNegatives": 3,
+      "falseAlarms": 0,
+      "defectEscapes": 2,
+      "abstained": 0,
+      "infrastructureErrors": 0
+    },
+    "offsetErrorsWithinTolerance": [
+      {
+        "id": "shift-40",
+        "error": 19.3,
+        "within": false
+      },
+      {
+        "id": "shift-80",
+        "error": 59.3,
+        "within": false
+      },
+      {
+        "id": "sparse-incoming",
+        "error": 55.9,
+        "within": false
+      }
+    ],
+    "totalRuntimeMs": 51710
+  },
+  "results": [
+    {
+      "id": "aligned-equal",
+      "expected": "pass",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": 0,
+      "driftMs": 3.4,
+      "onsetCount": 63,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 7380,
+      "detail": "defect cluster -20.7 ms (19% of onsets)"
+    },
+    {
+      "id": "aligned-unequal",
+      "expected": "pass",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": 0.5,
+      "driftMs": 0,
+      "onsetCount": 64,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 14852,
+      "detail": "defect cluster -20.9 ms (20% of onsets)"
+    },
+    {
+      "id": "shift-40",
+      "expected": "flag",
+      "verdict": "DEFECT-ESCAPE",
+      "medianOffsetMs": 0,
+      "driftMs": 3.4,
+      "onsetCount": 63,
+      "offsetErrorVsInjectedMs": 19.3,
+      "runtimeMs": 7391,
+      "detail": "defect cluster -20.7 ms (19% of onsets)"
+    },
+    {
+      "id": "shift-80",
+      "expected": "flag",
+      "verdict": "DEFECT-ESCAPE",
+      "medianOffsetMs": 0,
+      "driftMs": 3.4,
+      "onsetCount": 63,
+      "offsetErrorVsInjectedMs": 59.3,
+      "runtimeMs": 7342,
+      "detail": "defect cluster -20.7 ms (19% of onsets)"
+    },
+    {
+      "id": "rate-error",
+      "expected": "flag",
+      "verdict": "TRUE-POSITIVE",
+      "medianOffsetMs": 24.4,
+      "driftMs": 4.1,
+      "onsetCount": 64,
+      "offsetErrorVsInjectedMs": null,
+      "runtimeMs": 7367,
+      "detail": "defect cluster 81.3 ms (55% of onsets)"
+    },
+    {
+      "id": "sparse-incoming",
+      "expected": "pass",
+      "verdict": "TRUE-NEGATIVE",
+      "medianOffsetMs": 11.7,
+      "driftMs": 3.4,
+      "onsetCount": 34,
+      "offsetErrorVsInjectedMs": 55.9,
+      "runtimeMs": 7378,
+      "detail": "defect cluster 24.1 ms (15% of onsets)"
+    }
+  ]
+}
