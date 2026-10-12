@@ -653,3 +653,15 @@ Both CI lanes green on `830213d`. Stage A remaining: crash-recovery
 semantics for renamed-but-unrecorded artifacts; decode canonicalization +
 always-rehash mode (Q02); Windows bootstrap + config initializer (Q09);
 Q07 report-schema versioning and CI wiring.
+
+## Quality roadmap - Stage B opening (12 October 2026)
+
+| Finding                                                                                                                                                                                                                                                                                                                                                                            | Status    | Commit(s) |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
+| Q03 slice 1: versioned ResolvedJoinContext contract in domain (schemaVersion 1, policyVersion-gated rules) with explicit resolved/unresolved outcomes; geometry validated through the renderer's own piecewise rate map; stable unresolved reasons; unknown stays unknown (null confidence/coverage/derived gain); bounds overruns are outcomes, never clamps. Nine contract tests | Delivered | `13b8565` |
+| Listening evidence (owner verdicts are the calibration authority): two post-fix full renders judged "very good" - 35-track and 21-track sets on the R3 CLI path with multiple unequal-rate joins (0.9943/1.0058/1.0116), i.e. exactly the geometry class the boundary-anchoring fix repaired. First owner listening signal after the renderer corrections                          | Evidence  | -         |
+
+Both CI lanes green on `13b8565`. Q03 next slices: timeline stamps the
+contract at resolution; freeze validates feasibility against it; the
+renderer consumes it as the join authority (retiring recipeVersion as
+the alignment-validity flag).
