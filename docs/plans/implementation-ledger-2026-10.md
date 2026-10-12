@@ -588,3 +588,18 @@ T5 resolved-context remainder; T7 per-deck stems (moot for this finding,
 still useful for future attribution), final-blend checks, atempo fallback
 compensation, acrossfade boundary note; pilot sub-bar geometric offsets;
 Batch D steps 1-2/5.
+
+## Quality roadmap - Stage A, first tranche (12 October 2026)
+
+Backlog pointer: docs/plans/quality-roadmap-2026-10-12.md (ACTIVE HANDOFF).
+
+| Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Status    | Commit(s)                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------- |
+| Roadmap + follow-up findings landed; README points at the roadmap; sparse-incoming fixture no longer claims an uninjected offset (Q07 fixture truth)                                                                                                                                                                                                                                                                                                                                                                                     | Delivered | `99a826a`, `f63967c`, `8a371a5` |
+| Q01 first slice: publishUnderClaim no longer holds a transaction across the awaited publication. Row-level publish guard (migration 025); unrelated same-connection writes survive failed publication (failing-first, verified red as reproduced); same-process cancellation declines mid-publication; markCancelled/failRunningAsInterrupted respect/sweep the guard; T3 cross-process trial upgraded to the guard-respecting competitor (child write affects ZERO rows mid-publish, may act only after; winner bytes intact both ways) | Fixed     | `dd35263`                       |
+| Q03/Q08 focused fix: version-2 preview incoming anchor now piecewise (slicePreview returns incomingTimelineStartMs = sliced outgoing OUTPUT length - overlap); whole-window division removed from the caller. Failing-first at the roadmap's exact numbers (11,097.899326 red -> 11,034.483 green); v1 behavior unchanged                                                                                                                                                                                                                | Fixed     | `ce79212`                       |
+
+Both CI lanes green on `ce79212`. Open in Stage A: Q01 remainder
+(generation-owned staging paths, cache-entry publication, one-transaction
+analysis commit), Q02 identity + the reproduced in-flight anchor-revision
+race, Q09 early capability/docs, Q07 exit/calibration/assertion gates.
