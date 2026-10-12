@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { AppConfig, SetPlanV1 } from "@dnb-crate/domain";
+import type { AppConfig, ResolvedJoinContext, SetPlanV1 } from "@dnb-crate/domain";
 import {
   AUDIO_ENGINE_ID,
   DSP_ANALYZER_NAME,
@@ -721,6 +721,214 @@ describe("render jobs", () => {
     await expect
       .poll(async () => readdir(stagingDir).catch(() => [] as string[]), { timeout: 5_000 })
       .toEqual([]);
+  });
+
+  it("a resolved-join contract alone pins placement; without it the renderer re-aligns (Q03 retirement)", async () => {
+    // Corpus-derived discrimination: an incoming window placed ~40 ms off
+    // its own beat grid is HEALED by render-time alignment - unless the
+    // join carries resolution evidence. The stamped resolved-join context
+    // is that evidence on its own, with no legacy recipeVersion flag.
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-q03-retire-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
+    await writeSineWav(path.join(library, "alpha.wav"), {
+      title: "Alpha",
+      artist: "A",
+      durationMs: 60_000,
+    });
+    await writeSineWav(path.join(library, "bravo.wav"), {
+      title: "Bravo",
+      artist: "B",
+      durationMs: 60_000,
+    });
+    await catalog.service.scanLibrary();
+    const tracks = catalog.service.searchTracks({ limit: 10 }).tracks;
+    const alpha = tracks.find((item) => item.title === "Alpha")!;
+    const bravo = tracks.find((item) => item.title === "Bravo")!;
+    const beat = 60_000 / 174;
+    const beats: number[] = [];
+    for (let k = 0; k < 160; k++) beats.push(Number((k * beat).toFixed(3)));
+    const gridFor = (id: string) => {
+      catalog.analyses.upsert({
+        trackId: id,
+        analyzerName: DSP_ANALYZER_NAME,
+        analyzerVersion: "3.13.0",
+        bpm: 174,
+        bpmConfidence: 0.95,
+        bpmRaw: 174,
+        referenceBpm: null,
+        beatTimesMs: beats,
+        downbeatTimesMs: beats.filter((_, i) => i % 4 === 0),
+        gridRejected: false,
+        gridRejectionReason: null,
+        gridSource: "analyzed",
+        musicalKey: null,
+        keyConfidence: null,
+        keyMode: null,
+        camelotKey: null,
+        tempoStability: 0.95,
+        downbeatConfidence: 0.9,
+        integratedLufs: null,
+        truePeakDb: null,
+        lowBandEnergy: null,
+        midBandEnergy: null,
+        highBandEnergy: null,
+        waveformSummary: null,
+        beatAnchorMs: null,
+        descriptors: null,
+        engineRuntimeMs: 1,
+        analyzedAt: new Date().toISOString(),
+        suggestedCues: [],
+        sections: [],
+      });
+    };
+    gridFor(alpha.id);
+    gridFor(bravo.id);
+
+    const overlap = Math.round(4 * 4 * beat); // 4 bars at 174 = 5,517 ms
+    // 16 beats = 5517 ms is ON the grid; +40 ms is deliberately off it.
+    const incomingStart = 5517 + 40;
+    const { resolveJoinInputs } = await import("@dnb-crate/domain");
+    const alphaRow = catalog.repository.findById(alpha.id)!;
+    const bravoRow = catalog.repository.findById(bravo.id)!;
+    const buildPlan = (withContract: boolean): SetPlanV1 => {
+      const resolution = resolveJoinInputs({
+        outgoingEntryId: "entry-out",
+        incomingEntryId: "entry-in",
+        transitionId: "join-retire",
+        geometry: {
+          outgoingSourceStartMs: 0,
+          outgoingSourceEndMs: 10_500,
+          incomingSourceStartMs: incomingStart,
+          incomingSourceEndMs: 16_000,
+          joinOutputAnchorMs: 4_983,
+          overlapMs: overlap,
+          outgoingRate: 1,
+          incomingRate: 1,
+          phraseBarCount: 16,
+        },
+        outgoingDurationMs: alphaRow.durationMs,
+        incomingDurationMs: bravoRow.durationMs,
+        alignment: {
+          mode: "bar",
+          periodMs: 4 * beat,
+          downbeatOffsetMs: 0,
+          onsetLockBeats: null,
+          confidence: null,
+          coverage: null,
+        },
+        evidence: {
+          outgoingFingerprint: alphaRow.fileFingerprint ?? "",
+          incomingFingerprint: bravoRow.fileFingerprint ?? "",
+          analyzerVersion: "3.13.0",
+          gridSource: "analyzed",
+        },
+        treatment: { type: "phrase_mix", params: { targetBpm: 174, barCount: 8 } },
+        gain: { gainDb: 0, source: "derived" },
+      });
+      expect(resolution.status).toBe("resolved");
+      type Bag = Record<string, number | string | boolean | ResolvedJoinContext>;
+      const parameters = {} as Bag;
+      parameters.targetBpm = 174;
+      parameters.barCount = 16;
+      parameters.mixOutMs = 10_500 - overlap;
+      parameters.mixInMs = incomingStart;
+      parameters.incomingTrackId = bravo.id;
+      parameters.alignmentMode = "bar";
+      parameters.alignmentPeriodMs = Number((4 * beat).toFixed(3));
+      if (withContract) {
+        parameters.resolvedJoin = (resolution as { context: ResolvedJoinContext }).context;
+      }
+      return {
+        schemaVersion: 1,
+        id: crypto.randomUUID(),
+        name: `q03-retire-${withContract}`,
+        targetDurationMs: 120_000,
+        targetBpm: 174,
+        requestedArc: [
+          { atFraction: 0, targetEnergy: 5 },
+          { atFraction: 1, targetEnergy: 5 },
+        ],
+        entries: [
+          {
+            id: crypto.randomUUID(),
+            trackId: alpha.id,
+            order: 0,
+            sourceStartMs: 0,
+            sourceEndMs: 10_500,
+            timelineStartMs: 0,
+            playbackRate: 1,
+            gainDb: 0,
+            transitionToNext: {
+              id: crypto.randomUUID(),
+              type: "phrase_mix",
+              durationMs: overlap,
+              outgoingCuePointId: null,
+              incomingCuePointId: null,
+              parameters,
+            },
+          },
+          {
+            id: crypto.randomUUID(),
+            trackId: bravo.id,
+            order: 1,
+            sourceStartMs: incomingStart,
+            sourceEndMs: 16_000,
+            timelineStartMs: 10_500 - overlap,
+            playbackRate: 1,
+            gainDb: 0,
+            transitionToNext: null,
+          },
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    };
+
+    // With the contract (and NO recipeVersion): placement is honored.
+    const pinned = buildPlan(true);
+    expect(pinned.entries[0]!.transitionToNext!.parameters.resolvedJoin).toBeTruthy();
+    expect(pinned.entries[0]!.transitionToNext!.parameters.recipeVersion).toBeUndefined();
+    catalog.setPlans.save(pinned, 1, {
+      seed: 1,
+      selected: [],
+      rejected: [],
+      harmonicCoverage: { knownJoins: 0, totalJoins: 0 },
+    });
+    const pinnedRender = await catalog.service.startSetRender({
+      setPlanId: pinned.id,
+      allowLowConfidence: true,
+    });
+    const pinnedDone = await catalog.service.waitForRenderJob(pinnedRender.job.id, 30_000);
+    expect(pinnedDone.status).toBe("succeeded");
+    const pinnedManifest = catalog.service.getRenderManifest(pinnedDone.id);
+    expect(pinnedManifest.tracks[1]!.sourceStartMs).toBe(incomingStart);
+
+    // Without resolution evidence: render-time alignment heals the
+    // off-grid placement - proving the contract test discriminates.
+    const unpinned = buildPlan(false);
+    catalog.setPlans.save(unpinned, 1, {
+      seed: 1,
+      selected: [],
+      rejected: [],
+      harmonicCoverage: { knownJoins: 0, totalJoins: 0 },
+    });
+    const unpinnedRender = await catalog.service.startSetRender({
+      setPlanId: unpinned.id,
+      allowLowConfidence: true,
+    });
+    const unpinnedDone = await catalog.service.waitForRenderJob(unpinnedRender.job.id, 30_000);
+    expect(unpinnedDone.status).toBe("succeeded");
+    const unpinnedManifest = catalog.service.getRenderManifest(unpinnedDone.id);
+    expect(unpinnedManifest.tracks[1]!.sourceStartMs).not.toBe(incomingStart);
   });
 
   it("reports cache hits as succeeded with their artifact at enqueue (S4)", async () => {

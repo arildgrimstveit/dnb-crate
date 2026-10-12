@@ -3,7 +3,7 @@ import { pairKey } from "./recipe.ts";
 import { exactRecipeFingerprint } from "./recipe.ts";
 import type { AutomationEvent } from "./analysis.ts";
 import type { PhraseBarCount } from "./constants.ts";
-import type { TransitionPlan } from "./planning.ts";
+import type { TransitionPlan, TransitionParameterBag } from "./planning.ts";
 
 export const APPROVED_RECIPE_STATUSES = [
   "explicit_pair_preference",
@@ -200,10 +200,28 @@ export function reusableRecipeFromJoin(input: {
     incomingDropMs: num(parameters.incomingDropMs),
     exitKind: typeof parameters.exitKind === "string" ? parameters.exitKind : null,
     automation,
-    parameters,
+    // Q03: reusable recipes capture TREATMENT parameters, not a per-plan
+    // resolution - the resolved-join context is re-stamped on application.
+    parameters: stripJoinResolution(parameters),
     engine: input.engine,
     selectedEvidence: input.selectedEvidence ?? null,
   };
+}
+
+/** Drop the stamped resolved-join state from a parameters bag: a stored
+ * recipe's parameters must stay primitives (its identity fields already
+ * describe the treatment), and application re-resolves the join. */
+export function stripJoinResolution(
+  parameters: TransitionParameterBag,
+): Record<string, number | string | boolean> {
+  const out: Record<string, number | string | boolean> = {};
+  for (const [key, value] of Object.entries(parameters)) {
+    if (key === "resolvedJoin" || key === "joinResolution") continue;
+    if (typeof value === "number" || typeof value === "string" || typeof value === "boolean") {
+      out[key] = value;
+    }
+  }
+  return out;
 }
 
 export function recipeApplicability(

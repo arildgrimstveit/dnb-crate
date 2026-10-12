@@ -1435,7 +1435,12 @@ export class RenderCoordinator {
           typeof recipe?.parameters.onsetLockBeats === "number"
             ? recipe.parameters.onsetLockBeats
             : null;
-        if (recipe?.parameters.recipeVersion === 1) {
+        // Q03 slice 2: the stamped resolved-join contract is the join
+        // authority — a resolved context skips render-time re-alignment
+        // exactly like the legacy flag. During adoption recipeVersion
+        // remains the equivalent for pre-contract plans; a later slice
+        // retires it.
+        if (recipe?.parameters.resolvedJoin != null || recipe?.parameters.recipeVersion === 1) {
           continue;
         }
         const applied = applyAlignmentOffset({

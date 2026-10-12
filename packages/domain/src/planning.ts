@@ -10,13 +10,25 @@ export type EnergyArcPoint = {
 
 export type TransitionType = "crossfade" | "phrase_mix" | "bass_swap";
 
+import type { JoinUnresolvedOutcome, ResolvedJoinContext } from "./contracts/resolved-join.ts";
+
+/** Q03: transition parameter values may include the stamped resolved-join
+ * context or its unresolved outcome; legacy rows carry only primitives. */
+export type TransitionParameterValue =
+  | number
+  | string
+  | boolean
+  | ResolvedJoinContext
+  | JoinUnresolvedOutcome;
+export type TransitionParameterBag = Record<string, TransitionParameterValue>;
+
 export type TransitionPlan = {
   id: string;
   type: TransitionType;
   durationMs: number;
   outgoingCuePointId: string | null;
   incomingCuePointId: string | null;
-  parameters: Record<string, number | string | boolean>;
+  parameters: TransitionParameterBag;
 };
 
 export type SetPlanEntry = {

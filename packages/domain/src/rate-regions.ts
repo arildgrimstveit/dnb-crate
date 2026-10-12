@@ -1,4 +1,5 @@
 import { effectivePlaybackRate } from "./tempo.ts";
+import type { TransitionParameterBag } from "./planning.ts";
 
 export type RateRegion = {
   role: "head" | "body" | "tail";
@@ -82,7 +83,7 @@ export type RateRegionsResolution = {
 };
 
 type VersionedTransition = {
-  parameters?: Record<string, number | string | boolean> | null;
+  parameters?: TransitionParameterBag | null;
 } | null;
 
 /** Plan-level timing version. Existing mixed markers keep the previous any-2 opt-in. */

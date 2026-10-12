@@ -2,6 +2,10 @@ import * as z from "zod/v4";
 import { transitionTypeSchema } from "../transition-type.ts";
 import { renderReadinessSchema } from "../render-contracts.ts";
 import {
+  joinUnresolvedOutcomeSchema,
+  resolvedJoinContextSchema,
+} from "./resolved-join.ts";
+import {
   descriptorFiltersSchema,
   genreFiltersSchema,
   stringListSchema,
@@ -88,7 +92,19 @@ export const transitionPlanSchema = z.object({
   durationMs: z.number().int().positive(),
   outgoingCuePointId: z.string().nullable(),
   incomingCuePointId: z.string().nullable(),
-  parameters: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
+  // Q03: the parameters bag may carry the versioned resolved-join context
+  // (or its explicit unresolved outcome) stamped at resolution. Legacy
+  // rows contain only primitives and stay readable; readers must narrow.
+  parameters: z.record(
+    z.string(),
+    z.union([
+      z.number(),
+      z.string(),
+      z.boolean(),
+      z.lazy(() => resolvedJoinContextSchema),
+      z.lazy(() => joinUnresolvedOutcomeSchema),
+    ]),
+  ),
 });
 
 /** One required-transition declaration. Shared by stored plans and the

@@ -42,6 +42,14 @@ export const joinUnresolvedReasonSchema = z.enum([
 
 export type JoinUnresolvedReason = z.infer<typeof joinUnresolvedReasonSchema>;
 
+export const joinUnresolvedOutcomeSchema = z.object({
+  status: z.literal("unresolved"),
+  reason: joinUnresolvedReasonSchema,
+  detail: z.string(),
+});
+
+export type JoinUnresolvedOutcome = z.infer<typeof joinUnresolvedOutcomeSchema>;
+
 export const resolvedJoinGeometrySchema = z.object({
   outgoingSourceStartMs: z.number().int().nonnegative(),
   outgoingSourceEndMs: z.number().int().positive(),
@@ -54,7 +62,8 @@ export const resolvedJoinGeometrySchema = z.object({
   overlapMs: z.number().int().positive(),
   outgoingRate: z.number().positive(),
   incomingRate: z.number().positive(),
-  phraseBarCount: phraseBarCountSchema,
+  /** null for treatments without phrase semantics (crossfade). */
+  phraseBarCount: phraseBarCountSchema.nullable(),
 });
 
 export const resolvedJoinAlignmentSchema = z.object({
@@ -72,7 +81,7 @@ export const resolvedJoinEvidenceSchema = z.object({
   outgoingFingerprint: z.string().min(1),
   incomingFingerprint: z.string().min(1),
   analyzerVersion: z.string().nullable(),
-  gridSource: z.enum(["analyzed", "reference", "manual"]).nullable(),
+  gridSource: z.enum(["analyzed", "reference", "manual", "anchor", "sidecar"]).nullable(),
 });
 
 export const resolvedJoinTreatmentSchema = z.object({
@@ -118,7 +127,7 @@ export type JoinInputs = {
     overlapMs: number;
     outgoingRate: number;
     incomingRate: number;
-    phraseBarCount: PhraseBarCount;
+    phraseBarCount: PhraseBarCount | null;
   };
   /** Track durations when known: bounds are validated against them. */
   outgoingDurationMs?: number | null;
@@ -135,7 +144,7 @@ export type JoinInputs = {
     outgoingFingerprint: string;
     incomingFingerprint: string;
     analyzerVersion: string | null;
-    gridSource: "analyzed" | "reference" | "manual" | null;
+    gridSource: "analyzed" | "reference" | "manual" | "anchor" | "sidecar" | null;
   };
   treatment: {
     type: "crossfade" | "phrase_mix" | "bass_swap";

@@ -686,6 +686,39 @@ describe("planner tempo matching", () => {
     expect(entries[0]!.transitionToNext!.parameters.recipeVersion).toBe(1);
   });
 
+  it("stamps the resolved-join contract at resolution (Q03)", () => {
+    const a = { ...gridTrack(174), fileFingerprint: "fp-alpha" };
+    const b = { ...gridTrack(174, 5), fileFingerprint: "fp-bravo" };
+    const entries = buildEntries([a, b]);
+    const params = entries[0]!.transitionToNext!.parameters;
+    const context = params.resolvedJoin as
+      | { schemaVersion: number; policyVersion: number; geometry: { joinOutputAnchorMs: number; outgoingRate: number }; evidence: { outgoingFingerprint: string } }
+      | undefined;
+    expect(context).toBeTruthy();
+    // The stamped join anchor IS the next entry's timeline position - the
+    // same anchor the renderer honors since 06371da.
+    expect(context!.geometry.joinOutputAnchorMs).toBeCloseTo(entries[1]!.timelineStartMs, 6);
+    expect(context!.geometry.outgoingRate).toBe(1);
+    expect(context!.evidence.outgoingFingerprint).toBe("fp-alpha");
+    expect(context!.schemaVersion).toBe(1);
+    expect(context!.policyVersion).toBe(1);
+    // During adoption the legacy flag is stamped beside the contract.
+    expect(params.recipeVersion).toBe(1);
+  });
+
+  it("records an unresolved outcome when join evidence is missing (Q03)", () => {
+    // gridTrack carries no fingerprint: the contract must record the
+    // explicit unresolved reason rather than stamp a resolved-looking join.
+    const entries = buildEntries([gridTrack(174), gridTrack(174)]);
+    const outcome = entries[0]!.transitionToNext!.parameters.joinResolution as
+      | { status: string; reason: string }
+      | undefined;
+    expect(outcome).toBeTruthy();
+    expect(outcome!.status).toBe("unresolved");
+    expect(outcome!.reason).toBe("missing-evidence");
+    expect(entries[0]!.transitionToNext!.parameters.resolvedJoin).toBeUndefined();
+  });
+
   it("extends a drop-anchored tail to 90s without moving mix-in", () => {
     const track = gridTrack(174, 5, { audioEndMs: 240_000, mixOutMs: 160_000 });
     track.durationMs = 240_000;

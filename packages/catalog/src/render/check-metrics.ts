@@ -7,14 +7,15 @@ import {
 } from "@dnb-crate/domain";
 
 export function paramNumber(
-  parameters: Record<string, number | string | boolean> | undefined,
+  parameters: Record<string, number | string | boolean | object> | undefined,
   key: string,
 ): number | null {
-  return finiteNumber(parameters?.[key]);
+  const value = parameters?.[key];
+  return typeof value === "number" ? finiteNumber(value) : null;
 }
 
 export function paramString(
-  parameters: Record<string, number | string | boolean> | undefined,
+  parameters: Record<string, number | string | boolean | object> | undefined,
   key: string,
 ): string | null {
   const value = parameters?.[key];

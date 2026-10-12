@@ -30,6 +30,8 @@ import {
   chooseMixIntent,
   choosePhraseShape,
   RENDERER_VERSION,
+  resolveJoinInputs,
+  stripJoinResolution,
   type CuePoint,
   type PhraseBarCount,
   type RecipeLiveIdentity,
@@ -62,6 +64,9 @@ import {
 
 export type TimelineAnalysis = {
   gridOk: boolean;
+  /** Q03 evidence passthrough for the resolved-join contract. */
+  analyzerVersion?: string | null;
+  gridSource?: "analyzed" | "reference" | "manual" | "anchor" | "sidecar" | null;
   bpm: number | null;
   canonicalBpm: number | null;
   bpmHint: number | null;
@@ -916,6 +921,10 @@ export function buildEntries(
   });
 
   const rateVersion = 2;
+  // Q03: entry ids are generated BEFORE the loop so the resolved-join
+  // contract can stamp the exact pair identity the built entries carry
+  // (fresh builds otherwise mint their ids at push time).
+  const entryIds = tracks.map((track) => existing?.get(track.id)?.id ?? crypto.randomUUID());
   const entries: SetPlanEntry[] = [];
   let timeline = 0;
   for (let index = 0; index < tracks.length; index += 1) {
@@ -951,7 +960,113 @@ export function buildEntries(
         : ({ ...baseTransition.parameters } as Record<string, number | string | boolean>);
     if (alignmentInvalidated && priorParameters != null) {
       delete priorParameters.recipeVersion;
+      // S1 mutual exclusion covers the Q03 contract too: an invalidated
+      // placement must not carry a stale resolved-join context.
+      delete priorParameters.resolvedJoin;
+      delete priorParameters.joinResolution;
     }
+    const playbackRate = rateFromPrior[index]
+      ? (existing?.get(track.id)?.playbackRate as number)
+      : (rates[index] ?? 1);
+    // Q03 slice 2: the join's OUTPUT anchor is known before the parameters
+    // are finalized (same accumulation the entry loop performs), so the
+    // resolved-join contract can be stamped at resolution time.
+    const prevOverlap = index > 0 ? overlapFor(entries[index - 1]!.transitionToNext) : 0;
+    const playableSelf = playableOutputMs(
+      { sourceStartMs, sourceEndMs, playbackRate, transitionToNext: baseTransition },
+      prevOverlap,
+      rateVersion,
+    );
+    const clampedOverlap =
+      baseTransition === null
+        ? 0
+        : Math.min(overlapFor(baseTransition), Math.max(0, playableSelf - 1));
+    const joinAnchorMs = timeline + playableSelf - clampedOverlap;
+    // Resolve the join contract for this transition (Q03): geometry through
+    // the piecewise rate map, alignment from the resolved window, evidence
+    // from the track rows. Unresolved outcomes are recorded explicitly —
+    // they never silently degrade into a resolved-looking join.
+    const nextTrack = tracks[index + 1];
+    const nextPrior = nextTrack ? existing?.get(nextTrack.id) : undefined;
+    const nextResolvedWindow = windows[index + 1];
+    const incomingStartMs =
+      nextPrior?.sourceStartMs ?? nextResolvedWindow?.sourceStartMs ?? undefined;
+    const incomingEndMs = nextPrior?.sourceEndMs ?? nextResolvedWindow?.sourceEndMs ?? undefined;
+    const paramNum = (key: string): number | null => {
+      const value = priorParameters?.[key];
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    };
+    const targetBpmNum = paramNum("targetBpm");
+    const joinResolutionOutcome =
+      baseTransition === null || priorParameters === null || !nextTrack || isLast
+        ? null
+        : resolveJoinInputs({
+            outgoingEntryId: entryIds[index]!,
+            incomingEntryId: entryIds[index + 1]!,
+            transitionId: baseTransition.id,
+            geometry: {
+              outgoingSourceStartMs: sourceStartMs,
+              outgoingSourceEndMs: sourceEndMs,
+              incomingSourceStartMs: incomingStartMs ?? 0,
+              incomingSourceEndMs: incomingEndMs ?? 0,
+              joinOutputAnchorMs: joinAnchorMs,
+              overlapMs: baseTransition.durationMs,
+              outgoingRate: playbackRate,
+              incomingRate: rateFromPrior[index + 1]
+                ? ((existing?.get(nextTrack.id)?.playbackRate as number) ?? 1)
+                : (rates[index + 1] ?? 1),
+              phraseBarCount:
+                paramNum("barCount") === 8 ||
+                paramNum("barCount") === 16 ||
+                paramNum("barCount") === 32
+                  ? (paramNum("barCount") as 8 | 16 | 32)
+                  : null,
+            },
+            outgoingDurationMs: track.durationMs,
+            incomingDurationMs: nextTrack.durationMs,
+            alignment: {
+              mode:
+                priorParameters.alignmentMode === "beat" ||
+                priorParameters.alignmentMode === "phrase"
+                  ? priorParameters.alignmentMode
+                  : "bar",
+              periodMs:
+                paramNum("alignmentPeriodMs") ??
+                (targetBpmNum != null && targetBpmNum > 0
+                  ? (4 * 60_000) / targetBpmNum
+                  : (4 * 60_000) / 174),
+              downbeatOffsetMs: paramNum("downbeatOffsetMs") ?? 0,
+              onsetLockBeats:
+                typeof priorParameters.onsetLockBeats === "number"
+                  ? priorParameters.onsetLockBeats
+                  : null,
+              confidence: null,
+              coverage: null,
+            },
+            evidence: {
+              outgoingFingerprint: track.fileFingerprint ?? "",
+              incomingFingerprint: nextTrack.fileFingerprint ?? "",
+              analyzerVersion: track.analysis?.analyzerVersion ?? null,
+              gridSource: track.analysis?.gridSource ?? null,
+            },
+            treatment: {
+              type: baseTransition.type,
+              params: stripJoinResolution(priorParameters),
+            },
+            // The join context records the OUTGOING deck's gain decision;
+            // the joint two-deck gain policy is Q04.
+            gain: {
+              gainDb:
+                typeof prior?.gainDb === "number"
+                  ? prior.gainDb
+                  : levelMatchGainDb(
+                      track.analysis?.integratedLufs,
+                      referenceLufs,
+                      track.analysis?.truePeakDb,
+                    ).gainDb,
+              source: typeof prior?.gainDb === "number" ? "pinned" : "derived",
+            },
+          });
     const transitionToNext =
       baseTransition === null || priorParameters === null
         ? null
@@ -966,6 +1081,16 @@ export function buildEntries(
               // all. Without the flag, the renderer's alignment loop runs
               // and recomputes for the new window.
               ...(alignmentInvalidated ? {} : { recipeVersion: 1 }),
+              // Q03 slice 2: the versioned resolved-join contract, stamped
+              // at resolution. During adoption the legacy recipeVersion flag
+              // is still stamped beside it; the renderer accepts EITHER as
+              // resolution evidence, and a later slice retires the flag.
+              ...(joinResolutionOutcome?.status === "resolved"
+                ? { resolvedJoin: joinResolutionOutcome.context }
+                : {}),
+              ...(joinResolutionOutcome?.status === "unresolved"
+                ? { joinResolution: joinResolutionOutcome }
+                : {}),
               mixOutMs:
                 sourceEndMs -
                 outputToSourceMs(
@@ -982,9 +1107,6 @@ export function buildEntries(
               incomingTrackId: tracks[index + 1]!.id,
             },
           };
-    const playbackRate = rateFromPrior[index]
-      ? (existing?.get(track.id)?.playbackRate as number)
-      : (rates[index] ?? 1);
     const matched = levelMatchGainDb(
       track.analysis?.integratedLufs,
       referenceLufs,
@@ -1008,7 +1130,7 @@ export function buildEntries(
             parameters: { ...transitionWithGain.parameters, rateRegionsVersion: 2 as const },
           };
     entries.push({
-      id: prior?.id ?? crypto.randomUUID(),
+      id: entryIds[index]!,
       trackId: track.id,
       order: index,
       sourceStartMs,
@@ -1021,14 +1143,7 @@ export function buildEntries(
       gainDb,
       transitionToNext: stampedTransition,
     });
-    const prevOverlap = index > 0 ? overlapFor(entries[index - 1]!.transitionToNext) : 0;
-    const playable = playableOutputMs(
-      { sourceStartMs, sourceEndMs, playbackRate, transitionToNext: stampedTransition },
-      prevOverlap,
-      rateVersion,
-    );
-    const overlap = isLast ? 0 : Math.min(overlapFor(transitionToNext), Math.max(0, playable - 1));
-    timeline += playable - overlap;
+    timeline = joinAnchorMs;
   }
   return entries;
 }
@@ -1078,6 +1193,10 @@ export function analysisToTimeline(
     downbeatConfidence?: number | null;
     tempoStability?: number | null;
     beatTimesMs?: number[];
+    /** Q03 evidence passthrough: the analyzer version and grid source the
+     * resolved-join contract stamps (null stays null — unknown). */
+    analyzerVersion?: string | null;
+    gridSource?: "analyzed" | "reference" | "manual" | "anchor" | "sidecar" | null;
     descriptors: {
       suggestedEnergy: number | null;
       integratedLufs?: number | null;
@@ -1152,6 +1271,8 @@ export function analysisToTimeline(
   const hint = resolveBpmHint(analysis);
   return {
     gridOk: !analysis.gridRejected && (analysis.bpmConfidence ?? 0) >= MIN_ANALYSIS_CONFIDENCE,
+    analyzerVersion: analysis.analyzerVersion ?? null,
+    gridSource: analysis.gridSource ?? null,
     manualMixInMs:
       cues.find((cue) => cue.source === "manual" && cue.type === "intro_start")?.positionMs ?? null,
     manualMixOutMs:
