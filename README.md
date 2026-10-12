@@ -15,7 +15,7 @@ Read in this order:
 1. [Architecture](docs/architecture.md) — packages, data flow, where things live.
 2. [Folder to first mix](docs/first-mix.md) — prerequisites (Node, FFmpeg; Rubber Band and KeyFinder optional), config/data locations, and the first end-to-end mix.
 3. [CLI reference](docs/cli.md) — every command, including worker ownership (`--wait` runs work in-process; without it a live worker must exist).
-4. The **active backlog**: [implementation review, 12 October 2026](docs/plans/implementation-review-2026-10-12.md) — findings T1–T8 and the next steps for automatic join quality, with no saved-join prerequisite. Earlier reviews and the commit ledger under `docs/plans/` are historical snapshots.
+4. The **active backlog**: [repository review and quality roadmap, 12 October 2026](docs/plans/quality-roadmap-2026-10-12.md) — the architecture review, reconciled implementation status, and Q01–Q12 handoff for reliable automatic joins, consistent loudness, vocal awareness and easier setup. Earlier reviews and the commit ledger under `docs/plans/` are historical snapshots.
 
 Musical policy (template thresholds, triggers, pin overrides) lives in [mixing.md](docs/mixing.md); [scoring.md](docs/scoring.md) explains scoring and refers there. Verification semantics (stored-grid gate, source-deck probes, mix-quality scan, listening approval) live in [rendering.md](docs/rendering.md). Known limits: audio-verifier findings are advisory; safe-test commands are in each package's `package.json` scripts (`pnpm test`, `typecheck`, `lint`, `fix`).
 

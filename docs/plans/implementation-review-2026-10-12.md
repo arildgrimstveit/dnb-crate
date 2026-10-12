@@ -1,6 +1,6 @@
 # Implementation review and next steps — 12 October 2026
 
-> **Status: ACTIVE BACKLOG.** Reviews the implementation through `bd9f0043afbf0d70d7a0df03ba76472d3718b41f`, plus the real-library runner/report committed as `bcb7bce` during this review, against the [11 October review](implementation-review-2026-10-11.md). Findings T1–T8 below qualify the completion claims in the [implementation ledger](implementation-ledger-2026-10.md). Application code was not changed by this review.
+> **Status: HISTORICAL SNAPSHOT.** Superseded by the [repository review and quality roadmap](quality-roadmap-2026-10-12.md), which reconciles the subsequent T1–T8 delivery tranches through `cb8986c`. This snapshot reviews the implementation through `bd9f0043afbf0d70d7a0df03ba76472d3718b41f`, plus the real-library runner/report committed as `bcb7bce` during this review, against the [11 October review](implementation-review-2026-10-11.md). Findings T1–T8 below qualify the completion claims in the [implementation ledger](implementation-ledger-2026-10.md). Application code was not changed by this review.
 
 ## Recommendation
 
