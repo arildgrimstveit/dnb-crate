@@ -320,7 +320,7 @@ export class RenderJobRepository {
         `UPDATE render_jobs SET
           status = 'cancelled', progress_message = 'cancelled',
           error_code = NULL, error_message = 'Cancelled by user', retryable = 0, completed_at = ?
-         WHERE id = ? AND status IN ('queued', 'running')`,
+         WHERE id = ? AND status IN ('queued', 'running') AND publish_guard IS NULL`,
       )
       .run(nowIso(), id);
     return this.require(id);
@@ -339,19 +339,31 @@ export class RenderJobRepository {
   }
 
   /**
-   * T3 (12 October review): ownership-conditioned cross-process publication.
-   * The claim check and the filesystem rename are made atomic with respect
-   * to the job row by holding SQLite's write lock (BEGIN IMMEDIATE) across
-   * both: a competing process — takeover recovery re-marking the job, or
-   * the new owner re-claiming and publishing — cannot interleave between
-   * the check and the publish, because its own write blocks on the same
-   * database file lock. This closes the check/rename race a plain
-   * re-check-after-measurement leaves open.
+   * T3 (12 October review) + Q01 (12 October roadmap): ownership-conditioned
+   * cross-process publication WITHOUT holding a transaction across the
+   * awaited filesystem work. The old BEGIN IMMEDIATE-across-await shape
+   * executed unrelated same-connection writes inside the publication
+   * transaction and discarded them on rollback (Q01 reproduced), and a
+   * same-process cancellation could land inside the open transaction.
+   *
+   * Protocol (row-level guard, three phases, no awaits inside any
+   * transaction):
+   *   1. Acquire the guard atomically: a single conditional UPDATE flips
+   *      publish_guard to this owner only while the claim is current and no
+   *      other guard is held. Competing real writers (cancel, restart
+   *      recovery, re-claim) condition on publish_guard IS NULL and can
+   *      therefore not depose the publisher between its check and its
+   *      rename.
+   *   2. Run the publish callback with NO transaction open. Unrelated
+   *      writes on the shared connection commit independently and survive
+   *      a publication failure.
+   *   3. Release the guard conditionally. A guard lost in phase 2 (only
+   *      possible via stale-guard recovery long after a crash) means this
+   *      publisher is deposed: return false without further writes.
    *
    * Returns true when the claim held and the artifact was published; false
    * when the claim was already lost (nothing is written). The publish
-   * callback runs while the write lock is held — it must be fast and must
-   * not acquire the same database.
+   * callback's errors propagate after the guard is released.
    */
   async publishUnderClaim(
     jobId: string,
@@ -361,36 +373,50 @@ export class RenderJobRepository {
     if (ownerToken == null) {
       return false;
     }
-    this.db.exec("BEGIN IMMEDIATE");
+    const guarded = this.db
+      .prepare(
+        `UPDATE render_jobs SET publish_guard = ?, publish_guard_at = ?
+          WHERE id = ? AND status = 'running' AND claimed_by IS ? AND publish_guard IS NULL`,
+      )
+      .run(ownerToken, nowIso(), jobId, ownerToken);
+    if (guarded.changes !== 1) {
+      return false;
+    }
     try {
-      const row = this.db
-        .prepare(`SELECT status, claimed_by FROM render_jobs WHERE id = ?`)
-        .get(jobId) as { status: string; claimed_by: string | null } | undefined;
-      const current = Boolean(row && row.status === "running" && row.claimed_by === ownerToken);
-      if (!current) {
-        this.db.exec("ROLLBACK");
-        return false;
-      }
       await publish();
-      this.db.exec("COMMIT");
-      return true;
     } catch (error) {
-      try {
-        this.db.exec("ROLLBACK");
-      } catch {
-        // already rolled back or connection-level failure
-      }
+      // The artifact did not complete: release the guard so recovery and
+      // cancellation can act on the job again. The failed publication must
+      // not leave the row permanently guarded.
+      this.db
+        .prepare(
+          `UPDATE render_jobs SET publish_guard = NULL, publish_guard_at = NULL
+          WHERE id = ? AND publish_guard = ?`,
+        )
+        .run(jobId, ownerToken);
       throw error;
     }
+    const released = this.db
+      .prepare(
+        `UPDATE render_jobs SET publish_guard = NULL, publish_guard_at = NULL
+        WHERE id = ? AND publish_guard = ?`,
+      )
+      .run(jobId, ownerToken);
+    return released.changes === 1;
   }
 
   failRunningAsInterrupted(): number {
+    // Q01: an orphaned publish_guard means a publisher died mid-publication
+    // (the artifact may or may not have landed). Sweep it with the job:
+    // restart recovery marks the job interrupted/retryable and clears the
+    // guard so a new claim can proceed.
     const result = this.db
       .prepare(
         `UPDATE render_jobs SET
           status = 'failed', error_code = 'RENDER_INTERRUPTED',
           error_message = 'Server restarted while this render was running',
-          retryable = 1, progress_message = 'interrupted', completed_at = ?
+          retryable = 1, progress_message = 'interrupted', completed_at = ?,
+          publish_guard = NULL, publish_guard_at = NULL
          WHERE status = 'running'`,
       )
       .run(nowIso());

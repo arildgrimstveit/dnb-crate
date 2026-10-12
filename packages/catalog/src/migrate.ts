@@ -26,6 +26,7 @@ import { migration021AnalysisForceDsp } from "./migrations/021_analysis_force_ds
 import { migration022RenderJobClaimFencing } from "./migrations/022_render_job_claim_fencing.ts";
 import { migration023JobClaimFencingAll } from "./migrations/023_job_claim_fencing_all.ts";
 import { migration024EntryRateSource } from "./migrations/024_entry_rate_source.ts";
+import { migration025RenderPublishGuard } from "./migrations/025_render_publish_guard.ts";
 
 export type Migration = {
   id: number;
@@ -59,6 +60,7 @@ const MIGRATIONS: Migration[] = [
   migration022RenderJobClaimFencing,
   migration023JobClaimFencingAll,
   migration024EntryRateSource,
+  migration025RenderPublishGuard,
 ];
 
 export function runMigrations(db: SqliteDatabase): void {

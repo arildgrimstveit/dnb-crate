@@ -506,6 +506,83 @@ describe("worker ownership fencing (review item 5)", () => {
     winner.release();
   }, 30_000);
 
+  it("an unrelated same-connection write survives a failed publication (Q01)", async () => {
+    const root = path.join(os.tmpdir(), `dnb-q1-rollback-${crypto.randomUUID()}`);
+    await mkdir(root, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      useFakeFfmpeg: true,
+      passive: true,
+    });
+    cleanups.push(() => catalog.close());
+
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const { writeSineWav: writeWav } = await import("../src/index.ts");
+    await writeWav(path.join(library, "a.wav"), { title: "Alpha", durationMs: 2000 });
+    await catalog.service.scanLibrary();
+    const trackId = catalog.repository.listAll()[0]!.id;
+
+    const planId = crypto.randomUUID();
+    catalog.setPlans.save(
+      {
+        schemaVersion: 1,
+        id: planId,
+        name: "q1-rollback",
+        targetDurationMs: 15_000,
+        targetBpm: 174,
+        requestedArc: [
+          { atFraction: 0, targetEnergy: 3 },
+          { atFraction: 1, targetEnergy: 6 },
+        ],
+        entries: [
+          {
+            id: crypto.randomUUID(),
+            trackId,
+            order: 0,
+            sourceStartMs: 0,
+            sourceEndMs: 2000,
+            timelineStartMs: 0,
+            playbackRate: 1,
+            gainDb: 0,
+            transitionToNext: null,
+          },
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      1,
+      { seed: 1, selected: [], rejected: [], harmonicCoverage: { knownJoins: 0, totalJoins: 0 } },
+    );
+
+    const jobId = crypto.randomUUID();
+    catalog.renderJobs.insertQueued({ id: jobId, kind: "full", setPlanId: planId });
+    catalog.renderJobs.claimNextQueued("pub-owner");
+
+    const unrelatedId = crypto.randomUUID();
+    let publishError: unknown = null;
+    try {
+      await catalog.renderJobs.publishUnderClaim(jobId, "pub-owner", async () => {
+        // An unrelated acknowledged write lands on the SHARED connection
+        // while the publication is in flight. better-sqlite3 writes are
+        // synchronous, so under the old protocol this INSERT executed
+        // inside the publisher's open BEGIN IMMEDIATE and the publication
+        // rollback discarded it (Q01 reproduced: row count 1 -> 0).
+        catalog.renderJobs.insertQueued({ id: unrelatedId, kind: "full", setPlanId: planId });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        throw new Error("simulated publish failure");
+      });
+    } catch (error) {
+      publishError = error;
+    }
+    expect(publishError).toBeInstanceOf(Error);
+    expect((publishError as Error).message).toBe("simulated publish failure");
+    // The unrelated write must survive the failed publication untouched.
+    expect(catalog.renderJobs.require(unrelatedId).status).toBe("queued");
+    // The publishing job itself stays running for normal failure handling.
+    expect(catalog.renderJobs.require(jobId).status).toBe("running");
+    expect(catalog.renderJobs.isClaimCurrent(jobId, "pub-owner")).toBe(true);
+  });
+
   it("publication is claim-atomic across processes: no interleaving between check and rename (T3)", async () => {
     const root = path.join(os.tmpdir(), `dnb-t3-race-${crypto.randomUUID()}`);
     await mkdir(root, { recursive: true });
@@ -589,13 +666,16 @@ describe("worker ownership fencing (review item 5)", () => {
     expect(renamed1).toBe(false);
     expect(await readFile(winnerFile1, "utf8")).toBe("winner-bytes-1");
 
-    // Scenario 2: the takeover write is issued WHILE the publisher's
-    // transaction is open (between its claim check and its rename). The
-    // competing writer is a real CHILD PROCESS (better-sqlite3 writes are
-    // synchronous and would freeze this process's event loop) — its UPDATE
-    // blocks on the database write lock until the publisher commits,
-    // proving no cross-process recovery can interleave between check and
-    // rename.
+    // Scenario 2: the takeover write is issued WHILE the publisher is
+    // between its claim check and its rename. Q01 removed the open
+    // transaction from that window (it swallowed unrelated same-connection
+    // writes on rollback); the cross-process guarantee now rests on the
+    // row-level publish guard. The competing writer is a real CHILD
+    // PROCESS issuing the GUARD-RESPECTING recovery write (the same
+    // statement failRunningAsInterrupted uses). It completes immediately —
+    // no lock blocks it — but must affect ZERO rows while the guard is
+    // held: no cross-process recovery can depose the publisher between
+    // check and rename.
     const jobId2 = makeJob("deposed-2");
     const target2 = path.join(root, "listen-2.flac");
     let renameStarted = false;
@@ -607,33 +687,34 @@ describe("worker ownership fencing (review item 5)", () => {
     const { createRequire } = await import("node:module");
     const testRequire = createRequire(`${import.meta.dirname}/worker-owner-fencing.test.ts`);
     const modPath = testRequire.resolve("better-sqlite3");
-    const child = spawn(process.execPath, [
-      "-e",
-      `
+    const childWrite = `
       const Database = require(${JSON.stringify(modPath)});
       const db = new Database(${JSON.stringify(dbPath)});
       process.stdin.resume();
       process.stdin.on("data", () => {
         try {
-          db.prepare("UPDATE render_jobs SET status = 'failed', error_code = 'RENDER_INTERRUPTED', claimed_by = NULL WHERE id = ?").run(${JSON.stringify(jobId2)});
-          process.stdout.write("done");
+          const result = db.prepare("UPDATE render_jobs SET status = 'failed', error_code = 'RENDER_INTERRUPTED', claimed_by = NULL, publish_guard = NULL, publish_guard_at = NULL WHERE id = ? AND status = 'running' AND publish_guard IS NULL").run(${JSON.stringify(jobId2)});
+          process.stdout.write("done:" + result.changes);
         } catch (error) {
           process.stdout.write("error:" + (error && error.message));
         }
       });
-    `,
-    ]);
-    const childDone = new Promise<string>((resolve) => {
+    `;
+    const child = spawn(process.execPath, ["-e", childWrite]);
+    const childResult = ((): Promise<string> => {
       let out = "";
-      child.stdout.on("data", (chunk: Buffer) => {
-        out += chunk.toString();
-        if (out.includes("done") || out.includes("error:")) {
-          resolve(out.trim());
-        }
+      return new Promise((resolve) => {
+        child.stdout.on("data", (chunk: Buffer) => {
+          out += chunk.toString();
+          if (out.includes("done:") || out.includes("error:")) {
+            resolve(out.trim());
+          }
+        });
       });
-    });
+    })();
+    const childDone2 = childResult.then(() => undefined);
     // Give the child time to open its connection, then start the publish
-    // transaction with a rename that waits on our gate.
+    // with a rename that waits on our gate.
     await new Promise((resolve) => setTimeout(resolve, 250));
     const publishPromise = catalog.renderJobs.publishUnderClaim(jobId2, "deposed-2", async () => {
       renameStarted = true;
@@ -642,24 +723,117 @@ describe("worker ownership fencing (review item 5)", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(renameStarted).toBe(true);
-    // Fire the child's takeover write: it must BLOCK on the write lock.
+    // Fire the child's guard-respecting recovery write: it runs at once
+    // (nothing blocks it) but must match ZERO rows — the guard excludes
+    // recovery from the check→rename window.
     child.stdin.write("go");
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    // The child has not completed — its write is excluded by the open
-    // publish transaction.
-    expect(
-      await Promise.race([
-        childDone,
-        new Promise<string>((resolve) => setTimeout(() => resolve("__pending"), 50)),
-      ]),
-    ).toBe("__pending");
-    // Release the rename; the publish commits; the child's write proceeds.
+    expect(await childResult).toBe("done:0");
+    // The job was NOT deposed mid-publication.
+    expect(catalog.renderJobs.require(jobId2).status).toBe("running");
+    // Release the rename; the publish completes; the artifact stands.
     (releaseRename as unknown as () => void)();
     const published2 = await publishPromise;
     expect(published2).toBe(true);
-    expect(await childDone).toBe("done");
+    expect(await readFile(target2, "utf8")).toBe("deposed-published");
+    // After publication the guard is released: a recovery write MAY act
+    // on the still-running row (the caller has not yet marked it
+    // succeeded), and the winner's bytes still survive.
+    const child2 = spawn(process.execPath, ["-e", childWrite]);
+    const child2Result = ((): Promise<string> => {
+      let out = "";
+      return new Promise((resolve) => {
+        child2.stdout.on("data", (chunk: Buffer) => {
+          out += chunk.toString();
+          if (out.includes("done:") || out.includes("error:")) {
+            resolve(out.trim());
+          }
+        });
+      });
+    })();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    child2.stdin.write("go");
+    expect(await child2Result).toBe("done:1");
     child.kill();
+    child2.kill();
+    await childDone2;
     expect(catalog.renderJobs.require(jobId2).status).toBe("failed");
     expect(await readFile(target2, "utf8")).toBe("deposed-published");
   }, 60_000);
+
+  it("same-process cancellation during publication cannot depose the publisher (Q01)", async () => {
+    const root = path.join(os.tmpdir(), `dnb-q1-cancel-${crypto.randomUUID()}`);
+    await mkdir(root, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      useFakeFfmpeg: true,
+      passive: true,
+    });
+    cleanups.push(() => catalog.close());
+
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const { writeSineWav: writeWav } = await import("../src/index.ts");
+    await writeWav(path.join(library, "a.wav"), { title: "Alpha", durationMs: 2000 });
+    await catalog.service.scanLibrary();
+    const trackId = catalog.repository.listAll()[0]!.id;
+
+    const planId = crypto.randomUUID();
+    catalog.setPlans.save(
+      {
+        schemaVersion: 1,
+        id: planId,
+        name: "q1-cancel",
+        targetDurationMs: 15_000,
+        targetBpm: 174,
+        requestedArc: [
+          { atFraction: 0, targetEnergy: 3 },
+          { atFraction: 1, targetEnergy: 6 },
+        ],
+        entries: [
+          {
+            id: crypto.randomUUID(),
+            trackId,
+            order: 0,
+            sourceStartMs: 0,
+            sourceEndMs: 2000,
+            timelineStartMs: 0,
+            playbackRate: 1,
+            gainDb: 0,
+            transitionToNext: null,
+          },
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      1,
+      { seed: 1, selected: [], rejected: [], harmonicCoverage: { knownJoins: 0, totalJoins: 0 } },
+    );
+
+    const jobId = crypto.randomUUID();
+    catalog.renderJobs.insertQueued({ id: jobId, kind: "full", setPlanId: planId });
+    catalog.renderJobs.claimNextQueued("pub-owner");
+    const { writeFile } = await import("node:fs/promises");
+    const target = path.join(root, "listen.flac");
+    let renameStarted = false;
+    let releaseRename: (() => void) | null = null;
+    const renameGate = new Promise<void>((resolve) => {
+      releaseRename = resolve;
+    });
+    const publishPromise = catalog.renderJobs.publishUnderClaim(jobId, "pub-owner", async () => {
+      renameStarted = true;
+      await renameGate;
+      await writeFile(target, "published-bytes");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(renameStarted).toBe(true);
+    // Cancellation arrives mid-publication: it must DECLINE (the guarded
+    // row is excluded), not race the rename.
+    const cancelled = catalog.renderJobs.markCancelled(jobId);
+    expect(cancelled.status).toBe("running");
+    (releaseRename as unknown as () => void)();
+    await expect(publishPromise).resolves.toBe(true);
+    expect(await import("node:fs/promises").then((fs) => fs.readFile(target, "utf8"))).toBe(
+      "published-bytes",
+    );
+    expect(catalog.renderJobs.require(jobId).status).toBe("running");
+  });
 });
