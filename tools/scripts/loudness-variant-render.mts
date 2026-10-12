@@ -83,16 +83,44 @@ try {
   );
   const gainById = new Map(solution.gains.map((g) => [g.id, g.gainDb]));
 
-  // Clone the plan under a clear A/B name with the proposed gains.
+  // Clone the plan under a clear A/B name with the proposed gains. Entry
+  // IDs are re-minted (they are primary keys across plans) and the
+  // stamped resolved-join contracts follow the re-minted pair identity.
+  const idMap = new Map(sorted.map((entry) => [entry.id, crypto.randomUUID()]));
   const variant: SetPlanV1 = {
     ...plan,
     id: crypto.randomUUID(),
     name: `${plan.name} (body-gain A/B)`,
-    entries: sorted.map((entry) => ({
-      ...entry,
-      gainDb: gainById.get(entry.id) ?? entry.gainDb,
-      transitionToNext: entry.transitionToNext ? { ...entry.transitionToNext } : null,
-    })),
+    entries: sorted.map((entry, index) => {
+      const next = sorted[index + 1];
+      const transition = entry.transitionToNext;
+      const stamped = transition?.parameters.resolvedJoin;
+      const stampedContract =
+        stamped != null && typeof stamped === "object"
+          ? (stamped as { outgoingEntryId: string; incomingEntryId: string })
+          : null;
+      return {
+        ...entry,
+        id: idMap.get(entry.id)!,
+        gainDb: gainById.get(entry.id) ?? entry.gainDb,
+        transitionToNext:
+          transition && stampedContract
+            ? {
+                ...transition,
+                parameters: {
+                  ...transition.parameters,
+                  resolvedJoin: {
+                    ...stampedContract,
+                    outgoingEntryId: idMap.get(entry.id)!,
+                    incomingEntryId: next ? idMap.get(next.id)! : stampedContract.incomingEntryId,
+                  },
+                },
+              }
+            : transition
+              ? { ...transition }
+              : null,
+      };
+    }),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
