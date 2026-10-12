@@ -19,6 +19,7 @@ import {
 import {
   detectFfmpeg,
   parseEbur128,
+  sha256File,
   type FfmpegBinaries,
   type ProcessRunner,
 } from "@dnb-crate/audio-renderer";
@@ -28,6 +29,7 @@ import type { AnalysisRepository, StoredTrackAnalysis } from "../analysis-reposi
 import { dspFreshness, dspInputIdentity } from "./dsp-identity.ts";
 import { loadPcmForAnalysis } from "./load-pcm.ts";
 import type { TrackRepository } from "../repository.ts";
+import { stat } from "node:fs/promises";
 
 import { probeKeyEngine, type KeyEngineProbe } from "./key-engine.ts";
 import { KeyAnalysisService } from "./key-service.ts";
@@ -256,7 +258,7 @@ export class AnalysisCoordinator {
           return;
         }
         const track = this.tracks.findById(trackId);
-        if (!track || track.fileMissing || this.dspCurrent(trackId)) {
+        if (!track || track.fileMissing || this.dspCurrentWeak(trackId)) {
           return;
         }
         const decoded = loadPcmForAnalysis(
@@ -300,7 +302,7 @@ export class AnalysisCoordinator {
           }
         }
         try {
-          if (job.forceDsp || !this.dspCurrent(trackId)) {
+          if (job.forceDsp || !(await this.dspCurrent(trackId))) {
             // T2: the claim predicate travels INTO analyzeTrack - every
             // evidence write (analysis row, metadata, cues) is gated after
             // the expensive work, inside the method that performs it.
@@ -388,7 +390,12 @@ export class AnalysisCoordinator {
     }
   }
 
-  private dspCurrent(trackId: string): boolean {
+  /** R10 weak-tier freshness only (pure, synchronous). Used where a strong
+   * check would serialize work - prefetch gating. The authoritative gate
+   * is the async dspCurrent, which can only be STRICTER (more
+   * re-analysis), so disagreement is safe: worst case a prefetch decode
+   * is skipped and the real decode happens in analyzeTrack. */
+  private dspCurrentWeak(trackId: string): boolean {
     const track = this.tracks.findById(trackId);
     const stage = this.analyses.getStage(trackId, "dsp");
     const row = this.analyses.findByTrackId(trackId, "dnb-crate-dsp");
@@ -413,11 +420,54 @@ export class AnalysisCoordinator {
     }).current;
   }
 
+  /** Q02 strong content tier: the fast fingerprint (size + head/tail
+   * 64 KiB) cannot see middle-byte edits, so a stage that carries a
+   * content hash is re-verified - stat-assisted (re-hash only when size
+   * or whole-ms mtime drifted since the hash was taken), refreshing the
+   * recorded stat when the bytes turn out unchanged (move/copy). Legacy
+   * stage rows without a hash stay on the weak contract until their next
+   * analysis upgrades them. */
+  private async dspCurrent(trackId: string): Promise<boolean> {
+    if (!this.dspCurrentWeak(trackId)) {
+      return false;
+    }
+    const stage = this.analyses.getStage(trackId, "dsp");
+    if (stage?.contentHash == null) {
+      return true;
+    }
+    const track = this.tracks.findById(trackId);
+    if (!track || track.fileMissing) {
+      return false;
+    }
+    try {
+      const info = await stat(track.filePath);
+      const mtimeMs = Math.floor(info.mtimeMs);
+      if (info.size === stage.contentSize && mtimeMs === stage.contentMtimeMs) {
+        return true;
+      }
+      const hash = await sha256File(track.filePath);
+      if (hash !== stage.contentHash) {
+        return false;
+      }
+      this.analyses.refreshStageContentStat(trackId, "dsp", info.size, mtimeMs);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Q02: stamp the DSP stage with the inputs the evidence was actually
-   * computed under - captured values, never reread post-computation. */
+   * computed under - captured values, never reread post-computation -
+   * including the strong content identity observed with them. */
   private stampDspStage(
     trackId: string,
-    revision: { beatAnchorMs: number | null; fileFingerprint: string },
+    revision: {
+      beatAnchorMs: number | null;
+      fileFingerprint: string;
+      contentHash: string;
+      contentSize: number;
+      contentMtimeMs: number;
+    },
   ): void {
     this.analyses.setStage(trackId, "dsp", {
       state: "succeeded",
@@ -428,6 +478,9 @@ export class AnalysisCoordinator {
         bpmMax: this.config.analysis?.bpmMax,
       }),
       reason: null,
+      contentHash: revision.contentHash,
+      contentSize: revision.contentSize,
+      contentMtimeMs: revision.contentMtimeMs,
     });
   }
 
@@ -436,7 +489,14 @@ export class AnalysisCoordinator {
     binaries: FfmpegBinaries | null,
     preloaded?: { pcm: Promise<PcmAudio>; fingerprint: string },
     claimCurrent?: () => boolean,
-  ): Promise<{ beatAnchorMs: number | null; fileFingerprint: string; superseded: boolean }> {
+  ): Promise<{
+    beatAnchorMs: number | null;
+    fileFingerprint: string;
+    contentHash: string;
+    contentSize: number;
+    contentMtimeMs: number;
+    superseded: boolean;
+  }> {
     const track = this.tracks.findById(trackId);
     if (!track) {
       throw new DomainError("TRACK_NOT_FOUND", `No track with id ${trackId}`);
@@ -446,10 +506,17 @@ export class AnalysisCoordinator {
     }
     // Q02: capture the input revision BEFORE any expensive work. The
     // prefetched fingerprint (observed when its decode was queued) is
-    // authoritative when present - the PCM belongs to those bytes.
+    // authoritative when present - the PCM belongs to those bytes. The
+    // strong content hash is observed here as well, so evidence can never
+    // be stamped with bytes it was not computed over.
+    const contentStat = await stat(track.filePath);
+    const contentHash = await sha256File(track.filePath);
     const inputRevision = {
       beatAnchorMs: this.analyses.getBeatAnchorMs(trackId),
       fileFingerprint: preloaded?.fingerprint ?? track.fileFingerprint,
+      contentHash,
+      contentSize: contentStat.size,
+      contentMtimeMs: Math.floor(contentStat.mtimeMs),
     };
     const pcm = await (preloaded?.pcm ??
       loadPcmForAnalysis(track.filePath, this.runner, binaries, this.abort.signal));
@@ -508,6 +575,19 @@ export class AnalysisCoordinator {
     // claim was lost or any input the evidence was computed under changed
     // during the subprocess window, NOTHING is written - the caller
     // discards and retries under the current inputs (Q02).
+    //
+    // Q02: the bytes are re-verified immediately before the transaction -
+    // hashing stays OUTSIDE the boundary (no filesystem work inside it) -
+    // so the strong identity stamped on the stage describes exactly what
+    // is being published, with a fresh stat for cheap future fast-paths.
+    const verifyStat = await stat(track.filePath);
+    const verifyHash = await sha256File(track.filePath);
+    const publishedRevision = {
+      ...inputRevision,
+      contentHash: verifyHash,
+      contentSize: verifyStat.size,
+      contentMtimeMs: Math.floor(verifyStat.mtimeMs),
+    };
     let published = false;
     this.tracks.withTransaction(() => {
       if (claimCurrent && !claimCurrent()) {
@@ -522,7 +602,8 @@ export class AnalysisCoordinator {
       const superseded =
         this.analyses.getBeatAnchorMs(trackId) !== inputRevision.beatAnchorMs ||
         currentTrack?.fileFingerprint !== inputRevision.fileFingerprint ||
-        currentReferenceBpm !== referenceBpm;
+        currentReferenceBpm !== referenceBpm ||
+        verifyHash !== inputRevision.contentHash;
       if (superseded) {
         return;
       }
@@ -541,7 +622,7 @@ export class AnalysisCoordinator {
       } else {
         this.tracks.setAnalysisStatus(trackId, "complete");
       }
-      this.stampDspStage(trackId, inputRevision);
+      this.stampDspStage(trackId, publishedRevision);
       published = true;
     });
     if (!published) {
@@ -558,7 +639,7 @@ export class AnalysisCoordinator {
       );
       return { ...inputRevision, superseded: true };
     }
-    return { ...inputRevision, superseded: false };
+    return { ...publishedRevision, superseded: false };
   }
 
   private storeResult(

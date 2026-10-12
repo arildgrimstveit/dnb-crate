@@ -116,6 +116,12 @@ export type AnalysisStage = {
   identity: string;
   reason: string | null;
   analyzedAt: string;
+  /** Q02 strong content identity: full-file SHA-256 observed at analysis
+   * time, with the stat observed beside it. Absent on legacy rows and on
+   * stages that do not carry one yet (weak fingerprint contract only). */
+  contentHash?: string | null;
+  contentSize?: number | null;
+  contentMtimeMs?: number | null;
 };
 
 export class AnalysisRepository {
@@ -124,7 +130,10 @@ export class AnalysisRepository {
   getStage(trackId: string, stage: "key" | "dsp"): AnalysisStage | null {
     const row = this.db
       .prepare(
-        "SELECT state, fingerprint, identity, reason, analyzed_at AS analyzedAt FROM analysis_stages WHERE track_id = ? AND stage = ?",
+        `SELECT state, fingerprint, identity, reason, analyzed_at AS analyzedAt,
+                content_hash AS contentHash, content_size AS contentSize,
+                content_mtime_ms AS contentMtimeMs
+         FROM analysis_stages WHERE track_id = ? AND stage = ?`,
       )
       .get(trackId, stage);
     return (row as AnalysisStage | undefined) ?? null;
@@ -133,9 +142,16 @@ export class AnalysisRepository {
   setStage(trackId: string, stage: "key" | "dsp", value: Omit<AnalysisStage, "analyzedAt">): void {
     this.db
       .prepare(
-        `INSERT INTO analysis_stages VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(track_id, stage) DO UPDATE SET state=excluded.state, fingerprint=excluded.fingerprint,
-      identity=excluded.identity, reason=excluded.reason, analyzed_at=excluded.analyzed_at`,
+        `INSERT INTO analysis_stages
+           (track_id, stage, state, fingerprint, identity, reason, analyzed_at,
+            content_hash, content_size, content_mtime_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(track_id, stage) DO UPDATE SET
+         state=excluded.state, fingerprint=excluded.fingerprint,
+         identity=excluded.identity, reason=excluded.reason,
+         analyzed_at=excluded.analyzed_at,
+         content_hash=excluded.content_hash, content_size=excluded.content_size,
+         content_mtime_ms=excluded.content_mtime_ms`,
       )
       .run(
         trackId,
@@ -145,7 +161,26 @@ export class AnalysisRepository {
         value.identity,
         value.reason,
         new Date().toISOString(),
+        value.contentHash ?? null,
+        value.contentSize ?? null,
+        value.contentMtimeMs ?? null,
       );
+  }
+
+  /** Q02: the bytes re-verified as unchanged under a new stat (move/copy):
+   * refresh the recorded stat so future freshness checks stay cheap. */
+  refreshStageContentStat(
+    trackId: string,
+    stage: "key" | "dsp",
+    size: number,
+    mtimeMs: number,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE analysis_stages SET content_size = ?, content_mtime_ms = ?
+          WHERE track_id = ? AND stage = ? AND content_hash IS NOT NULL`,
+      )
+      .run(size, mtimeMs, trackId, stage);
   }
 
   listByTrackId(trackId: string): StoredTrackAnalysis[] {

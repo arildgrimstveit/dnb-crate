@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -128,6 +128,53 @@ describe("track analysis and aligned transitions", () => {
     expect(analysis.beatAnchorMs).toBe(100);
     // And it is GENUINELY current: recomputed, not merely relabeled.
     expect(catalog.analyses.listIdsForScope("stale")).not.toContain(track.id);
+  });
+
+  it("a mid-byte edit that preserves the weak fingerprint invalidates DSP (Q02 strong identity)", async () => {
+    // Roadmap reproduced gap: the fast fingerprint hashes size plus the
+    // first/last 64 KiB, so a middle-byte edit keeps the identity and the
+    // stale analysis stays "current". DSP stages now carry a strong
+    // content identity (full-file SHA-256 + stat observed at analysis
+    // time); freshness re-verifies it - stat-assisted, re-hashing on stat
+    // drift - so the edit is caught and the track re-analyzed.
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-q02-content-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
+    const pcm = buildClickTrackPcm({ bpm: 174, durationMs: 12_000 });
+    const clickPath = path.join(library, "click.wav");
+    await writeFile(clickPath, encodeMonoWav(pcm));
+    await catalog.service.scanLibrary();
+    const track = catalog.service.searchTracks({ query: "click", limit: 1 }).tracks[0]!;
+    const first = catalog.service.startTrackAnalysis({ trackIds: [track.id] });
+    await catalog.service.waitForAnalysisJob(first.job.id, 60_000);
+    const stageAfterFirst = catalog.analyses.getStage(track.id, "dsp");
+    expect(stageAfterFirst?.contentHash).toBeTruthy();
+    const analyzedAtFirst = catalog.service.getTrackAnalysis(track.id).analyzedAt;
+
+    // Flip one MIDDLE byte: size and both 64 KiB edges are unchanged, so
+    // the weak fingerprint cannot see it.
+    const bytes = Buffer.from(await readFile(clickPath));
+    bytes[Math.floor(bytes.length / 2)] = (bytes[Math.floor(bytes.length / 2)] ?? 0) ^ 0xff;
+    await writeFile(clickPath, bytes);
+    // Give the filesystem a moment so mtime differs from the recorded stat.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const second = catalog.service.startTrackAnalysis({ trackIds: [track.id] });
+    await catalog.service.waitForAnalysisJob(second.job.id, 60_000);
+    const analysis = catalog.service.getTrackAnalysis(track.id);
+    const stageAfterSecond = catalog.analyses.getStage(track.id, "dsp");
+    // The track was RE-ANALYZED (not skipped): new analyzedAt, and the
+    // stage's strong identity now describes the edited bytes.
+    expect(analysis.analyzedAt).not.toBe(analyzedAtFirst);
+    expect(stageAfterSecond?.contentHash).not.toBe(stageAfterFirst?.contentHash);
   });
 
   it("ranks bass_swap when energy rises and blocks aligned render on a rejected grid", async () => {
