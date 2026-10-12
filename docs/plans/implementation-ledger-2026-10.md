@@ -558,3 +558,16 @@ the preview cache-key publication path (content-identical by construction but
 unguarded). Open in T7: per-deck stem capture for attribution, final-blend
 boundary/dynamics checks, source-suite taxonomy alignment, and the
 stretch-latency investigation the new finding names.
+
+## 12 October review - third delivery tranche (12 October 2026)
+
+| Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Status       | Commit(s)            |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------- |
+| T7 stretch-latency investigation: direct ffmpeg measurement - rubberband adds ZERO latency vs its own stretched grid; atempo adds +12.8 ms group delay. Preferred rubberband path clean; the atempo FALLBACK shifts stretched decks late. Follow-ups named (engine in manifest / atempo compensation / per-deck stems)                                                                                                                                                                                     | Investigated | `bdfc472`            |
+| T7 source-suite taxonomy: labels aligned 1:1 with the processed-deck corpus (DEFECT-ESCAPE for escaped defects, FALSE-ALARM for clean-audio verdicts, INFRASTRUCTURE-ERROR for machinery); abstentions split by expectation; measured offsets asserted against injected (phase-reduced, 10 ms) and drift against injected tempo error; unique report filenames. New finding surfaced: shift-140 measures 123.1 vs 140 injected (-16.9 ms, coverage 15/64) - offset estimator under-reports at large shifts | Delivered    | `c8b20f9`            |
+| Docs reconciliation landed: the 12 October review itself committed (had been untracked while commits referenced it); README pointer flipped to it; 11 October review marked HISTORICAL; processed-deck hardening-session intermediates retained as evidence                                                                                                                                                                                                                                                | Delivered    | `f94ac07`, `c81ac88` |
+
+Both CI lanes green on `c81ac88`. Open: T2/T3 transactional boundary and
+preview cache path; T5 resolved-context remainder; T7 per-deck stems,
+final-blend checks, atempo manifest/compensation, shift-140 measurement bias;
+Batch D steps 1-2/5.
