@@ -615,3 +615,16 @@ Both CI lanes green on `cee0541`. Remaining Stage A: Q01 staging/cache
 remainder + one-transaction analysis commit; Q02 strong content identity
 and decode canonicalization; Q09 preflight/docs; wider Q07 report-schema
 versioning and CI wiring.
+
+## Quality roadmap - Stage A, third tranche (12 October 2026)
+
+| Finding                                                                                                                                                                                                                                                                                                                                                                                                         | Status    | Commit(s)   |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ----------- |
+| Q01 item 3 (DSP path): claim check + captured-input revision check + every evidence write (result, metadata, cues, stage stamp) commit under ONE synchronous withTransaction; the stage stamp moved from the job loop into the commit. Verified by existing regressions (Q02 anchor race, T2 straddling, prefetch pipeline) + full suites - boundary hardening per roadmap, behavior unchanged except atomicity | Delivered | `8e210fe`   |
+| Q09 early capability check: preflight.check() validates standalone R3 BEFORE scan/analysis/planning with an actionable RUBBERBAND_REQUIRED error (shared rubberbandReady() with checkPlan so the gates cannot disagree); fake runner answers the R3 probe; forced-failure test covers the early error + ready=false                                                                                             | Delivered | `8e210fe`   |
+| Q09 docs: README reading order now starts with the first-mix guide; Rubber Band described as required-by-default (bundled) instead of optional                                                                                                                                                                                                                                                                  | Delivered | this commit |
+
+Both CI lanes green on `8e210fe`. Remaining Stage A: Q01 staging/cache
+remainder; Q02 strong content identity + decode canonicalization; Q09
+Windows bootstrap recipe + config initializer; wider Q07 report-schema
+versioning and CI wiring.

@@ -12,8 +12,8 @@ An MCP host (Cursor, Codex, MCP Inspector) talks to a stdio server. The same ser
 
 Read in this order:
 
-1. [Architecture](docs/architecture.md) — packages, data flow, where things live.
-2. [Folder to first mix](docs/first-mix.md) — prerequisites (Node, FFmpeg; Rubber Band and KeyFinder optional), config/data locations, and the first end-to-end mix.
+1. [Folder to first mix](docs/first-mix.md) — prerequisites (Node, FFmpeg, and the standalone Rubber Band R3 CLI — bundled with the repo — which the default tempo-matching policy requires; KeyFinder optional), config/data locations, and the first end-to-end mix. `mix:preflight` verifies all of this before any expensive work.
+2. [Architecture](docs/architecture.md) — packages, data flow, where things live.
 3. [CLI reference](docs/cli.md) — every command, including worker ownership (`--wait` runs work in-process; without it a live worker must exist).
 4. The **active backlog**: [repository review and quality roadmap, 12 October 2026](docs/plans/quality-roadmap-2026-10-12.md) — the architecture review, reconciled implementation status, and Q01–Q12 handoff for reliable automatic joins, consistent loudness, vocal awareness and easier setup. Earlier reviews and the commit ledger under `docs/plans/` are historical snapshots.
 
