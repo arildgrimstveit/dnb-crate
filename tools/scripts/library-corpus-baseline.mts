@@ -65,9 +65,6 @@ type JoinRow = {
   outgoingSourceEndMs: number;
   incomingSourceStartMs: number;
   incomingSourceEndMs: number;
-  barCount: number;
-  reason: string | null;
-  windowShiftBars: number | null;
   downbeatOffsetMs: number | null;
   alignmentPeriodMs: number | null;
   alignmentMode: string | null;
