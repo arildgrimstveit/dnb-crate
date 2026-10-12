@@ -526,3 +526,21 @@ Both CI lanes green on `19bef39`. Remaining from the 11 October review: Batch D
 steps 1-2 (broader alternative evaluation) and step 5 (held-out generalization),
 both gated on a real-library corpus baseline; and the optional approved-join
 library features explicitly deferred by the product direction.
+
+## 12 October review (T1-T8) - first delivery tranche (12 October 2026)
+
+| Finding                                                                                                                                                                                                                                                                          | Status       | Commit(s)            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------- |
+| T8 build gates: runner result contract, unused import, template types                                                                                                                                                                                                            | Fixed        | `f63be76`            |
+| T1: window recovery in source time; measured-evidence-only recovery; re-baked alignment + cleared stale provenance (170/178 BPM regressions at <5 ms bar distance; unknown evidence crossfades)                                                                                  | Fixed        | `929f29e`            |
+| T4: applyTransition stamps the pair identity so jointly-resolved rates survive rebuilds (0.98 regression verified pre-fix)                                                                                                                                                       | Fixed        | `8c2bf01`            |
+| T2 first tranche: claim predicate gates EVERY analysis/key/enrichment evidence write after the expensive work; delayed-loudness takeover trial green pre-fix-failing                                                                                                             | Fixed        | `8bd6d76`            |
+| T3 first tranche: listen publication checks the claim AFTER measurement, immediately before publish (encode + verification windows closed; check/rename race and cross-process protocol remain)                                                                                  | Fixed        | `8bd6d76`            |
+| T6: abstention stays out of measuredJoins (attempted/measured gap is the visible abstention)                                                                                                                                                                                     | Fixed        | `6b8f23e`            |
+| T5 first tranche: saved windows validate exact fit - no silent clamping into a different interval (both reproduction shapes reject)                                                                                                                                              | Fixed        | `6b8f23e`            |
+| T8 pilot investigation: both failed-check cases traced to bar-mode sub-bar geometric offsets WITHOUT onset-lock corroboration (-298/-634 ms); All Fall Down also rides a 0.6-confidence reference-locked grid. Follow-up named in beatmatching-followups; NOT a threshold change | Investigated | `25e4d2c`            |
+| T8 runner: WAL-safe SQLite backup snapshot, copied-job/owner clearing, full join provenance in the report                                                                                                                                                                        | Fixed        | `25e4d2c`, `5ee9ddb` |
+
+Both CI lanes green on `5ee9ddb`. Open: T2/T3 full transactional boundary +
+cross-process publication protocol + preview cache path; T5 resolved-context
+remainder; T7 processed-deck corpus + taxonomy fixes; Batch D steps 1-2/5.
