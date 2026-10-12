@@ -646,3 +646,10 @@ canonicalization, always-rehash verification mode.
 | Q02 remainder (selection/scheduling): statDriftedTrackIds() - a synchronous, hashing-free stat pass - unions strong-identity stat drift into the stale scope; strongStale() extracted and shared; the mix workflow consults it after the weak contract, so mid-byte edits send the workflow back to analysis instead of planning on a stale grid. Failing-first verified with keyAnalysis off (pre-fix: "No tracks to analyze"; post-fix: selected and re-analyzed) | Delivered | `b949400` |
 
 Both CI lanes green on `b949400`.
+
+| Q01 item 2 (preview/cache slice): previews render to job-owned cache/previews/staging/{job.id} (all intermediates derive from it); the shared cache entry is created only by a publishUnderClaim rename before markSucceeded; a finally sweeps the staged artifact + derived intermediates on every exit. Failing-first contract test verified (render target WAS the shared cache path pre-fix; deposed owner leaves no entry and staging is swept) | Delivered | `830213d` |
+
+Both CI lanes green on `830213d`. Stage A remaining: crash-recovery
+semantics for renamed-but-unrecorded artifacts; decode canonicalization +
+always-rehash mode (Q02); Windows bootstrap + config initializer (Q09);
+Q07 report-schema versioning and CI wiring.
