@@ -30,6 +30,7 @@ import { dspFreshness, dspInputIdentity } from "./dsp-identity.ts";
 import { loadPcmForAnalysis } from "./load-pcm.ts";
 import type { TrackRepository } from "../repository.ts";
 import { stat } from "node:fs/promises";
+import { statSync } from "node:fs";
 
 import { probeKeyEngine, type KeyEngineProbe } from "./key-engine.ts";
 import { KeyAnalysisService } from "./key-service.ts";
@@ -420,40 +421,74 @@ export class AnalysisCoordinator {
     }).current;
   }
 
-  /** Q02 strong content tier: the fast fingerprint (size + head/tail
+  /** Q02 strong tier: the fast fingerprint (size + head/tail
    * 64 KiB) cannot see middle-byte edits, so a stage that carries a
    * content hash is re-verified - stat-assisted (re-hash only when size
    * or whole-ms mtime drifted since the hash was taken), refreshing the
    * recorded stat when the bytes turn out unchanged (move/copy). Legacy
    * stage rows without a hash stay on the weak contract until their next
    * analysis upgrades them. */
-  private async dspCurrent(trackId: string): Promise<boolean> {
-    if (!this.dspCurrentWeak(trackId)) {
-      return false;
-    }
+  async strongStale(trackId: string): Promise<boolean> {
     const stage = this.analyses.getStage(trackId, "dsp");
     if (stage?.contentHash == null) {
-      return true;
+      return false;
     }
     const track = this.tracks.findById(trackId);
     if (!track || track.fileMissing) {
-      return false;
+      return true;
     }
     try {
       const info = await stat(track.filePath);
       const mtimeMs = Math.floor(info.mtimeMs);
       if (info.size === stage.contentSize && mtimeMs === stage.contentMtimeMs) {
-        return true;
+        return false;
       }
       const hash = await sha256File(track.filePath);
       if (hash !== stage.contentHash) {
-        return false;
+        return true;
       }
       this.analyses.refreshStageContentStat(trackId, "dsp", info.size, mtimeMs);
-      return true;
+      return false;
     } catch {
+      return true;
+    }
+  }
+
+  /** Q02 stat-drift selection for scope schedulers: tracks whose DSP stage
+   * carries a strong content identity recorded against a stat that no
+   * longer matches the file. Synchronous and hashing-FREE - the job loop's
+   * strong freshness gate re-hashes each candidate and skips false
+   * positives (moves), refreshing their recorded stat. */
+  statDriftedTrackIds(): string[] {
+    const drifted: string[] = [];
+    for (const track of this.tracks.listAll()) {
+      if (track.fileMissing) {
+        continue;
+      }
+      const stage = this.analyses.getStage(track.id, "dsp");
+      if (stage?.state !== "succeeded" || stage.contentHash == null) {
+        continue;
+      }
+      if (stage.contentSize == null || stage.contentMtimeMs == null) {
+        continue;
+      }
+      try {
+        const info = statSync(track.filePath);
+        if (info.size !== stage.contentSize || Math.floor(info.mtimeMs) !== stage.contentMtimeMs) {
+          drifted.push(track.id);
+        }
+      } catch {
+        drifted.push(track.id);
+      }
+    }
+    return drifted;
+  }
+
+  private async dspCurrent(trackId: string): Promise<boolean> {
+    if (!this.dspCurrentWeak(trackId)) {
       return false;
     }
+    return !(await this.strongStale(trackId));
   }
 
   /** Q02: stamp the DSP stage with the inputs the evidence was actually

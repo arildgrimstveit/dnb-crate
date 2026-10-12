@@ -177,6 +177,53 @@ describe("track analysis and aligned transitions", () => {
     expect(stageAfterSecond?.contentHash).not.toBe(stageAfterFirst?.contentHash);
   });
 
+  it("the stale scope catches mid-byte edits through stat drift (Q02)", async () => {
+    // The weak fingerprint cannot see a middle-byte edit, so the SQL-side
+    // stale scope alone would miss it (with a single-track library it
+    // finds nothing at all). The stat-drift union adds candidates whose
+    // recorded strong identity no longer matches the file stat; the job's
+    // strong freshness gate then re-analyzes them.
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-q02-scope-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    // keyAnalysis off isolates the selection question: without the strong
+    // stat-drift union, the weak stale scope finds NOTHING for a mid-byte
+    // edit (the key-backfill branch would otherwise mask the gap by
+    // pulling the track into the job, where the already-committed strong
+    // freshness gate re-analyzes it).
+    const catalog = createCatalogRuntime(
+      { ...testConfig(root), analysis: { defaultEngine: "dnb-crate-dsp", keyAnalysis: "off" } },
+      undefined,
+      { useFakeFfmpeg: true },
+    );
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
+    const pcm = buildClickTrackPcm({ bpm: 174, durationMs: 12_000 });
+    const clickPath = path.join(library, "click.wav");
+    await writeFile(clickPath, encodeMonoWav(pcm));
+    await catalog.service.scanLibrary();
+    const track = catalog.service.searchTracks({ query: "click", limit: 1 }).tracks[0]!;
+    const first = catalog.service.startTrackAnalysis({ trackIds: [track.id] });
+    await catalog.service.waitForAnalysisJob(first.job.id, 60_000);
+    const analyzedAtFirst = catalog.service.getTrackAnalysis(track.id).analyzedAt;
+
+    const bytes = Buffer.from(await readFile(clickPath));
+    bytes[Math.floor(bytes.length / 2)] = (bytes[Math.floor(bytes.length / 2)] ?? 0) ^ 0xff;
+    await writeFile(clickPath, bytes);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const second = catalog.service.startTrackAnalysis({ scope: "stale" });
+    await catalog.service.waitForAnalysisJob(second.job.id, 60_000);
+    // The stat-drifted track was selected AND re-analyzed, not skipped.
+    expect(second.job.trackIds).toContain(track.id);
+    expect(catalog.service.getTrackAnalysis(track.id).analyzedAt).not.toBe(analyzedAtFirst);
+  });
+
   it("ranks bass_swap when energy rises and blocks aligned render on a rejected grid", async () => {
     const root = path.join(
       os.tmpdir(),

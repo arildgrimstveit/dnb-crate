@@ -297,6 +297,17 @@ export class CatalogService {
         if (this.needsKeyBackfill(track)) ids.add(track.id);
       }
     }
+    if (scope === "stale") {
+      // Q02: stat-drifted tracks carry a strong content identity recorded
+      // against a file stat that no longer matches - the weak fingerprint
+      // cannot see middle-byte edits, so they would otherwise be missing
+      // from the stale scope. The job's strong freshness gate re-hashes
+      // each candidate: false positives (moves) skip and refresh their
+      // recorded stat.
+      for (const id of this.analysis.statDriftedTrackIds()) {
+        ids.add(id);
+      }
+    }
     if (scope === "planningReady" || input.planningReadyOnly === true) {
       for (const row of this.getPlanningReadiness().tracks) {
         if (row.ready) {

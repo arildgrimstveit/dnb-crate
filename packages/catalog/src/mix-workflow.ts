@@ -107,9 +107,13 @@ export class MixWorkflowCoordinator {
         return row;
       }
       const keyfinder = preflight.dependencies.keyfinder;
-      const needsWork = Object.keys(row.candidates ?? {}).some((id) =>
-        this.needsMixAnalysis(id, this.effectiveSettings.keyAnalysis),
-      );
+      let needsWork = false;
+      for (const id of Object.keys(row.candidates ?? {})) {
+        if (await this.needsMixAnalysis(id, this.effectiveSettings.keyAnalysis)) {
+          needsWork = true;
+          break;
+        }
+      }
       const recheck =
         (keyfinder != null && keyfinder !== row.dependencies.keyfinder) ||
         row.effectiveSettings.dspVersion !== this.effectiveSettings.dspVersion;
@@ -220,10 +224,10 @@ export class MixWorkflowCoordinator {
   private issue(code: string, stage: string, message: string, nextAction: string): MixIssue {
     return { code, stage, message, nextAction, severity: "error", retryable: true };
   }
-  private needsMixAnalysis(
+  private async needsMixAnalysis(
     id: string,
     keyAnalysis: string | number | boolean | null | undefined,
-  ): boolean {
+  ): Promise<boolean> {
     const track = this.tracks.findById(id);
     if (!track || track.fileMissing) return false;
     const dspRow = this.analyses.findByTrackId(id, DSP_ANALYZER_NAME);
@@ -250,6 +254,10 @@ export class MixWorkflowCoordinator {
       bpmMax: this.bpmMax,
     });
     if (!freshness.current) return true;
+    // Q02 strong tier: a mid-byte edit preserves the weak fingerprint, so
+    // scheduling must also consult the stage's strong content identity
+    // before trusting the analysis that backs this workflow's plan.
+    if (await this.analysis.strongStale(id)) return true;
     if (keyAnalysis === "off") return false;
     if (track.keySource === "manual" || track.keySource === "published") return false;
     const key = this.analyses.getStage(id, "key");
@@ -380,9 +388,11 @@ export class MixWorkflowCoordinator {
 
       const children = row.analysisJobIds.map((id) => this.jobs.require(id));
       const assigned = new Set(children.flatMap((job) => job.trackIds));
-      const remaining = ids.filter(
-        (id) => this.needsMixAnalysis(id, row.effectiveSettings.keyAnalysis) && !assigned.has(id),
-      );
+      const remaining: string[] = [];
+      for (const id of ids) {
+        if (!(await this.needsMixAnalysis(id, row.effectiveSettings.keyAnalysis))) continue;
+        if (!assigned.has(id)) remaining.push(id);
+      }
       const active = children.find((job) => job.status === "running" || job.status === "queued");
       row.progress = { completed: ids.length - remaining.length, total: ids.length };
       if (!active) {
