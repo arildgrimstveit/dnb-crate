@@ -124,7 +124,7 @@ try {
                     ...(stampedContract as ResolvedJoinContext),
                     outgoingEntryId: idMap.get(entry.id)!,
                     incomingEntryId: next ? idMap.get(next.id)! : stampedContract.incomingEntryId,
-                  } as ResolvedJoinContext,
+                  },
                 },
               }
             : transition
