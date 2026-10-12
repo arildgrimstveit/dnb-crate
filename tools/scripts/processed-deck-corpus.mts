@@ -278,7 +278,11 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
     const outRate = target / BPM;
     const inRate = target / spec.incomingBpm;
     const outMixOutMs = Math.round(8 * BAR_MS);
-    const alignedInStart = Math.round(4 * BAR_MS);
+    // Kick-aligned for the INCOMING'S OWN tempo: 4 bars of ITS bpm puts a
+    // downbeat exactly at the decode start (4 bars at 174 only aligns a
+    // 174 BPM incoming - the unequal case measured its own fixture phase
+    // (+90 ms) before this correction; see beatmatching-followups).
+    const alignedInStart = Math.round(4 * ((60_000 / spec.incomingBpm) * 4));
     const inStartMs = alignedInStart + spec.incomingShiftMs;
     const inSourceEnd = Math.round(inRow.durationMs - 1500);
     const plan = {

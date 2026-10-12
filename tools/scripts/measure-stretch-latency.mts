@@ -27,10 +27,13 @@ const run = promisify(execFile);
  * Findings (this machine, 12 October 2026):
  *   ffmpeg rubberband filter: ZERO added latency (residual == raw)
  *   ffmpeg atempo filter:     +12.8 ms group delay vs its stretched grid
- *   R3 CLI: measured after this script could attribute the corpus case -
- *   the processed-deck corpus's +24.8 ms unequal-rate case ran the R3 CLI
- *   path (engine surfaced in its report), so the CLI path is the primary
- *   suspect for that offset, NOT the atempo fallback.
+ *   R3 CLI:                   ZERO added latency (same residual as raw)
+ *
+ * Consequence: NO stretch engine explains the processed-deck corpus's
+ * unequal-rate offset - the real cause was join placement (corpus fixture
+ * phase + the renderer's file-boundary anchoring under rateRegionsVersion 2;
+ * both fixed the same day - see beatmatching-followups). The atempo FALLBACK
+ * still carries its -14 ms group delay uncompensated.
  *
  * Self-contained: generates fixtures into a temp dir. Requires ffmpeg on
  * PATH. Usage: pnpm tsx tools/scripts/measure-stretch-latency.mts

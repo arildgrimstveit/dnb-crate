@@ -21,6 +21,14 @@ export type FilterTrim = {
   playbackRate?: number;
   /** Solo isolate: stretch this many output seconds at the tail. */
   stretchTailSec?: number;
+  /**
+   * The deck's planned position on the mix timeline (seconds). When both
+   * decks carry it, the join anchors at the PLAN (incoming minus outgoing)
+   * instead of the outgoing file's pre-overlap length: under rate-regions
+   * splicing those differ whenever the rate differs from 1, and the file
+   * boundary would flam every kick in the blend by the difference.
+   */
+  timelineStartSec?: number;
 };
 
 export type MixTransitionKind = "crossfade" | "phrase_mix" | "bass_swap";
@@ -423,11 +431,23 @@ export function buildBandMixFilter(options: FilterGraphOptions): string {
   const tempoEngine = options.tempoEngine ?? "atempo";
   void options.isolatePrefix;
   const expectedSec = expectedDurationMs(trims, overlapSeconds, stretchScope) / 1000;
-  const delayMs = Math.max(0, Math.round(prefixSec * 1000));
+  // Join anchor: the PLAN's timeline when both decks carry one, else the
+  // outgoing file's pre-overlap length. Under rate-regions splicing the
+  // spliced outgoing's overlap starts at (sourceLength - overlap*rate)/1,
+  // which differs from the planned join whenever rate != 1; anchoring the
+  // incoming at the file boundary would offset it by exactly that
+  // difference against the outgoing's on-grid overlap content.
+  const plannedJoinSec =
+    trims[0]!.timelineStartSec != null && trims[1]!.timelineStartSec != null
+      ? trims[1]!.timelineStartSec - trims[0]!.timelineStartSec
+      : null;
+  const joinOriginSec =
+    plannedJoinSec != null ? Math.max(0, plannedJoinSec) : Math.max(0, prefixSec);
+  const delayMs = Math.round(joinOriginSec * 1000);
   const events = expandPreset(type, params, barCount, barMs);
   const hasUnity = options.hasAfadeUnity !== false;
   const warnings = options.warnings ?? [];
-  const outgoingOrigin = Math.max(0, prefixSec);
+  const outgoingOrigin = joinOriginSec;
   const byTarget = (target: AutomationEvent["target"]) =>
     events.filter((ev) => ev.target === target);
   const incomingDelay = delayMs > 0 ? `,adelay=${delayMs}|${delayMs}` : "";

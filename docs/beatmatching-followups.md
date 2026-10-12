@@ -434,3 +434,49 @@ fix the unequal-rate placement math. Separately: when the atempo FALLBACK
 engages (no rubberband filter/CLI), its -14.2 ms group delay remains
 uncompensated - a small placement compensation or a manifest warning is still
 worth doing, but it is NOT the corpus case's cause.
+
+### RESOLVED: unequal-rate join placement - renderer boundary anchoring defect (12 October 2026, T7)
+
+Root-cause complete for the processed-deck corpus's unequal-rate finding
+(+24.8 ms median / +74.8 ms cluster). Two stacked causes:
+
+1. **Corpus fixture phase error** (fixed in the corpus): `alignedInStart` used 4
+   bars at the BASE tempo (174), which only kick-aligns a 174 BPM incoming.
+   The 178 BPM incoming's first kick landed 213 ms into its segment -> +90 ms
+   phase by construction. Now 4 bars at the INCOMING'S OWN tempo.
+2. **Renderer defect - join anchored at the spliced file boundary** (fixed in
+   the renderer, failing-first): under `rateRegionsVersion: 2` (R3 CLI path),
+   the final band-mix graph delayed the incoming deck at the CLI-spliced
+   outgoing's pre-overlap length (`prefixSec`) instead of the plan's timeline
+   anchor. The spliced boundary sits `overlap x (rate - 1)` (~127 ms at the
+   corpus geometry) before the planned join, so PINNED placements
+   (recipeVersion 1 - the resolved-transition path that bypasses
+   `applyAlignmentOffset`) flammed every kick in the blend by that amount.
+   Fix: `MixSegment.timelineStartMs` -> `FilterTrim.timelineStartSec`; the
+   band graph anchors `delayMs` AND the outgoing fade origin at
+   `incoming.timeline - outgoing.timeline` when both decks carry one, falling
+   back to the file boundary otherwise.
+
+Evidence:
+
+- Failing-first graph test (adelay=11034 planned vs 10907 boundary) verified
+  red pre-fix, green post-fix; full audio-renderer suite green (71 tests).
+- Corpus unequal case: offset 0.5 ms / drift 0.0 / TRUE-NEGATIVE post-fix
+  (was bimodal 0 / -138 with the fixture fixed pre-renderer-fix).
+- Real-library baseline re-run post-fix: EVERY probe offset IDENTICAL to the
+  pre-fix committed baseline (e.g. -5.83 / 0 / 49.71 / 0.00 ms) - confirming
+  planner-derived plans were never exposed (their geometry is healed by
+  applyAlignmentOffset, so boundary == plan), and the fix changes nothing
+  for them. The two remaining flags are the known pilot signatures
+  (sub-bar geometric offsets -298/-634 ms without onset-lock; one on a
+  0.6-confidence reference grid), unchanged and still open as planner-side
+  questions.
+
+Attribution tooling committed alongside:
+`tools/scripts/unequal-rate-attribution.mts` (renders the corpus case, reads
+the manifest per-track placement + full invocation, assigns measured onsets
+to manifest-implied positions, and replicates the CLI tail-splice in
+isolation). Remaining named follow-ups: the acrossfade (equal-power) path
+shares the boundary-anchoring exposure in principle but only unpinned plans
+use it (planner-healed); the atempo fallback's -14.2 ms group delay remains
+uncompensated.

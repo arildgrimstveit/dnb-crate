@@ -19,6 +19,44 @@ import {
 } from "../src/index.ts";
 
 describe("filter graph", () => {
+  it("anchors the incoming at the planned timeline when the CLI-spliced outgoing boundary differs", () => {
+    // Rate-regions geometry from the processed-deck corpus's unequal case
+    // (174/178 into a 175 target, R3 CLI): the CLI-spliced outgoing runs
+    // 32.976 s with a 22.069 s stretched overlap tail, so its pre-overlap
+    // length (10.907 s) sits 127 ms BEFORE the planned join position
+    // (11.034 s). The incoming deck - and the outgoing fade origin - must
+    // anchor at the PLAN's timeline, not at the spliced file boundary,
+    // or every kick in the blend flams by the difference.
+    const filter = buildBandMixFilter({
+      trims: [
+        { startSec: 0, endSec: 32.976, gainDb: 0, timelineStartSec: 0 },
+        { startSec: 0, endSec: 36.625, gainDb: 0, timelineStartSec: 11.034 },
+      ],
+      overlapSeconds: [22.069],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+      hasAfadeUnity: true,
+      transitions: [{ type: "phrase_mix", barCount: 16, params: { targetBpm: 175 } }],
+    });
+    expect(filter).toContain("adelay=11034|11034");
+    expect(filter).not.toContain("adelay=10907|10907");
+  });
+
+  it("falls back to the file-boundary anchor when no timeline is known", () => {
+    const filter = buildBandMixFilter({
+      trims: [
+        { startSec: 0, endSec: 32.976, gainDb: 0 },
+        { startSec: 0, endSec: 36.625, gainDb: 0 },
+      ],
+      overlapSeconds: [22.069],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+      hasAfadeUnity: true,
+      transitions: [{ type: "phrase_mix", barCount: 16, params: { targetBpm: 175 } }],
+    });
+    expect(filter).toContain("adelay=10907|10907");
+  });
+
   it("retains small tempo corrections across long phrases", () => {
     const rate = 174 / 174.3;
     const filter = buildAcrossfadeFilter({

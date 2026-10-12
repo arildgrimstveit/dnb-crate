@@ -47,6 +47,12 @@ export type MixSegment = {
   playbackRate?: number;
   /** Solo isolate: stretch this many output milliseconds at the tail. */
   stretchTailMs?: number;
+  /**
+   * Planned position on the mix timeline (ms). Forwarded to the filter
+   * graph so joins anchor at the plan rather than spliced file boundaries
+   * (rate-regions geometry differs from the plan whenever rate != 1).
+   */
+  timelineStartMs?: number;
 };
 
 export type MixRequest = {
@@ -171,6 +177,7 @@ function toTrims(segments: MixSegment[]): FilterTrim[] {
     gainDb: segment.gainDb,
     playbackRate: segment.playbackRate ?? 1,
     stretchTailSec: segment.stretchTailMs != null ? segment.stretchTailMs / 1000 : undefined,
+    timelineStartSec: segment.timelineStartMs != null ? segment.timelineStartMs / 1000 : undefined,
   }));
 }
 
