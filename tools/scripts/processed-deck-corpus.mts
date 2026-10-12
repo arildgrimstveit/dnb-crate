@@ -195,7 +195,11 @@ type CaseResult = {
   id: string;
   expected: CaseSpec["expected"];
   verdict: Outcome;
+  /** Calibrated median offset (harness bias subtracted). */
   medianOffsetMs: number | null;
+  /** Raw median offset (uncalibrated) - retained so calibration failures
+   * cannot hide a systematic placement regression (Q07). */
+  rawMedianOffsetMs: number | null;
   driftMs: number | null;
   onsetCount: number;
   offsetErrorVsInjectedMs: number | null;
@@ -374,6 +378,7 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
         expected: spec.expected,
         verdict: "INFRASTRUCTURE-ERROR",
         medianOffsetMs: null,
+        rawMedianOffsetMs: null,
         driftMs: null,
         onsetCount: 0,
         offsetErrorVsInjectedMs: null,
@@ -423,6 +428,7 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
         expected: spec.expected,
         verdict,
         medianOffsetMs: null,
+        rawMedianOffsetMs: null,
         driftMs: null,
         onsetCount: onsets.length,
         offsetErrorVsInjectedMs: null,
@@ -445,10 +451,11 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
       return d;
     };
     const residual = (time: number) => wrap(time % beatOut);
-    const residuals = onsets
-      .map(residual)
-      .map((r) => wrap(r - harnessBiasMs))
-      .sort((a, b) => a - b);
+    // Q07: raw (uncalibrated) residuals are retained so a bad calibration
+    // cannot erase a systematic placement regression from the report.
+    const rawResiduals = onsets.map(residual).sort((a, b) => a - b);
+    const rawMedianUncalibrated = rawResiduals[Math.floor(rawResiduals.length / 2)]!;
+    const residuals = rawResiduals.map((r) => wrap(r - harnessBiasMs)).sort((a, b) => a - b);
     const rawMedian = residuals[Math.floor(residuals.length / 2)]!;
     const median = rawMedian;
     const half = onsets.filter((_, i) => i % 2 === 0).map(residual);
@@ -492,6 +499,7 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
       expected: spec.expected,
       verdict,
       medianOffsetMs: Number(median.toFixed(1)),
+      rawMedianOffsetMs: Number(rawMedianUncalibrated.toFixed(1)),
       driftMs: drift == null ? null : Number(drift.toFixed(1)),
       onsetCount: onsets.length,
       offsetErrorVsInjectedMs:
@@ -516,6 +524,7 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
       expected: spec.expected,
       verdict: "INFRASTRUCTURE-ERROR",
       medianOffsetMs: null,
+      rawMedianOffsetMs: null,
       driftMs: null,
       onsetCount: 0,
       offsetErrorVsInjectedMs: null,
@@ -530,6 +539,12 @@ async function runCase(spec: CaseSpec, harnessBiasMs: number): Promise<CaseResul
 }
 
 const results: CaseResult[] = [];
+// Q07: explicitly enumerated known failures - recorded findings with named
+// follow-ups (beatmatching-followups.md). They do not fail the gate; any
+// OTHER escape/false-alarm/numeric failure does. Remove an entry when its
+// recorded follow-up lands.
+const KNOWN_FAILURES: Record<string, string> = {};
+
 // Calibration: the aligned control's raw median IS the harness bias
 // (onset attack lag + decode offset); everything else is measured against
 // it. A first run collects the bias, then all cases run calibrated.
@@ -537,6 +552,33 @@ process.stdout.write("calibrating on aligned-equal... ");
 const calibration = await runCase(CASES[0]!, 0);
 const harnessBiasMs = calibration.medianOffsetMs ?? 0;
 process.stdout.write(`bias ${harnessBiasMs} ms\n`);
+// Q07: calibration must be an actual measurement within a sane bound -
+// silently falling back to 0 would erase a systematic placement
+// regression from every reported number.
+const CALIBRATION_BOUND_MS = 50;
+if (calibration.medianOffsetMs == null || Math.abs(harnessBiasMs) > CALIBRATION_BOUND_MS) {
+  console.error(
+    `CALIBRATION FAILED: aligned control measured ${calibration.medianOffsetMs ?? "nothing"} ` +
+      `(bound ${CALIBRATION_BOUND_MS} ms); calibrated results would be meaningless`,
+  );
+  const { writeFile: writeOut, mkdir: mkdirOut } = await import("node:fs/promises");
+  const reportDir = path.join(import.meta.dirname, "..", "reports");
+  await mkdirOut(reportDir, { recursive: true });
+  const failStamp = new Date().toISOString().replace(/[:.]/g, "-");
+  await writeOut(
+    path.join(reportDir, `processed-deck-${failStamp}.json`),
+    JSON.stringify(
+      {
+        summary: null,
+        gate: { exitCode: 5, reasons: ["calibration failed"], knownFailures: {} },
+        calibration,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(5);
+}
 for (const spec of CASES) {
   process.stdout.write(`running ${spec.id}... `);
   const result = await runCase(spec, harnessBiasMs);
@@ -588,12 +630,47 @@ const summary = {
 console.log("\nProcessed-deck corpus (rendered output vs projected grid)");
 console.log(JSON.stringify({ results, summary }, null, 2));
 
+// Q07 gate: documented nonzero exits, with explicitly enumerated known
+// failures rather than globally accepting red outcomes.
+//   0 = clean  | 2 = infrastructure errors | 3 = unexpected escape/false alarm
+//   4 = numeric assertion failure | 5 = calibration failure (exits earlier)
+const gateReasons: string[] = [];
+const infra = results.filter((r) => r.verdict === "INFRASTRUCTURE-ERROR");
+if (infra.length > 0) {
+  gateReasons.push(`infrastructure errors: ${infra.map((r) => r.id).join(", ")}`);
+}
+const unexpected = results.filter(
+  (r) =>
+    (r.verdict === "DEFECT-ESCAPE" || r.verdict === "FALSE-ALARM") && !(r.id in KNOWN_FAILURES),
+);
+if (unexpected.length > 0) {
+  gateReasons.push(
+    `unexpected verdicts: ${unexpected.map((r) => `${r.id}=${r.verdict}`).join(", ")}`,
+  );
+}
+const numeric = summary.offsetErrorsWithinTolerance.filter(
+  (e) => !e.within && !(e.id in KNOWN_FAILURES),
+);
+if (numeric.length > 0) {
+  gateReasons.push(`numeric assertion failures: ${numeric.map((e) => e.id).join(", ")}`);
+}
+const knownHit = results.filter((r) => r.id in KNOWN_FAILURES);
+const gate = {
+  exitCode: infra.length > 0 ? 2 : unexpected.length > 0 ? 3 : numeric.length > 0 ? 4 : 0,
+  reasons: gateReasons,
+  knownFailures: Object.fromEntries(knownHit.map((r) => [r.id, KNOWN_FAILURES[r.id]!])),
+};
+
 const { writeFile: writeOut, mkdir: mkdirOut } = await import("node:fs/promises");
 const reportDir = path.join(import.meta.dirname, "..", "reports");
 await mkdirOut(reportDir, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 await writeOut(
   path.join(reportDir, `processed-deck-${stamp}.json`),
-  JSON.stringify({ summary, results }, null, 2),
+  JSON.stringify({ summary, gate, results }, null, 2),
 );
 console.log(`report: tools/reports/processed-deck-${stamp}.json`);
+if (gate.exitCode !== 0) {
+  console.error(`GATE FAILED (exit ${gate.exitCode}): ${gate.reasons.join("; ")}`);
+}
+process.exit(gate.exitCode);

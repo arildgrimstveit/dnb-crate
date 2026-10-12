@@ -502,6 +502,48 @@ const summary = {
   totalRuntimeMs: results.reduce((sum, r) => sum + r.runtimeMs, 0),
 };
 
+// Q07: explicitly enumerated known failures - recorded findings with named
+// follow-ups (beatmatching-followups.md). They do not fail the gate; any
+// OTHER escape/false-alarm/numeric failure does. Remove an entry when its
+// recorded follow-up lands.
+const KNOWN_FAILURES: Record<string, string> = {
+  "half-beat":
+    "known false-abstention: half-beat misalignment abstains instead of flagging (recorded; beatmatching-followups)",
+  "shift-140":
+    "known measurement bias: offset estimator under-reports at large shifts, coverage collapses to 15/64 (recorded; beatmatching-followups)",
+};
+// Q07 gate: documented nonzero exits.
+//   0 = clean | 2 = infrastructure errors | 3 = unexpected escape/false alarm
+//   4 = numeric assertion failure
+const gateReasons: string[] = [];
+const infra = results.filter((r) => r.classification === "INFRASTRUCTURE-ERROR");
+if (infra.length > 0) {
+  gateReasons.push(`infrastructure errors: ${infra.map((r) => r.id).join(", ")}`);
+}
+const unexpected = results.filter(
+  (r) =>
+    (r.classification === "DEFECT-ESCAPE" || r.classification === "FALSE-ALARM") &&
+    !(r.id in KNOWN_FAILURES),
+);
+if (unexpected.length > 0) {
+  gateReasons.push(
+    `unexpected verdicts: ${unexpected.map((r) => `${r.id}=${r.classification}`).join(", ")}`,
+  );
+}
+const numeric = results.filter(
+  (r) => (r.offsetErrorOk === false || r.driftOk === false) && !(r.id in KNOWN_FAILURES),
+);
+if (numeric.length > 0) {
+  gateReasons.push(`numeric assertion failures: ${numeric.map((r) => r.id).join(", ")}`);
+}
+const gate = {
+  exitCode: infra.length > 0 ? 2 : unexpected.length > 0 ? 3 : numeric.length > 0 ? 4 : 0,
+  reasons: gateReasons,
+  knownFailures: Object.fromEntries(
+    results.filter((r) => r.id in KNOWN_FAILURES).map((r) => [r.id, KNOWN_FAILURES[r.id]!]),
+  ),
+};
+
 console.log("\nAudio regression corpus (synthetic ground truth)");
 const width = 14;
 console.log(
@@ -551,6 +593,7 @@ const report = {
   renderer: "real ffmpeg",
   results,
   summary,
+  gate,
 };
 const reportDir = path.join(import.meta.dirname, "..", "reports");
 await mkdir(reportDir, { recursive: true });
@@ -559,3 +602,7 @@ const stamp = `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid.t
 const reportPath = path.join(reportDir, `audio-regression-${stamp}.json`);
 await writeFile(reportPath, JSON.stringify(report, null, 2));
 console.log(`report written to ${path.relative(process.cwd(), reportPath)}`);
+if (gate.exitCode !== 0) {
+  console.error(`GATE FAILED (exit ${gate.exitCode}): ${gate.reasons.join("; ")}`);
+}
+process.exit(gate.exitCode);
