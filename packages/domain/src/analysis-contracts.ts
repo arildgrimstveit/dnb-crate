@@ -277,6 +277,53 @@ export const sonicDescriptorsSchema = z.object({
   beatPhaseHistogram: z.array(z.number()).nullable().optional(),
 });
 
+export type TimeIndexedLoudness = {
+  schemaVersion: 1;
+  hopMs: number;
+  units: "LUFS";
+  sourceIdentity: string;
+  frameCount: number;
+  shortTermLufs: Array<number | null>;
+  momentaryLufs: Array<number | null>;
+  coverage: number;
+  medianShortTermLufs: number | null;
+  p10ShortTermLufs: number | null;
+  p90ShortTermLufs: number | null;
+  integratedLufs: number | null;
+  truePeakDb: number | null;
+  measuredAt: string;
+};
+
+/**
+ * Q04 (12 October roadmap): cached time-indexed loudness measurement on
+ * the ORIGINAL stereo signal. Per-hop momentary (400 ms) and short-term
+ * (3 s) loudness with silence kept as null so validity/coverage stay
+ * measurable; the identity fields (hop, units, source) make the cache
+ * checkable like every other analysis evidence. Section/window
+ * representative values are DERIVED from this series at planning time -
+ * never substituted with whole-track or normalized RMS.
+ */
+export const timeIndexedLoudnessSchema = z.object({
+  schemaVersion: z.literal(1),
+  hopMs: z.number().int().positive(),
+  units: z.literal("LUFS"),
+  /** Measurement source identity, e.g. "ebur128/peak=true@N-125875". */
+  sourceIdentity: z.string().min(1),
+  frameCount: z.number().int().nonnegative(),
+  /** Short-term loudness per hop; null = silence / below meter floor. */
+  shortTermLufs: z.array(z.number().nullable()),
+  /** Momentary loudness per hop; null = silence. */
+  momentaryLufs: z.array(z.number().nullable()),
+  /** Fraction of frames with a valid short-term value. */
+  coverage: z.number().min(0).max(1),
+  medianShortTermLufs: z.number().nullable(),
+  p10ShortTermLufs: z.number().nullable(),
+  p90ShortTermLufs: z.number().nullable(),
+  integratedLufs: z.number().nullable(),
+  truePeakDb: z.number().nullable(),
+  measuredAt: z.string().min(1),
+});
+
 export const beatGridSummarySchema = z.object({
   bpm: z.number().nullable(),
   bpmConfidence: z.number().nullable(),

@@ -29,6 +29,7 @@ import { migration024EntryRateSource } from "./migrations/024_entry_rate_source.
 import { migration025RenderPublishGuard } from "./migrations/025_render_publish_guard.ts";
 import { migration026StageContentIdentity } from "./migrations/026_stage_content_identity.ts";
 import { migration027StoredJoinContracts } from "./migrations/027_stored_join_contracts.ts";
+import { migration028TrackLoudness } from "./migrations/028_track_loudness.ts";
 
 export type Migration = {
   id: number;
@@ -65,6 +66,7 @@ const MIGRATIONS: Migration[] = [
   migration025RenderPublishGuard,
   migration026StageContentIdentity,
   migration027StoredJoinContracts,
+  migration028TrackLoudness,
 ];
 
 export function runMigrations(db: SqliteDatabase): void {

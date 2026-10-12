@@ -169,12 +169,51 @@ describe("track analysis and aligned transitions", () => {
 
     const second = catalog.service.startTrackAnalysis({ trackIds: [track.id] });
     await catalog.service.waitForAnalysisJob(second.job.id, 60_000);
-    const analysis = catalog.service.getTrackAnalysis(track.id);
-    const stageAfterSecond = catalog.analyses.getStage(track.id, "dsp");
     // The track was RE-ANALYZED (not skipped): new analyzedAt, and the
     // stage's strong identity now describes the edited bytes.
+    const analysis = catalog.service.getTrackAnalysis(track.id);
+    const stageAfterSecond = catalog.analyses.getStage(track.id, "dsp");
     expect(analysis.analyzedAt).not.toBe(analyzedAtFirst);
     expect(stageAfterSecond?.contentHash).not.toBe(stageAfterFirst?.contentHash);
+  });
+
+  it("analysis stores the time-indexed loudness series with content identity (Q04)", async () => {
+    const root = path.join(
+      os.tmpdir(),
+      `dnb-q04-loudness-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, { useFakeFfmpeg: true });
+    cleanups.push(async () => {
+      await catalog.close();
+      await rm(root, { recursive: true, force: true });
+    });
+    const pcm = buildClickTrackPcm({ bpm: 174, durationMs: 12_000 });
+    await writeFile(path.join(library, "click.wav"), encodeMonoWav(pcm));
+    await catalog.service.scanLibrary();
+    const track = catalog.service.searchTracks({ query: "click", limit: 1 }).tracks[0]!;
+    const started = catalog.service.startTrackAnalysis({ trackIds: [track.id] });
+    const done = await catalog.service.waitForAnalysisJob(started.job.id, 60_000);
+    expect(done.status).toBe("succeeded");
+
+    const loudness = catalog.analyses.getLoudness(track.id);
+    expect(loudness).not.toBeNull();
+    // The fake runner's ebur128 text carries four frames (one silent).
+    expect(loudness!.frameCount).toBe(4);
+    expect(loudness!.hopMs).toBe(100);
+    expect(loudness!.units).toBe("LUFS");
+    expect(loudness!.sourceIdentity).toContain("ebur128");
+    // Silence stays null; coverage reflects it.
+    expect(loudness!.shortTermLufs[2]).toBeNull();
+    expect(loudness!.coverage).toBeCloseTo(0.75, 5);
+    // The summary matches the analysis row the descriptors consumed.
+    expect(loudness!.integratedLufs).toBe(
+      catalog.service.getTrackAnalysis(track.id).integratedLufs,
+    );
+    // Q02 identity discipline: the row records the strong content hash of
+    // the bytes it measured.
+    expect(loudness!.contentHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("the stale scope catches mid-byte edits through stat drift (Q02)", async () => {

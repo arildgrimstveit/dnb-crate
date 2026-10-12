@@ -18,7 +18,7 @@ import {
 } from "@dnb-crate/domain";
 import {
   detectFfmpeg,
-  parseEbur128,
+  measureLoudnessSeries,
   sha256File,
   type FfmpegBinaries,
   type ProcessRunner,
@@ -571,32 +571,15 @@ export class AnalysisCoordinator {
       dnbBpmMin: this.config.analysis?.bpmMin,
       dnbBpmMax: this.config.analysis?.bpmMax,
     });
-    const loudnessPromise = binaries
-      ? this.runner.run({
-          executable: binaries.ffmpegPath,
-          timeoutMs: 180_000,
-          abortSignal: this.abort.signal,
-          args: [
-            "-nostdin",
-            "-hide_banner",
-            "-i",
-            track.filePath,
-            "-filter_complex",
-            "ebur128=peak=true",
-            "-f",
-            "null",
-            "-",
-          ],
-        })
-      : Promise.resolve(null);
-    const loudness = await loudnessPromise;
-    let integratedLufs: number | null = null;
-    let truePeakDb: number | null = null;
-    if (loudness) {
-      const parsed = parseEbur128(loudness.stderr);
-      integratedLufs = parsed.integratedLufs;
-      truePeakDb = parsed.truePeakDb;
-    }
+    // Q04: the loudness pass now yields the TIME-INDEXED series (same
+    // ebur128 invocation the integrated/peak summary came from). The
+    // series is stored on the original stereo signal with the strong
+    // content identity observed at measurement time.
+    const loudnessSeries = binaries
+      ? await measureLoudnessSeries(this.runner, binaries, track.filePath, this.abort.signal)
+      : null;
+    const integratedLufs = loudnessSeries?.integratedLufs ?? null;
+    const truePeakDb = loudnessSeries?.truePeakDb ?? null;
     // T2 (12 October review): ALL catalog evidence writes for this track
     // happen after the expensive decode/DSP/loudness work, gated on the
     // claim. A takeover during the subprocess window leaves no analysis
@@ -643,6 +626,44 @@ export class AnalysisCoordinator {
         return;
       }
       this.storeResult(trackId, dsp, anchor, integratedLufs, truePeakDb, referenceBpm ?? null);
+      // Q04: the time-indexed loudness row commits with every other
+      // evidence write, stamped with the input revision's strong content
+      // hash (Q02 identity: the series describes those bytes).
+      if (loudnessSeries) {
+        const validShortTerm = loudnessSeries.frames
+          .map((frame) => frame.shortTermLufs)
+          .filter((value): value is number => value != null)
+          .sort((a, b) => a - b);
+        const quantile = (q: number): number | null =>
+          validShortTerm.length === 0
+            ? null
+            : Number(
+                validShortTerm[
+                  Math.min(validShortTerm.length - 1, Math.floor(q * validShortTerm.length))
+                ]!.toFixed(1),
+              );
+        this.analyses.saveLoudness(trackId, {
+          hopMs: loudnessSeries.hopMs,
+          sourceIdentity: `ebur128/peak=true@${binaries?.ffmpegVersion ?? "unknown"}`,
+          shortTermLufs: loudnessSeries.frames.map((frame) =>
+            frame.shortTermLufs == null ? null : Number(frame.shortTermLufs.toFixed(1)),
+          ),
+          momentaryLufs: loudnessSeries.frames.map((frame) =>
+            frame.momentaryLufs == null ? null : Number(frame.momentaryLufs.toFixed(1)),
+          ),
+          coverage:
+            loudnessSeries.frames.length === 0
+              ? 0
+              : validShortTerm.length / loudnessSeries.frames.length,
+          medianShortTermLufs: quantile(0.5),
+          p10ShortTermLufs: quantile(0.1),
+          p90ShortTermLufs: quantile(0.9),
+          integratedLufs,
+          truePeakDb,
+          contentHash: inputRevision.contentHash,
+          measuredAt: new Date().toISOString(),
+        });
+      }
       const preferred =
         this.analyses.findByTrackId(trackId) ??
         this.analyses.findByTrackId(trackId, dsp.analyzerName);

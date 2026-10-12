@@ -251,6 +251,8 @@ export {
   planTransitionInputSchema,
   setBeatAnchorInputSchema,
   startTrackAnalysisInputSchema,
+  timeIndexedLoudnessSchema,
+  type TimeIndexedLoudness,
   analysisScopeSchema,
   trackAnalysisSchema,
   trackSectionSchema,

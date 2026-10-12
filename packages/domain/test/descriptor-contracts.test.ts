@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sonicDescriptorsSchema } from "../src/analysis-contracts.ts";
+import { sonicDescriptorsSchema, timeIndexedLoudnessSchema } from "../src/analysis-contracts.ts";
 import type { SonicDescriptors } from "../src/analysis.ts";
 import { BAR_SERIES_KEYS, SONIC_DESCRIPTOR_KEYS } from "../src/type-mirror-checks.ts";
 
@@ -121,5 +121,67 @@ describe("sonic descriptor contract (F5)", () => {
     const bars = sonicDescriptorsSchema.shape.bars?.unwrap().unwrap();
     expect(bars).toBeDefined();
     expect(Object.keys(bars.shape).sort()).toEqual([...BAR_SERIES_KEYS].sort());
+  });
+});
+
+describe("time-indexed loudness contract (Q04)", () => {
+  it("round-trips a fully populated series with silence as null", () => {
+    const row = {
+      schemaVersion: 1 as const,
+      hopMs: 100,
+      units: "LUFS" as const,
+      sourceIdentity: "ebur128/peak=true@N-125875",
+      frameCount: 3,
+      shortTermLufs: [-13.6, null, -6.7],
+      momentaryLufs: [-13.1, null, -6.5],
+      coverage: 2 / 3,
+      medianShortTermLufs: -10.2,
+      p10ShortTermLufs: -13.6,
+      p90ShortTermLufs: -6.7,
+      integratedLufs: -8.5,
+      truePeakDb: 1.2,
+      measuredAt: "2026-10-12T22:00:00.000Z",
+    };
+    const parsed = timeIndexedLoudnessSchema.parse(row);
+    expect(parsed).toEqual(row);
+  });
+
+  it("rejects rows without identity or with out-of-range coverage", () => {
+    expect(
+      timeIndexedLoudnessSchema.safeParse({
+        schemaVersion: 1,
+        hopMs: 100,
+        units: "LUFS",
+        sourceIdentity: "",
+        frameCount: 0,
+        shortTermLufs: [],
+        momentaryLufs: [],
+        coverage: 0,
+        medianShortTermLufs: null,
+        p10ShortTermLufs: null,
+        p90ShortTermLufs: null,
+        integratedLufs: null,
+        truePeakDb: null,
+        measuredAt: "2026-10-12T22:00:00.000Z",
+      }).success,
+    ).toBe(false);
+    expect(
+      timeIndexedLoudnessSchema.safeParse({
+        schemaVersion: 1,
+        hopMs: 100,
+        units: "LUFS",
+        sourceIdentity: "ebur128/peak=true",
+        frameCount: 1,
+        shortTermLufs: [-10],
+        momentaryLufs: [-10],
+        coverage: 1.5,
+        medianShortTermLufs: -10,
+        p10ShortTermLufs: -10,
+        p90ShortTermLufs: -10,
+        integratedLufs: -10,
+        truePeakDb: -1,
+        measuredAt: "2026-10-12T22:00:00.000Z",
+      }).success,
+    ).toBe(false);
   });
 });

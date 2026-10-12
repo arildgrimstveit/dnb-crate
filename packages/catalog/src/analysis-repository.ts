@@ -6,6 +6,7 @@ import {
   resolveCanonicalKey,
   type SonicDescriptors,
   type SuggestedCue,
+  type TimeIndexedLoudness,
   type Track,
   type TrackAnalysis,
   type TrackAnalysisView,
@@ -181,6 +182,114 @@ export class AnalysisRepository {
           WHERE track_id = ? AND stage = ? AND content_hash IS NOT NULL`,
       )
       .run(size, mtimeMs, trackId, stage);
+  }
+
+  /** Q04: cached time-indexed loudness on the original stereo signal.
+   * Stored with the strong content hash observed at measurement time so
+   * freshness checks follow the same identity discipline as DSP stages. */
+  saveLoudness(
+    trackId: string,
+    row: {
+      hopMs: number;
+      sourceIdentity: string;
+      shortTermLufs: Array<number | null>;
+      momentaryLufs: Array<number | null>;
+      coverage: number;
+      medianShortTermLufs: number | null;
+      p10ShortTermLufs: number | null;
+      p90ShortTermLufs: number | null;
+      integratedLufs: number | null;
+      truePeakDb: number | null;
+      contentHash: string | null;
+      measuredAt: string;
+    },
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO track_loudness (
+           track_id, hop_ms, source_identity, short_term_json, momentary_json,
+           coverage, median_short_term_lufs, p10_short_term_lufs, p90_short_term_lufs,
+           integrated_lufs, true_peak_db, content_hash, measured_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(track_id) DO UPDATE SET
+           hop_ms = excluded.hop_ms,
+           source_identity = excluded.source_identity,
+           short_term_json = excluded.short_term_json,
+           momentary_json = excluded.momentary_json,
+           coverage = excluded.coverage,
+           median_short_term_lufs = excluded.median_short_term_lufs,
+           p10_short_term_lufs = excluded.p10_short_term_lufs,
+           p90_short_term_lufs = excluded.p90_short_term_lufs,
+           integrated_lufs = excluded.integrated_lufs,
+           true_peak_db = excluded.true_peak_db,
+           content_hash = excluded.content_hash,
+           measured_at = excluded.measured_at`,
+      )
+      .run(
+        trackId,
+        row.hopMs,
+        row.sourceIdentity,
+        JSON.stringify(row.shortTermLufs),
+        JSON.stringify(row.momentaryLufs),
+        row.coverage,
+        row.medianShortTermLufs,
+        row.p10ShortTermLufs,
+        row.p90ShortTermLufs,
+        row.integratedLufs,
+        row.truePeakDb,
+        row.contentHash,
+        row.measuredAt,
+      );
+  }
+
+  getLoudness(trackId: string): (TimeIndexedLoudness & { contentHash: string | null }) | null {
+    const row = this.db
+      .prepare(
+        `SELECT hop_ms AS hopMs, source_identity AS sourceIdentity, short_term_json, momentary_json,
+                coverage, median_short_term_lufs AS medianShortTermLufs,
+                p10_short_term_lufs AS p10ShortTermLufs, p90_short_term_lufs AS p90ShortTermLufs,
+                integrated_lufs AS integratedLufs, true_peak_db AS truePeakDb,
+                content_hash AS contentHash, measured_at AS measuredAt
+         FROM track_loudness WHERE track_id = ?`,
+      )
+      .get(trackId) as
+      | {
+          hopMs: number;
+          sourceIdentity: string;
+          short_term_json: string;
+          momentary_json: string;
+          coverage: number;
+          medianShortTermLufs: number | null;
+          p10ShortTermLufs: number | null;
+          p90ShortTermLufs: number | null;
+          integratedLufs: number | null;
+          truePeakDb: number | null;
+          contentHash: string | null;
+          measuredAt: string;
+        }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+    const shortTermLufs = JSON.parse(row.short_term_json) as Array<number | null>;
+    const momentaryLufs = JSON.parse(row.momentary_json) as Array<number | null>;
+    return {
+      schemaVersion: 1,
+      units: "LUFS" as const,
+      hopMs: row.hopMs,
+      sourceIdentity: row.sourceIdentity,
+      frameCount: shortTermLufs.length,
+      shortTermLufs,
+      momentaryLufs,
+      coverage: row.coverage,
+      medianShortTermLufs: row.medianShortTermLufs,
+      p10ShortTermLufs: row.p10ShortTermLufs,
+      p90ShortTermLufs: row.p90ShortTermLufs,
+      integratedLufs: row.integratedLufs,
+      truePeakDb: row.truePeakDb,
+      contentHash: row.contentHash,
+      measuredAt: row.measuredAt,
+    };
   }
 
   listByTrackId(trackId: string): StoredTrackAnalysis[] {

@@ -840,6 +840,7 @@ export async function measureLoudnessSeries(
     executable: binaries.ffmpegPath,
     args,
     abortSignal,
+    timeoutMs: 180_000,
     onStderr: (chunk) => {
       if (streamed.length < 64 * 1024 * 1024) {
         streamed += chunk;

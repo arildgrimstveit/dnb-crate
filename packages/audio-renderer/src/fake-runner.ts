@@ -221,7 +221,16 @@ export function createFakeFfmpegRunner(
           request.onStderr?.("");
           return { exitCode: 0, signal: null, stdout: "", stderr: "" };
         }
-        const text = `Summary:\n  Integrated loudness:\n    I:         ${integrated.toFixed(1)} LUFS\n  True peak:\n    Peak:       ${peak.toFixed(2)} dBFS\n`;
+        const text = [
+          // Q04: a few per-frame series lines (the real filter logs these
+          // every ~100 ms) so time-indexed loudness population is testable;
+          // the summary below is what the existing parsers read.
+          `[Parsed_ebur128_0 @ 0xfake] t: 0.10000 TARGET:-23 LUFS M: ${(integrated + 0.3).toFixed(1)} S: ${(integrated + 0.2).toFixed(1)} I: ${integrated.toFixed(1)} LUFS LRA: 0.0 LU peak: ${peak.toFixed(2)} dBFS`,
+          `[Parsed_ebur128_0 @ 0xfake] t: 0.20000 TARGET:-23 LUFS M: ${(integrated - 0.2).toFixed(1)} S: ${integrated.toFixed(1)} I: ${integrated.toFixed(1)} LUFS LRA: 0.0 LU peak: ${peak.toFixed(2)} dBFS`,
+          `[Parsed_ebur128_0 @ 0xfake] t: 0.30000 TARGET:-23 LUFS M:  -inf S:  -inf I: ${integrated.toFixed(1)} LUFS LRA: 0.0 LU peak: ${peak.toFixed(2)} dBFS`,
+          `[Parsed_ebur128_0 @ 0xfake] t: 0.40000 TARGET:-23 LUFS M: ${(integrated + 0.1).toFixed(1)} S: ${(integrated - 0.1).toFixed(1)} I: ${integrated.toFixed(1)} LUFS LRA: 0.0 LU peak: ${peak.toFixed(2)} dBFS`,
+          `Summary:\n  Integrated loudness:\n    I:         ${integrated.toFixed(1)} LUFS\n  True peak:\n    Peak:       ${peak.toFixed(2)} dBFS\n`,
+        ].join("\n");
         request.onStderr?.(text);
         return { exitCode: 0, signal: null, stdout: "", stderr: text };
       }
