@@ -80,6 +80,7 @@
     "policy": "bakeWindowAlignment reduces uncorroborated offsets via uncorroboratedGeometricOffsetMs (10 ms multiple tolerance). Synthetic equivalents in packages/catalog/test/windows.test.ts.",
     "pilot-634": "REPAIRED: the join now bakes the sub-beat residual and the real-library baseline probe passes (was review +49.7 ms).",
     "pilot-298": "PARTIALLY REPAIRED, root cause deeper: the baked offset correctly reduced -298 -> +47, but the probe still measures +108.3 ms IDENTICAL to before - the incoming's 0.6-confidence REFERENCE grid is mislabeled ~108 ms against its own audio, so no window choice can align it. Follow-up: grid-quality handling for low-confidence reference grids (reject/reanalyze or gate the join on grid-vs-audio agreement), per the original pilot investigation note.",
+    "pilot-298-refinement": "Checked the stored evidence (2026-10-12): the DSP's whole-track gridPhaseMaxErrorMs is 25 ms (NOT suspect) while the join-local probe measures 108 ms - a global-vs-local trust gap. The stored bars series carries per-BEAT amplitudes only (no sub-beat phase), so join-local grid verification requires NEW per-interval evidence emission - Q05's local-confidence slice, not a quick gate. Note also the probe offset is beat-wrapped, which is why the -298 -> +47 one-beat change left it identical.",
     "baselineAfter": "tools/reports/library-baseline-2026-10-12.json: 10 pass / 3 review / 1 fail (was 9/4/1)."
   }
 }

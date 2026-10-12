@@ -30,7 +30,13 @@ import {
 } from "./filter-graph.ts";
 import { sha256File } from "./hash.ts";
 import { buildFfmetadataFile, type MixOutputTags } from "./output-tags.ts";
-import { parseEbur128, parseOutTimeMs, parseSilenceSpans } from "./parse.ts";
+import {
+  parseEbur128,
+  parseEbur128Series,
+  parseOutTimeMs,
+  parseSilenceSpans,
+  type Ebur128Series,
+} from "./parse.ts";
 import { probeAudioFile } from "./probe.ts";
 import {
   INTERMEDIATE_PCM_CODEC,
@@ -798,6 +804,61 @@ export async function measureLoudness(
     return { integratedLufs: null, truePeakDb: null };
   }
   return parseEbur128(result.stderr);
+}
+
+/**
+ * Q04 (12 October roadmap): time-indexed loudness measurement. The same
+ * ebur128 pass measureLoudness performs, parsed to its per-100 ms
+ * momentary/short-term series plus the integrated/peak summary. This is
+ * the measurement foundation for section-aware gain decisions; callers
+ * decide how to store and use it.
+ */
+export async function measureLoudnessSeries(
+  runner: ProcessRunner,
+  binaries: FfmpegBinaries,
+  filePath: string,
+  abortSignal?: AbortSignal,
+): Promise<Ebur128Series> {
+  const args = [
+    "-nostdin",
+    "-hide_banner",
+    "-i",
+    filePath,
+    "-filter_complex",
+    "ebur128=peak=true",
+    "-f",
+    "null",
+    "-",
+  ];
+  // The runner tail-bounds captured stderr (32 KB default), which keeps
+  // only the end of a long file's per-frame series. Stream the chunks
+  // instead: the series accumulator is bounded by frame count (a hard
+  // safety cap), so this cannot grow without limit.
+  const MAX_SERIES_FRAMES = 200_000; // ~5.5 hours at the 100 ms hop
+  let streamed = "";
+  const result = await runner.run({
+    executable: binaries.ffmpegPath,
+    args,
+    abortSignal,
+    onStderr: (chunk) => {
+      if (streamed.length < 64 * 1024 * 1024) {
+        streamed += chunk;
+      }
+    },
+  });
+  if (abortSignal?.aborted) {
+    const error = new Error("Render cancelled");
+    error.name = "AbortError";
+    throw error;
+  }
+  if (result.exitCode !== 0) {
+    return { hopMs: 100, frames: [], integratedLufs: null, truePeakDb: null };
+  }
+  const parsed = parseEbur128Series(streamed || result.stderr);
+  return {
+    ...parsed,
+    frames: parsed.frames.slice(0, MAX_SERIES_FRAMES),
+  };
 }
 
 async function stitchPreservedPrefix(

@@ -48,6 +48,48 @@ export function parseEbur128(text: string): {
   };
 }
 
+export type Ebur128SeriesFrame = {
+  timeMs: number;
+  /** Momentary loudness (LUFS); null when the filter reported silence
+   * (-inf / below the meter's floor). */
+  momentaryLufs: number | null;
+  /** Short-term loudness (LUFS); null for silence. */
+  shortTermLufs: number | null;
+};
+
+export type Ebur128Series = {
+  hopMs: number;
+  frames: Ebur128SeriesFrame[];
+  integratedLufs: number | null;
+  truePeakDb: number | null;
+};
+
+/**
+ * Q04 (12 October roadmap): parse the per-frame momentary/short-term
+ * loudness series FFmpeg's ebur128 filter logs every ~100 ms. The lines
+ * look like:
+ *   t: 1.00431 TARGET:-23 LUFS M: -18.5 S: -19.2 I: ...
+ * M/S are `-inf` (or below-floor) during silence; those frames keep their
+ * time with null values so validity/coverage stays measurable.
+ */
+export function parseEbur128Series(text: string): Ebur128Series {
+  const frames: Ebur128SeriesFrame[] = [];
+  const frameRe =
+    /t:\s*([0-9]+(?:\.[0-9]+)?)\s+TARGET:.*?\s+M:\s*(-?\d+(?:\.\d+)?|-inf)\s+S:\s*(-?\d+(?:\.\d+)?|-inf)/g;
+  for (const match of text.matchAll(frameRe)) {
+    const timeMs = Math.round(Number(match[1]) * 1000);
+    const momentary = match[2] === "-inf" ? null : Number(match[2]);
+    const shortTerm = match[3] === "-inf" ? null : Number(match[3]);
+    frames.push({ timeMs, momentaryLufs: momentary, shortTermLufs: shortTerm });
+  }
+  const summary = parseEbur128(text);
+  // Hop is the observed frame cadence (FFmpeg logs every 100 ms); derive
+  // it from consecutive frames rather than hardcoding, so odd builds
+  // surface as a different hop instead of misaligned times.
+  const hopMs = frames.length >= 2 ? Math.round(frames[1]!.timeMs - frames[0]!.timeMs) || 100 : 100;
+  return { hopMs, frames, ...summary };
+}
+
 export function parseOutTimeMs(chunk: string): number | null {
   const us = /out_time_us=(\d+)/.exec(chunk);
   if (us) {

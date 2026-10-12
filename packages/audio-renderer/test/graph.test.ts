@@ -6,6 +6,7 @@ import {
   buildBassSwapFilter,
   buildPhraseMixFilter,
   expectedDurationMs,
+  parseEbur128Series,
   RATE_SPLICE_XFADE_SEC,
   limiterAmplitudeFromCeilingDb,
   mixFilterArgs,
@@ -54,6 +55,38 @@ describe("filter graph", () => {
     });
     expect(filter).toContain("acrossfade=d=22.069");
     expect(filter).not.toContain("adelay=");
+  });
+
+  it("parses the ebur128 per-frame loudness series with silence as null (Q04 measurement)", () => {
+    // Shape captured from FFmpeg's ebur128 filter (100 ms frames; M/S go
+    // -inf during silence; the summary line repeats per frame and the
+    // final I/Peak close the log).
+    const stderr = [
+      "[Parsed_ebur128_0 @ 0x1] t: 0.10417 TARGET:-23 LUFS M: -18.4 S: -18.9 I: -18.7 LUFS LRA: 0.0 LU peak: -3.2 dBFS",
+      "[Parsed_ebur128_0 @ 0x1] t: 0.20417 TARGET:-23 LUFS M: -19.1 S: -19.0 I: -18.8 LUFS LRA: 0.0 LU peak: -3.2 dBFS",
+      "[Parsed_ebur128_0 @ 0x1] t: 0.30417 TARGET:-23 LUFS M:  -inf S:  -inf I: -18.8 LUFS LRA: 0.0 LU peak: -3.2 dBFS",
+      "[Parsed_ebur128_0 @ 0x1] t: 0.40417 TARGET:-23 LUFS M: -19.3 S: -19.1 I: -18.8 LUFS LRA: 0.1 LU peak: -3.1 dBFS",
+      "",
+      "  Integrated loudness:",
+      "    I:         -18.8 LUFS",
+      "  Peak:",
+      "    Peak:      -3.1 dBFS",
+    ].join("\n");
+    const series = parseEbur128Series(stderr);
+    expect(series.hopMs).toBe(100);
+    expect(series.frames).toHaveLength(4);
+    expect(series.frames[0]).toEqual({ timeMs: 104, momentaryLufs: -18.4, shortTermLufs: -18.9 });
+    // Silence keeps its timestamp with null values - validity and
+    // coverage stay measurable.
+    expect(series.frames[2]).toEqual({ timeMs: 304, momentaryLufs: null, shortTermLufs: null });
+    expect(series.integratedLufs).toBe(-18.8);
+    expect(series.truePeakDb).toBe(-3.1);
+  });
+
+  it("returns an empty series for logs without frames", () => {
+    const series = parseEbur128Series("[Parsed_ebur128_0 @ 0x1] summary only");
+    expect(series.frames).toEqual([]);
+    expect(series.hopMs).toBe(100);
   });
 
   it("anchors the incoming at the planned timeline when the CLI-spliced outgoing boundary differs", () => {
