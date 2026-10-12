@@ -353,6 +353,21 @@ export type {
   ValidationIssue,
 } from "./planning.ts";
 export {
+  JOIN_RESOLUTION_POLICY_VERSION,
+  type JoinInputs,
+  type JoinResolution,
+  type JoinUnresolvedReason,
+  type ResolvedJoinContext,
+  joinUnresolvedReasonSchema,
+  resolveJoinInputs,
+  resolvedJoinAlignmentSchema,
+  resolvedJoinContextSchema,
+  resolvedJoinEvidenceSchema,
+  resolvedJoinGainSchema,
+  resolvedJoinGeometrySchema,
+  resolvedJoinTreatmentSchema,
+} from "./contracts/resolved-join.ts";
+export {
   buildDnbSetPromptArgsSchema,
   createSetPlanDataSchema,
   createSetPlanInputSchema,
