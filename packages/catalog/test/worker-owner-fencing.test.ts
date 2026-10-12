@@ -605,9 +605,8 @@ describe("worker ownership fencing (review item 5)", () => {
     });
     const { spawn } = await import("node:child_process");
     const { createRequire } = await import("node:module");
-    const modPath = createRequire(
-      "C:/Users/arild/repos/dnb-crate/packages/catalog/package.json",
-    ).resolve("better-sqlite3");
+    const testRequire = createRequire(`${import.meta.dirname}/worker-owner-fencing.test.ts`);
+    const modPath = testRequire.resolve("better-sqlite3");
     const child = spawn(process.execPath, [
       "-e",
       `
