@@ -571,3 +571,20 @@ Both CI lanes green on `c81ac88`. Open: T2/T3 transactional boundary and
 preview cache path; T5 resolved-context remainder; T7 per-deck stems,
 final-blend checks, atempo manifest/compensation, shift-140 measurement bias;
 Batch D steps 1-2/5.
+
+## 12 October review - fourth delivery tranche (12 October 2026)
+
+| Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Status    | Commit(s) |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------- |
+| T7 stretch-engine attribution: corpus records per-case manifest engines; all three stretch paths measured directly (rubberband filter + R3 CLI clean, atempo -14.2 ms) - engine latency EXCLUDED as the unequal-rate cause; earlier atempo inference corrected in followups                                                                                                                                                                                                                                                                                                                                         | Delivered | `2dd32fb` |
+| T7 ROOT CAUSE + FIX: unequal-rate corpus finding resolved as (1) corpus fixture phase error (inStart now at the incoming own bar) and (2) REAL renderer defect - band graph anchored the incoming at the CLI-spliced outgoing boundary instead of the planned timeline under rateRegionsVersion 2, flammed PINNED placements (recipeVersion 1) by overlap*(rate-1) (~127 ms). Fix anchors delay + fade origin at incoming.timeline - outgoing.timeline (failing-first graph test; corpus 0.5 ms/0.0 drift TRUE-NEGATIVE; real-library baseline offsets IDENTICAL pre/post, proving planner-healed plans unaffected) | Fixed     | `06371da` |
+| Attribution tooling: unequal-rate-attribution.mts (manifest-vs-audio placement attribution, invocation dump, isolated CLI splice replication)                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Delivered | `06371da` |
+
+Both CI lanes green on `06371da`. Real-library baseline now 14 joins /
+9 pass / 4 review / 1 fail - the flagged ones are the known pilot
+signatures (sub-bar geometric offsets without onset-lock), still open
+planner-side. Open: T2/T3 transactional boundary and preview cache path;
+T5 resolved-context remainder; T7 per-deck stems (moot for this finding,
+still useful for future attribution), final-blend checks, atempo fallback
+compensation, acrossfade boundary note; pilot sub-bar geometric offsets;
+Batch D steps 1-2/5.
