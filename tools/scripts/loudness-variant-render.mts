@@ -10,6 +10,7 @@ import {
   loadConfig,
   solveSetGains,
   windowShortTermLoudness,
+  type ResolvedJoinContext,
   type SetPlanV1,
 } from "../../packages/domain/src/index.ts";
 import { createCatalogRuntime } from "../../packages/catalog/src/index.ts";
@@ -120,10 +121,10 @@ try {
                 parameters: {
                   ...transition.parameters,
                   resolvedJoin: {
-                    ...stampedContract,
+                    ...(stampedContract as ResolvedJoinContext),
                     outgoingEntryId: idMap.get(entry.id)!,
                     incomingEntryId: next ? idMap.get(next.id)! : stampedContract.incomingEntryId,
-                  },
+                  } as ResolvedJoinContext,
                 },
               }
             : transition
