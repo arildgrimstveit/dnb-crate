@@ -544,3 +544,17 @@ library features explicitly deferred by the product direction.
 Both CI lanes green on `5ee9ddb`. Open: T2/T3 full transactional boundary +
 cross-process publication protocol + preview cache path; T5 resolved-context
 remainder; T7 processed-deck corpus + taxonomy fixes; Batch D steps 1-2/5.
+
+## 12 October review - second delivery tranche (12 October 2026)
+
+| Finding                                                                                                                                                                                                                                                                                                                                                                                            | Status    | Commit(s)            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | -------------------- |
+| T3 cross-process publication: publishUnderClaim (BEGIN IMMEDIATE claim check + rename atomic w.r.t. the job row); child-process race trial proves no interleaving; deposed publish skips, winner bytes survive                                                                                                                                                                                     | Delivered | `81f18ec`, `32be9b9` |
+| T7 processed-deck corpus: rendered-master overlap vs projected output grid; calibrated offsets; bimodal-aware detection; post-preparation negative controls; explicit taxonomy; unique reports. Baseline 3 TP / 2 TN / 0 escapes, plus ONE REAL FINDING: unequal-rate stretch measures +24.8 ms off-grid under a pinned zero offset (possible uncompensated stretch latency) - recorded, not tuned | Delivered | `d85b86e`            |
+
+Both CI lanes green on `d85b86e`. Open in T2/T3: the full transactional
+persistence boundary (writes still gate per-write, not in one transaction) and
+the preview cache-key publication path (content-identical by construction but
+unguarded). Open in T7: per-deck stem capture for attribution, final-blend
+boundary/dynamics checks, source-suite taxonomy alignment, and the
+stretch-latency investigation the new finding names.
