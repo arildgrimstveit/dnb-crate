@@ -53,6 +53,7 @@ import {
   type RecipeRecallLookup,
 } from "./recall.ts";
 import {
+  bakeWindowAlignment,
   firstDropSection,
   lateDropMinPlayableMs,
   planPhraseWindow,
@@ -415,17 +416,30 @@ export function chooseTransition(
   // conflicts, recover automatically with a different WINDOW before
   // accepting the crossfade fallback — the gate is overlap-local, so a
   // whole-phrase shift of the incoming mix-in can move the blend onto
-  // compatible material without changing tracks. Whole-phrase shifts are
-  // alignment-safe (bar phase is preserved) and bounded at two phrases per
-  // side; downstream gates (playable span, continuity, timeline) still
+  // compatible material without changing tracks. Bounded at two phrases
+  // per side; downstream gates (playable span, continuity, timeline) still
   // reject an infeasible shift, so termination is unchanged.
+  // T1 (12 October review): mixInMs is SOURCE time — the shift increment
+  // and the bounds check must convert the output-time bar length through
+  // the incoming rate, recovery requires MEASURED compatibility (an
+  // unknown region is not evidence of a recovery), and the shifted window
+  // is re-baked through the shared alignment path with stale drop/phrase
+  // provenance cleared so dependent fields describe the new interval.
   let resolvedWindow = resolvedBase;
   let windowShiftBars: number | null = null;
+  let windowShiftMeasured = false;
   if (structural.conflict && structural.gap != null && options.window == null) {
     const barMs = target && target > 0 ? (4 * 60_000) / target : 1379.31;
     const inAudioStart = incoming.analysis?.audioStartMs ?? 0;
     const inAudioEnd = incoming.analysis?.audioEndMs ?? incoming.durationMs;
     const inBpm = incoming.analysis?.bpm ?? target;
+    // Output-time bar length converted to the incoming's SOURCE time; the
+    // overlap occupies this much of the incoming's source timeline.
+    const barSourceMs = outputToSourceMs(barMs, incomingRate);
+    const overlapSourceMs = outputToSourceMs(
+      phraseDurationMs(resolvedBase.barCount, target ?? inBpm ?? 174),
+      incomingRate,
+    );
     const shifts = [
       resolvedBase.barCount,
       -resolvedBase.barCount,
@@ -433,11 +447,8 @@ export function chooseTransition(
       -resolvedBase.barCount * 2,
     ];
     for (const shiftBars of shifts) {
-      const candidateIn = resolvedBase.mixInMs + shiftBars * barMs;
-      if (
-        candidateIn < inAudioStart ||
-        candidateIn + resolvedBase.barCount * barMs > inAudioEnd - 100
-      ) {
+      const candidateIn = resolvedBase.mixInMs + shiftBars * barSourceMs;
+      if (candidateIn < inAudioStart || candidateIn + overlapSourceMs > inAudioEnd - 100) {
         continue;
       }
       const shifted = structuralGrooveConflict(
@@ -457,9 +468,26 @@ export function chooseTransition(
         },
         PLANNER_GROOVE_STRUCTURAL_CONFLICT_GAP,
       );
-      if (!shifted.conflict) {
-        resolvedWindow = { ...resolvedBase, mixInMs: Math.round(candidateIn) };
+      // Only MEASURED compatibility is a recovery: conflict===false with a
+      // gap means both sides were measured and agree. gap===null means the
+      // candidate region's evidence was missing — unknown, not recovered.
+      if (!shifted.conflict && shifted.gap != null) {
+        const shiftedWindow: PhraseWindow = {
+          ...resolvedBase,
+          mixInMs: Math.round(candidateIn),
+          mixInBar: resolvedBase.mixInBar != null ? resolvedBase.mixInBar + shiftBars : null,
+          // The old interval's provenance no longer describes this window.
+          dropAnchored: false,
+          incomingDropMs: null,
+          continuity: undefined,
+        };
+        resolvedWindow = bakeWindowAlignment(outgoing, incoming, shiftedWindow, {
+          targetBpm: target,
+          outgoingRate,
+          incomingRate,
+        });
         windowShiftBars = shiftBars;
+        windowShiftMeasured = true;
         break;
       }
     }
@@ -583,8 +611,9 @@ export function chooseTransition(
         ...(keyClash ? { keyClash: true, keyClashWarning: "KEY_CLASH" } : {}),
         ...(structuralAbstain ? { grooveAbstain: structuralAbstain } : {}),
         // Batch D: when the anchored window structurally conflicted and a
-        // whole-phrase shift recovered it, the shift is provenance.
-        ...(windowShiftBars != null
+        // whole-phrase shift recovered it on MEASURED compatibility, the
+        // shift is provenance (T1: unknown evidence is not a recovery).
+        ...(windowShiftBars != null && windowShiftMeasured
           ? { windowShiftBars, windowShiftReason: "groove-syncopation-conflict-resolved" }
           : {}),
         ...(policyHandoff.rateRegionsVersion === 2 ? { rateRegionsVersion: 2 } : {}),

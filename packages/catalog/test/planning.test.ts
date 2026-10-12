@@ -3521,6 +3521,126 @@ describe("join inspector (batch 9)", () => {
     }
   });
 
+  it("window recovery keeps source-time coordinates at unequal tempos (T1)", async () => {
+    const { chooseTransition } = await import("../src/planning/timeline.ts");
+    const downbeatsFor = (bpm: number) => {
+      const out: number[] = [];
+      const beat = (4 * 60_000) / bpm;
+      for (let t = 0; t < 200_000; t += beat * 4) {
+        out.push(Number(t.toFixed(3)));
+      }
+      return out;
+    };
+    const analysisFor = (bpm: number, syncopation: number[], dropAtBar: number | null) => ({
+      gridOk: true,
+      bpm,
+      canonicalBpm: bpm,
+      bpmHint: null,
+      bpmHintConfidence: null,
+      suggestedEnergy: 6,
+      introStartMs: null,
+      outroStartMs: null,
+      outroEndMs: null,
+      introLenMs: null,
+      outroLenMs: null,
+      sections: dropAtBar
+        ? [
+            {
+              type: "drop" as const,
+              startMs: dropAtBar * ((4 * 60_000) / bpm),
+              endMs: (dropAtBar + 16) * ((4 * 60_000) / bpm),
+              startBar: dropAtBar,
+              endBar: dropAtBar + 16,
+              confidence: 0.9,
+              sectionEnergy: 0.9,
+            },
+          ]
+        : [],
+      downbeatTimesMs: downbeatsFor(bpm),
+      downbeatConfidence: 0.9,
+      beatTimesMs: [],
+      headEnergy: null,
+      tailEnergy: null,
+      integratedLufs: null,
+      keyConfidence: null,
+      audioStartMs: null,
+      audioEndMs: null,
+      mixInMs: null,
+      mixOutMs: null,
+      tempoStability: null,
+      descriptors: {
+        energy: null,
+        danceability: null,
+        valence: null,
+        acousticness: null,
+        melodicness: null,
+        subBassRatio: null,
+        brightness: null,
+        suggestedEnergy: 6,
+        bars: {
+          rms: Array.from({ length: 144 }, () => 0.5),
+          syncopation,
+        },
+      },
+    });
+    const track = (id: string, bpm: number, syncopation: number[], dropAtBar: number | null) => ({
+      id,
+      durationMs: 200_000,
+      energy: 5,
+      bpm,
+      camelotKey: "8A",
+      analysis: analysisFor(bpm, syncopation, dropAtBar),
+    });
+
+    const straight = Array.from({ length: 144 }, () => 0.05);
+    const regional = Array.from({ length: 144 }, (_, bar) => (bar >= 16 && bar < 32 ? 0.95 : 0.05));
+    // Missing evidence EVERYWHERE except the conflicted region: no shift
+    // candidate (+16/-16/+32/-32) lands on measured material, so none is a
+    // measured recovery and the crossfade fallback must stand.
+    const conflictedThenNull = Array.from({ length: 144 }, (_, bar) =>
+      bar >= 16 && bar < 32 ? 0.95 : (null as unknown as number),
+    );
+
+    // T1's reproduced case: 174 outgoing, 178 incoming. The old output-time
+    // shift introduced ~162 ms of projected beat residual; the source-time
+    // shift must land on the incoming's own grid (residual ~0) and the
+    // alignment bake must describe the new interval.
+    for (const incomingBpm of [170, 178]) {
+      const outgoing = track("t1-out", 174, straight, null);
+      const incoming = track(`t1-in-${incomingBpm}`, incomingBpm, regional, 32);
+      const chosen = chooseTransition(outgoing, incoming, {
+        chainTargetBpm: 174,
+      });
+      expect(chosen.transition.type).toBe("phrase_mix");
+      const shift = chosen.transition.parameters.windowShiftBars as number;
+      expect(shift).toBeGreaterThanOrEqual(16);
+      // The incoming grid projects the shifted mix-in onto its own beat
+      // grid: nearest downbeat distance ~0, not ~160 ms.
+      const incomingBeatMs = (4 * 60_000) / incomingBpm;
+      const mixIn = chosen.transition.parameters.mixInMs as number;
+      const downbeat = incoming.analysis.downbeatTimesMs[0] ?? 0;
+      const phase =
+        (((mixIn - downbeat) % (incomingBeatMs * 4)) + incomingBeatMs * 4) % (incomingBeatMs * 4);
+      const distanceToBar = Math.min(phase, incomingBeatMs * 4 - phase);
+      expect(distanceToBar).toBeLessThan(5);
+      // The alignment bake refreshed the offset for the new interval.
+      expect(chosen.transition.parameters.downbeatOffsetMs).toBeDefined();
+    }
+
+    // Unknown evidence after the conflicted region is NOT a recovery: the
+    // crossfade fallback stands instead of a claimed resolution.
+    const outgoing = track("t1-out2", 174, straight, null);
+    const unknown = track("t1-unknown", 174, conflictedThenNull, 32);
+    const fallback = chooseTransition(outgoing, unknown, { chainTargetBpm: 174 });
+    if (fallback.transition.type === "phrase_mix") {
+      // If it aligned, it must NOT claim a shift-based resolution on
+      // missing evidence.
+      expect(fallback.transition.parameters.windowShiftReason).toBeUndefined();
+    } else {
+      expect(fallback.transition.parameters.reason).toBe("groove-syncopation-conflict");
+    }
+  });
+
   it("recovers a structurally conflicted join with a whole-phrase window shift before crossfading (Batch D)", async () => {
     const { chooseTransition } = await import("../src/planning/timeline.ts");
     const barMs = (4 * 60_000) / 174;
