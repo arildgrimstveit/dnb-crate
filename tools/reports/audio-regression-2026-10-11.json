@@ -1,0 +1,121 @@
+{
+  "generatedAt": "2026-10-11T20:28:06.294Z",
+  "bpm": 174,
+  "bars": 16,
+  "renderer": "real ffmpeg",
+  "results": [
+    {
+      "id": "aligned",
+      "description": "aligned control (0 ms)",
+      "expected": "pass",
+      "status": "pass",
+      "measuredOffsetMs": 0,
+      "driftMs": 0,
+      "outgoingLocked": 63,
+      "incomingLocked": 63,
+      "sourceIdentity": "verified",
+      "runtimeMs": 10103,
+      "classification": "true-negative"
+    },
+    {
+      "id": "shift-40",
+      "description": "incoming placed +40 ms late",
+      "expected": "flag",
+      "status": "review",
+      "measuredOffsetMs": 40,
+      "driftMs": 0,
+      "outgoingLocked": 63,
+      "incomingLocked": 64,
+      "sourceIdentity": "verified",
+      "runtimeMs": 10124,
+      "classification": "true-positive"
+    },
+    {
+      "id": "shift-80",
+      "description": "incoming placed +80 ms late",
+      "expected": "flag",
+      "status": "review",
+      "measuredOffsetMs": 80,
+      "driftMs": 0,
+      "outgoingLocked": 63,
+      "incomingLocked": 64,
+      "sourceIdentity": "verified",
+      "runtimeMs": 10086,
+      "classification": "true-positive"
+    },
+    {
+      "id": "shift-140",
+      "description": "incoming placed +140 ms late",
+      "expected": "flag",
+      "status": "fail",
+      "measuredOffsetMs": 123.09600000004139,
+      "driftMs": 24.151999999921827,
+      "outgoingLocked": 63,
+      "incomingLocked": 15,
+      "sourceIdentity": "verified",
+      "runtimeMs": 10035,
+      "classification": "true-positive"
+    },
+    {
+      "id": "whole-beat",
+      "description": "incoming one whole beat apart (phase-equivalent by design)",
+      "expected": "pass",
+      "status": "pass",
+      "measuredOffsetMs": 0,
+      "driftMs": 0,
+      "outgoingLocked": 63,
+      "incomingLocked": 63,
+      "sourceIdentity": "verified",
+      "runtimeMs": 10036,
+      "classification": "true-negative"
+    },
+    {
+      "id": "half-beat",
+      "description": "incoming half a beat apart (~172 ms)",
+      "expected": "flag",
+      "status": "unmeasured",
+      "measuredOffsetMs": null,
+      "driftMs": null,
+      "outgoingLocked": 63,
+      "incomingLocked": 0,
+      "sourceIdentity": "verified",
+      "runtimeMs": 10086,
+      "classification": "FALSE-PASS"
+    },
+    {
+      "id": "drift",
+      "description": "incoming tempo +0.4% against its grid (slow drift)",
+      "expected": "flag",
+      "status": "review",
+      "measuredOffsetMs": 40,
+      "driftMs": 40,
+      "outgoingLocked": 63,
+      "incomingLocked": 63,
+      "sourceIdentity": "verified",
+      "runtimeMs": 10068,
+      "classification": "true-positive"
+    },
+    {
+      "id": "sparse",
+      "description": "incoming kicks only in the first bar (sparse evidence)",
+      "expected": "abstain",
+      "status": "unmeasured",
+      "measuredOffsetMs": null,
+      "driftMs": null,
+      "outgoingLocked": 63,
+      "incomingLocked": 4,
+      "sourceIdentity": "verified",
+      "runtimeMs": 10037,
+      "classification": "abstention"
+    }
+  ],
+  "summary": {
+    "cases": 8,
+    "truePositives": 4,
+    "trueNegatives": 2,
+    "abstentions": 1,
+    "falsePasses": 1,
+    "falseFails": 0,
+    "totalRuntimeMs": 80575
+  }
+}

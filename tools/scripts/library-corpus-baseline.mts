@@ -28,7 +28,7 @@
  * Usage: pnpm tsx tools/scripts/library-corpus-baseline.mts [plans=3] [minutes=15]
  * Writes tools/reports/library-baseline-<date>.json + .audition.md
  */
-import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -58,6 +58,27 @@ type JoinRow = {
   probeLocked: string | null;
   sourceIdentity: string | null;
   pairHoldout: "tuning" | "holdout";
+  /** T8: provenance the review found missing - exact windows, alignment
+   * pins, grid evidence sources, and IDs, so a failed check can be root-caused
+   * from the report alone. */
+  outgoingSourceStartMs: number;
+  outgoingSourceEndMs: number;
+  incomingSourceStartMs: number;
+  incomingSourceEndMs: number;
+  barCount: number;
+  reason: string | null;
+  windowShiftBars: number | null;
+  downbeatOffsetMs: number | null;
+  alignmentPeriodMs: number | null;
+  alignmentMode: string | null;
+  onsetLockBeats: number | null;
+  outgoingGridSource: string | null;
+  incomingGridSource: string | null;
+  outgoingGridConfidence: number | null;
+  incomingGridConfidence: number | null;
+  transitionId: string;
+  outgoingTrackId: string;
+  incomingTrackId: string;
 };
 
 type PlanRow = {
@@ -90,18 +111,48 @@ async function main() {
   );
   await mkdir(path.join(scratch, "output"), { recursive: true });
   const dbCopy = path.join(scratch, "catalog.sqlite");
-  await copyFile(config.databasePath, dbCopy);
+  // T8: SQLite's backup API, not copyFile — the catalog runs WAL, and a
+  // plain file copy can miss committed WAL contents, so the snapshot is
+  // not the promised reproducible state. backup() reads through WAL.
+  {
+    const { createRequire } = await import("node:module");
+    const require = createRequire(
+      path.join(import.meta.dirname, "../../packages/catalog/package.json"),
+    );
+    const Database = require("better-sqlite3") as new (
+      path: string,
+      options?: unknown,
+    ) => {
+      backup(destination: string): Promise<void>;
+      close(): void;
+    };
+    const source = new Database(config.databasePath, { readonly: true });
+    await source.backup(dbCopy);
+    source.close();
+  }
 
-  // A live worker may be writing the real DB; wait briefly for a quiet
-  // copy is unnecessary - SQLite copies of a checkpointed file are
-  // consistent enough for planning, and every write in this run targets
-  // the copy only.
+  // Every write in this run targets the copy only; the owner's catalog is
+  // never touched. Pending jobs/ownership copied from the live catalog are
+  // cleared so the isolated corpus work is the only work this snapshot
+  // carries (T8: no unintended copied job execution).
   const runtime = createCatalogRuntime({
     ...config,
     databasePath: dbCopy,
     outputRoot: path.join(scratch, "output"),
     logLevel: "error",
   });
+  runtime.db
+    .prepare(
+      "UPDATE render_jobs SET status = 'cancelled', error_code = 'SNAPSHOT_CANCELLED', error_message = 'Cancelled by the corpus snapshot' WHERE status IN ('queued','running')",
+    )
+    .run();
+  runtime.db
+    .prepare("UPDATE analysis_jobs SET status = 'cancelled' WHERE status IN ('queued','running')")
+    .run();
+  runtime.db
+    .prepare("UPDATE enrichment_jobs SET status = 'cancelled' WHERE status IN ('queued','running')")
+    .run();
+  runtime.db.prepare("DELETE FROM worker_owner").run();
 
   const planRows: PlanRow[] = [];
   const pairOccurrences = new Map<string, number>();
@@ -193,6 +244,11 @@ async function main() {
       const titles = new Map(
         sorted.map((entry) => [entry.id, runtime.repository.findById(entry.trackId)?.title ?? "?"]),
       );
+      const gridOf = (trackId: string) =>
+        runtime.analyses.findByTrackId(trackId) as {
+          gridSource?: string | null;
+          bpmConfidence?: number | null;
+        } | null;
 
       // Render + check.
       let renderMs: number | null = null;
@@ -262,6 +318,33 @@ async function main() {
             : null,
           sourceIdentity: probe ? String(probe.sourceIdentity) : null,
           pairHoldout: stableSplit(pairKey),
+          outgoingSourceStartMs: outgoing.sourceStartMs,
+          outgoingSourceEndMs: outgoing.sourceEndMs,
+          incomingSourceStartMs: incoming.sourceStartMs,
+          incomingSourceEndMs: incoming.sourceEndMs,
+          downbeatOffsetMs:
+            typeof transition.parameters.downbeatOffsetMs === "number"
+              ? transition.parameters.downbeatOffsetMs
+              : null,
+          alignmentPeriodMs:
+            typeof transition.parameters.alignmentPeriodMs === "number"
+              ? transition.parameters.alignmentPeriodMs
+              : null,
+          alignmentMode:
+            typeof transition.parameters.alignmentMode === "string"
+              ? transition.parameters.alignmentMode
+              : null,
+          onsetLockBeats:
+            typeof transition.parameters.onsetLockBeats === "number"
+              ? transition.parameters.onsetLockBeats
+              : null,
+          outgoingGridSource: gridOf(outgoing.trackId)?.gridSource ?? null,
+          incomingGridSource: gridOf(incoming.trackId)?.gridSource ?? null,
+          outgoingGridConfidence: gridOf(outgoing.trackId)?.bpmConfidence ?? null,
+          incomingGridConfidence: gridOf(incoming.trackId)?.bpmConfidence ?? null,
+          transitionId: transition.id,
+          outgoingTrackId: outgoing.trackId,
+          incomingTrackId: incoming.trackId,
         });
       }
 

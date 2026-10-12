@@ -303,3 +303,38 @@ source-deck probe's verdicts (no saved joins, no history - cold catalog):
 Plan-window placement errors are healed by the renderer's own alignment
 application, so the corpus injects defects as AUDIO offset against the stored
 grid - the stale-grid defect class the verifier exists to catch.
+
+### Real-library pilot failed-check cases (12 October 2026, T8 investigation)
+
+Traced from the corpus scratch catalog (deterministic re-run, seeds 101/102) through
+the stored joins, alignment provenance, and grid evidence. Both renders succeeded;
+both output checks failed on stored-grid residual + corroborating deck-probe offsets.
+
+1. **Girl In The Fire -> All Fall Down (Fred V & Grafix Remix)** - residual 120 ms,
+   probe offset 108.3 ms (fail). Provenance: phrase_mix 32 bars, geometric BAR-mode
+   offset **-298 ms**, period 1379.3, **no onset lock**. The incoming's grid is
+   **reference-locked at confidence 0.6** (manual/published 174 written onto analysis):
+   a low-confidence reference grid whose beat times can disagree with the track's own
+   audio. The sub-bar geometric offset rode label disagreement the onset-lock never
+   corroborated; the probe measured the real ~108 ms drum disagreement.
+
+2. **Witchcraft -> Atmosphere** - residual 60 ms, probe offset 49.7 ms (review).
+   Provenance: phrase_mix 32 bars at rate 1.0057 (175 target over 174 grids),
+   geometric BAR-mode offset **-634 ms** (46 percent of the bar - near half-bar),
+   period 1371.4, **no onset lock**. Both grids analyzed (0.929/0.935). Again a
+   sub-bar geometric offset without drum corroboration; decks sit ~50 ms apart.
+
+Common shape: **bar-mode geometric alignment with sub-bar offsets (-298/-634 ms)
+and NO onset-lock slip**. Passing joins in the same pilot either had small
+geometric offsets (<10 ms) or large offsets CORROBORATED by the onset lock
+(whole-beat slips of -8/+8 beats). The known beatmatching blind spot (downbeat
+label disagreement alone is not drum evidence) is visible in real material.
+
+Engineering follow-up (NOT a threshold change): alignment that lands a sub-bar
+geometric offset without onset-lock corroboration should either run an
+independent phase candidate check against the overlap-local drums or mark the
+join's alignment confidence down so checks surface it. The half-beat-adjacent
+-634 ms case overlaps the corpus half-beat blind spot (separate item). Also:
+reference-locked grids at low confidence (0.6) currently pass freshness because
+the reference is an intentional lock; their disagreement with the track's own
+audio deserves an explicit diagnostic, not silent acceptance.
