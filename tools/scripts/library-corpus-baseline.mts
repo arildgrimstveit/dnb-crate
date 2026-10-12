@@ -28,7 +28,7 @@
  * Usage: pnpm tsx tools/scripts/library-corpus-baseline.mts [plans=3] [minutes=15]
  * Writes tools/reports/library-baseline-<date>.json + .audition.md
  */
-import { copyFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -214,7 +214,7 @@ async function main() {
           });
           checkOk = checked.ok;
           checkWarnings = checked.warnings.length;
-          checkJoins = checked.joins as unknown as Array<Record<string, unknown>>;
+          checkJoins = checked.joins.map((join) => join as unknown as Record<string, unknown>);
         }
       } catch (error) {
         renderStatus = `error: ${error instanceof Error ? error.message : String(error)}`;
@@ -257,7 +257,9 @@ async function main() {
             probe && probe.verification
               ? ((probe.verification as Record<string, unknown>).deckOffsetMs as number | null)
               : null,
-          probeLocked: probe ? `${probe.outgoingLockedCount}/${probe.incomingLockedCount}` : null,
+          probeLocked: probe
+            ? `${String(probe.outgoingLockedCount)}/${String(probe.incomingLockedCount)}`
+            : null,
           sourceIdentity: probe ? String(probe.sourceIdentity) : null,
           pairHoldout: stableSplit(pairKey),
         });
@@ -268,7 +270,7 @@ async function main() {
         name,
         entryCount: sorted.length,
         partial: created.partial,
-        partialReasons: created.partialReasons,
+        partialReasons: created.quality.partialReasons ?? [],
         selectedCount: created.explanation.selected?.length ?? 0,
         rejectedCount: created.explanation.rejected?.length ?? 0,
         planMs,
