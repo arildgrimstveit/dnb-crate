@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import DatabaseDefault from "better-sqlite3";
 import type { Database } from "better-sqlite3";
 import type { AppConfig } from "@dnb-crate/domain";
 
@@ -500,8 +501,166 @@ describe("worker ownership fencing (review item 5)", () => {
     ).n;
     expect(stages).toBe(0);
     expect(ownerB.repository.findById(trackId)!.analysisStatus).not.toBe("complete");
-    const job = ownerB.analysisJobs.findById(started.job.id)!;
-    expect(job.status).toBe("failed");
+    const t2Job = ownerB.analysisJobs.findById(started.job.id)!;
+    expect(t2Job.status).toBe("failed");
     winner.release();
   }, 30_000);
+
+  it("publication is claim-atomic across processes: no interleaving between check and rename (T3)", async () => {
+    const root = path.join(os.tmpdir(), `dnb-t3-race-${crypto.randomUUID()}`);
+    await mkdir(root, { recursive: true });
+    const catalog = createCatalogRuntime(testConfig(root), undefined, {
+      useFakeFfmpeg: true,
+      passive: true,
+    });
+    cleanups.push(() => catalog.close());
+
+    const library = path.join(root, "library");
+    await mkdir(library, { recursive: true });
+    const { writeSineWav: writeWav } = await import("../src/index.ts");
+    await writeWav(path.join(library, "a.wav"), { title: "Alpha", durationMs: 2000 });
+    await catalog.service.scanLibrary();
+    const trackId = catalog.repository.listAll()[0]!.id;
+
+    // A minimal stored plan to satisfy the render-job foreign key.
+    const planId = crypto.randomUUID();
+    catalog.setPlans.save(
+      {
+        schemaVersion: 1,
+        id: planId,
+        name: "t3-race",
+        targetDurationMs: 15_000,
+        targetBpm: 174,
+        requestedArc: [
+          { atFraction: 0, targetEnergy: 3 },
+          { atFraction: 1, targetEnergy: 6 },
+        ],
+        entries: [
+          {
+            id: crypto.randomUUID(),
+            trackId,
+            order: 0,
+            sourceStartMs: 0,
+            sourceEndMs: 2000,
+            timelineStartMs: 0,
+            playbackRate: 1,
+            gainDb: 0,
+            transitionToNext: null,
+          },
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      1,
+      { seed: 1, selected: [], rejected: [], harmonicCoverage: { knownJoins: 0, totalJoins: 0 } },
+    );
+
+    const makeJob = (token: string) => {
+      const jobId = crypto.randomUUID();
+      catalog.renderJobs.insertQueued({ id: jobId, kind: "full", setPlanId: planId });
+      catalog.renderJobs.claimNextQueued(token);
+      return jobId;
+    };
+    const dbPath = path.join(root, "catalog.sqlite");
+    const { writeFile, readFile } = await import("node:fs/promises");
+
+    // Scenario 1: the winner has ALREADY recovered and published; the
+    // deposed owner's publish attempt must skip entirely (its check sees
+    // the lost claim) and the winner's bytes stay intact.
+    const jobId1 = makeJob("deposed-1");
+    const winnerFile1 = path.join(root, "listen-1.flac");
+    await writeFile(winnerFile1, "winner-bytes-1");
+    const dbB1 = new DatabaseDefault(dbPath) as unknown as {
+      prepare: (sql: string) => { run: (...args: unknown[]) => unknown };
+      close: () => void;
+    };
+    dbB1
+      .prepare(
+        "UPDATE render_jobs SET status = 'failed', error_code = 'RENDER_INTERRUPTED', claimed_by = NULL WHERE id = ?",
+      )
+      .run(jobId1);
+    dbB1.close();
+    let renamed1 = false;
+    const published1 = await catalog.renderJobs.publishUnderClaim(jobId1, "deposed-1", async () => {
+      renamed1 = true;
+      await writeFile(winnerFile1, "deposed-bytes");
+    });
+    expect(published1).toBe(false);
+    expect(renamed1).toBe(false);
+    expect(await readFile(winnerFile1, "utf8")).toBe("winner-bytes-1");
+
+    // Scenario 2: the takeover write is issued WHILE the publisher's
+    // transaction is open (between its claim check and its rename). The
+    // competing writer is a real CHILD PROCESS (better-sqlite3 writes are
+    // synchronous and would freeze this process's event loop) — its UPDATE
+    // blocks on the database write lock until the publisher commits,
+    // proving no cross-process recovery can interleave between check and
+    // rename.
+    const jobId2 = makeJob("deposed-2");
+    const target2 = path.join(root, "listen-2.flac");
+    let renameStarted = false;
+    let releaseRename: (() => void) | null = null;
+    const renameGate = new Promise<void>((resolve) => {
+      releaseRename = resolve;
+    });
+    const { spawn } = await import("node:child_process");
+    const { createRequire } = await import("node:module");
+    const modPath = createRequire(
+      "C:/Users/arild/repos/dnb-crate/packages/catalog/package.json",
+    ).resolve("better-sqlite3");
+    const child = spawn(process.execPath, [
+      "-e",
+      `
+      const Database = require(${JSON.stringify(modPath)});
+      const db = new Database(${JSON.stringify(dbPath)});
+      process.stdin.resume();
+      process.stdin.on("data", () => {
+        try {
+          db.prepare("UPDATE render_jobs SET status = 'failed', error_code = 'RENDER_INTERRUPTED', claimed_by = NULL WHERE id = ?").run(${JSON.stringify(jobId2)});
+          process.stdout.write("done");
+        } catch (error) {
+          process.stdout.write("error:" + (error && error.message));
+        }
+      });
+    `,
+    ]);
+    const childDone = new Promise<string>((resolve) => {
+      let out = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        out += chunk.toString();
+        if (out.includes("done") || out.includes("error:")) {
+          resolve(out.trim());
+        }
+      });
+    });
+    // Give the child time to open its connection, then start the publish
+    // transaction with a rename that waits on our gate.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const publishPromise = catalog.renderJobs.publishUnderClaim(jobId2, "deposed-2", async () => {
+      renameStarted = true;
+      await renameGate;
+      await writeFile(target2, "deposed-published");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(renameStarted).toBe(true);
+    // Fire the child's takeover write: it must BLOCK on the write lock.
+    child.stdin.write("go");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    // The child has not completed — its write is excluded by the open
+    // publish transaction.
+    expect(
+      await Promise.race([
+        childDone,
+        new Promise<string>((resolve) => setTimeout(() => resolve("__pending"), 50)),
+      ]),
+    ).toBe("__pending");
+    // Release the rename; the publish commits; the child's write proceeds.
+    (releaseRename as unknown as () => void)();
+    const published2 = await publishPromise;
+    expect(published2).toBe(true);
+    expect(await childDone).toBe("done");
+    child.kill();
+    expect(catalog.renderJobs.require(jobId2).status).toBe("failed");
+    expect(await readFile(target2, "utf8")).toBe("deposed-published");
+  }, 60_000);
 });

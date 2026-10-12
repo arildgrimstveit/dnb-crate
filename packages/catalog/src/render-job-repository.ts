@@ -338,6 +338,52 @@ export class RenderJobRepository {
     return Boolean(row && row.status === "running" && row.claimed_by === ownerToken);
   }
 
+  /**
+   * T3 (12 October review): ownership-conditioned cross-process publication.
+   * The claim check and the filesystem rename are made atomic with respect
+   * to the job row by holding SQLite's write lock (BEGIN IMMEDIATE) across
+   * both: a competing process — takeover recovery re-marking the job, or
+   * the new owner re-claiming and publishing — cannot interleave between
+   * the check and the publish, because its own write blocks on the same
+   * database file lock. This closes the check/rename race a plain
+   * re-check-after-measurement leaves open.
+   *
+   * Returns true when the claim held and the artifact was published; false
+   * when the claim was already lost (nothing is written). The publish
+   * callback runs while the write lock is held — it must be fast and must
+   * not acquire the same database.
+   */
+  async publishUnderClaim(
+    jobId: string,
+    ownerToken: string | null | undefined,
+    publish: () => Promise<void>,
+  ): Promise<boolean> {
+    if (ownerToken == null) {
+      return false;
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db
+        .prepare(`SELECT status, claimed_by FROM render_jobs WHERE id = ?`)
+        .get(jobId) as { status: string; claimed_by: string | null } | undefined;
+      const current = Boolean(row && row.status === "running" && row.claimed_by === ownerToken);
+      if (!current) {
+        this.db.exec("ROLLBACK");
+        return false;
+      }
+      await publish();
+      this.db.exec("COMMIT");
+      return true;
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // already rolled back or connection-level failure
+      }
+      throw error;
+    }
+  }
+
   failRunningAsInterrupted(): number {
     const result = this.db
       .prepare(

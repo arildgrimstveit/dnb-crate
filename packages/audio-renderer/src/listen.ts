@@ -103,7 +103,18 @@ async function atomicReplace(fromPath: string, toPath: string): Promise<void> {
 
 /** 16-bit 48 kHz FLAC from a 24-bit master. Dithered. Copies tags and chapters.
  * `options.gainDb` applies a static attenuation BEFORE the dither stage — the
- * dither-compensation retry path. */
+ * dither-compensation retry path.
+ * `options.publishGuard` replaces the internal publication step: it receives
+ * the staged path and performs the final rename ONLY when its ownership
+ * condition holds (T3). Returning without throwing means published; throwing
+ * `ListenPublishSkipped` skips publication (the staged file is cleaned up). */
+export class ListenPublishSkipped extends Error {
+  constructor(reason: string) {
+    super(`Listen publication skipped: ${reason}`);
+    this.name = "ListenPublishSkipped";
+  }
+}
+
 export async function encodeListenFlac(
   runner: ProcessRunner,
   binaries: FfmpegBinaries,
@@ -111,7 +122,13 @@ export async function encodeListenFlac(
   outputPath: string,
   abortSignal?: AbortSignal,
   verifyStaged?: (stagedPath: string) => Promise<void>,
-  options?: { gainDb?: number },
+  options?: {
+    gainDb?: number;
+    publishGuard?: (
+      stagedPath: string,
+      replace: (from: string, to: string) => Promise<void>,
+    ) => Promise<void>;
+  },
 ): Promise<void> {
   if (abortSignal?.aborted) {
     const error = new Error("Render cancelled");
@@ -163,14 +180,22 @@ export async function encodeListenFlac(
       );
     }
     await verifyStaged?.(partial);
-    await withPublishLock(outputPath, async () => {
-      if (abortSignal?.aborted) {
-        const error = new Error("Render cancelled");
-        error.name = "AbortError";
-        throw error;
-      }
-      await atomicReplace(partial, outputPath);
-    });
+    const replace = async (from: string, to: string) => atomicReplace(from, to);
+    if (options?.publishGuard) {
+      // T3: ownership-conditioned publication — the guard decides whether
+      // this owner still has the right to replace the shared artifact, and
+      // performs the rename atomically with its ownership check.
+      await options.publishGuard(partial, replace);
+    } else {
+      await withPublishLock(outputPath, async () => {
+        if (abortSignal?.aborted) {
+          const error = new Error("Render cancelled");
+          error.name = "AbortError";
+          throw error;
+        }
+        await atomicReplace(partial, outputPath);
+      });
+    }
   } finally {
     await removeIfPresent(partial);
   }

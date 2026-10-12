@@ -1697,7 +1697,30 @@ export class RenderCoordinator {
                     });
                   }
                 },
-                gainDb != null ? { gainDb } : undefined,
+                {
+                  ...(gainDb != null ? { gainDb } : {}),
+                  // T3: the final rename happens inside the job row's write
+                  // transaction, claim-verified — a competing owner's
+                  // recovery/publish write cannot interleave between the
+                  // check and the rename (cross-process, via SQLite's
+                  // database file lock).
+                  publishGuard: async (stagedPath, replace) => {
+                    const published = await this.jobs.publishUnderClaim(
+                      job.id,
+                      claimToken,
+                      async () => {
+                        await replace(stagedPath, listenAbs);
+                      },
+                    );
+                    if (!published) {
+                      throw new DomainError(
+                        "RENDER_FAILED",
+                        "Render claim lost to a takeover at listen publication; staged copy discarded",
+                        { retryable: true, details: { jobId: job.id } },
+                      );
+                    }
+                  },
+                },
               );
             };
             try {
