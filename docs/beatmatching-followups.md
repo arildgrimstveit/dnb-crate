@@ -364,3 +364,21 @@ the follow-up; do not tune thresholds over it.
 Attribution limit (documented in the suite): the mixed overlap cannot say
 WHICH deck is off - the source-probe suite localizes the side. Per-deck stem
 capture during preparation is the named next stage (T7 acceptance).
+
+### Stretch-engine latency measurement (12 October 2026, T7 follow-up)
+
+`tools/scripts/measure-stretch-latency.mts` renders the same 174 BPM kick train
+through atempo and rubberband at rate 175/174 and measures each output against
+its OWN stretched grid (the picker bias is common to all files, so residual
+differences are the filter's group delay):
+
+- rubberband: **zero added latency** (median residual identical to the raw file)
+- atempo: **+12.8 ms group delay** vs its stretched grid
+
+The renderer's preferred rubberband path is clean. The atempo FALLBACK shifts
+every stretched deck ~13 ms late against its projected grid - the processed-deck
+corpus's +24.8 ms unequal-rate finding is consistent with atempo'd decks (the
+machine's engine availability determines which engine ran). Follow-up: either
+compensate placement by the measured atempo delay when the fallback engages, or
+surface the engine choice in the manifest so the corpus can stratify by engine.
+Per-deck stem capture (T7 next stage) separates the two decks' contributions.
