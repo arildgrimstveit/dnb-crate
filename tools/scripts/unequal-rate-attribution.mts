@@ -195,8 +195,7 @@ async function renderCase(incomingBpm: number, targetBpm: number): Promise<Rende
         overlapMs: OVERLAP_MS,
         outgoingRate: outRate,
         incomingRate: inRate,
-        phraseBarCount:
-          OVERLAP_BARS === 8 || OVERLAP_BARS === 16 || OVERLAP_BARS === 32 ? OVERLAP_BARS : 16,
+        phraseBarCount: OVERLAP_BARS,
       },
       outgoingDurationMs: outRow.durationMs,
       incomingDurationMs: inRow.durationMs,

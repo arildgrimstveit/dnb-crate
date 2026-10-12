@@ -52,9 +52,7 @@
       "driftMs": 3.4,
       "onsetCount": 63,
       "offsetErrorVsInjectedMs": null,
-      "stretchEngines": [
-        "none"
-      ],
+      "stretchEngines": ["none"],
       "runtimeMs": 8345,
       "detail": "defect cluster -20.7 ms (19% of onsets)"
     },
@@ -67,9 +65,7 @@
       "driftMs": 0,
       "onsetCount": 64,
       "offsetErrorVsInjectedMs": null,
-      "stretchEngines": [
-        "rubberband-r3"
-      ],
+      "stretchEngines": ["rubberband-r3"],
       "runtimeMs": 16506,
       "detail": "defect cluster -20.9 ms (20% of onsets)"
     },
@@ -82,9 +78,7 @@
       "driftMs": 4.5,
       "onsetCount": 64,
       "offsetErrorVsInjectedMs": 9.7,
-      "stretchEngines": [
-        "none"
-      ],
+      "stretchEngines": ["none"],
       "runtimeMs": 8218,
       "detail": "defect cluster -49.7 ms (56% of onsets)"
     },
@@ -97,9 +91,7 @@
       "driftMs": 4.1,
       "onsetCount": 65,
       "offsetErrorVsInjectedMs": 9.7,
-      "stretchEngines": [
-        "none"
-      ],
+      "stretchEngines": ["none"],
       "runtimeMs": 8227,
       "detail": "defect cluster -89.7 ms (55% of onsets)"
     },
@@ -112,9 +104,7 @@
       "driftMs": 4.1,
       "onsetCount": 64,
       "offsetErrorVsInjectedMs": null,
-      "stretchEngines": [
-        "none"
-      ],
+      "stretchEngines": ["none"],
       "runtimeMs": 8225,
       "detail": "defect cluster 111.7 ms (55% of onsets)"
     },
@@ -127,9 +117,7 @@
       "driftMs": 3.4,
       "onsetCount": 34,
       "offsetErrorVsInjectedMs": null,
-      "stretchEngines": [
-        "none"
-      ],
+      "stretchEngines": ["none"],
       "runtimeMs": 8218,
       "detail": "defect cluster 24.1 ms (15% of onsets)"
     }
