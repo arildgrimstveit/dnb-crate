@@ -480,3 +480,27 @@ isolation). Remaining named follow-ups: the acrossfade (equal-power) path
 shares the boundary-anchoring exposure in principle but only unpinned plans
 use it (planner-healed); the atempo fallback's -14.2 ms group delay remains
 uncompensated.
+
+### Q04 body-gain A/B verdict: no audible difference (owner, 13 October 2026)
+
+The 35-track "Full throttle" variant (solver gains, reference -7.4 LUFS,
+all attenuation) vs the original at matched volume: the owner cannot hear
+a difference. The report data explains why, and the numbers make this a
+GOOD result for the current system:
+
+- Whole-track vs body-window loudness disagreement across the 35 tracks:
+  median 0.6 LU, p90 1.1, max 1.5. DnB masters are loudness-uniform and
+  the planner's windows already skip quiet intros/outros, so integrated
+  ~ body for this material.
+- Per-join RELATIVE gain change between the two policies: median 0.9 dB,
+  p90 1.9, max 2.6 - at or below the just-noticeable difference for
+  program material.
+
+Calibration decision: do NOT flip the default gain policy. Keep whole-
+track matching as the default and hold the solver for OUTLIER correction -
+tracks whose body-vs-integrated disagreement is large (the reproduced
+5.9 LU class: quiet intros/outros dominating integrated, or hot masters
+next to dynamic material). Candidate trigger: body-vs-integrated
+disagreement > 2 LU, to be validated on corpus fixtures of that class.
+The storage (track_loudness) and reader/solver remain the foundation for
+that trigger and for Q12 recovery.
