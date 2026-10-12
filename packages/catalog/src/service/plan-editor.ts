@@ -266,6 +266,21 @@ export function applySetPlanUpdate(
           : outgoing.transitionToNext.incomingCuePointId,
       parameters: input.applyTransition.parameters ?? outgoing.transitionToNext.parameters,
     };
+    // T4 (12 October review): the applied transition is JOINTLY RESOLVED for
+    // exactly this ordered pair - its rates and windows are authority, not a
+    // replacement placeholder. Caller-supplied parameter objects commonly
+    // lack the internal incomingTrackId stamp, which made the S3 rate
+    // preservation treat the incoming rate as untrusted and re-derived it to
+    // 1 on the next rebuild while the chooser branch (kept transition) never
+    // re-ran. Stamp the pair identity here so rebuilds trust the applied
+    // geometry; an intentional user rate pin still wins via rateSource.
+    const applied = outgoing.transitionToNext;
+    if (typeof applied.parameters.incomingTrackId !== "string") {
+      applied.parameters = {
+        ...applied.parameters,
+        incomingTrackId: incoming.trackId,
+      };
+    }
     if (input.applyTransition.parameters === undefined) {
       // Caller moved windows without specifying alignment; carried-over pins
       // describe the OLD windows and the renderer applies them verbatim.

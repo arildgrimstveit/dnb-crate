@@ -3731,6 +3731,70 @@ describe("join inspector (batch 9)", () => {
     expect(fallback.transition.parameters.reason).toBe("groove-syncopation-conflict");
   });
 
+  it("applying a transition preserves its incoming rate through rebuild (T4)", () => {
+    const catalog = runtime();
+    for (let i = 0; i < 16; i += 1) {
+      const id = seedTrack(catalog, {
+        title: `T4 Chain ${i}`,
+        artist: `T4 Artist ${i}`,
+        bpm: 174,
+        camelot: "8A",
+        energy: 5,
+        durationMs: 200_000,
+      });
+      stubDescriptors(catalog, id, {});
+    }
+    const created = createPlan(catalog, {
+      name: "T4 fixture",
+      targetDurationMs: 700_000,
+      seed: 21,
+      explorationWeight: 0,
+    });
+    const sorted = [...created.plan.entries].sort((a, b) => a.order - b.order);
+    expect(sorted.length).toBeGreaterThanOrEqual(4);
+    // Apply a proposal-style transition to join 1 with EXPLICIT rates and
+    // fresh parameters that (as real callers supply them) lack the internal
+    // incomingTrackId stamp.
+    const outgoing = sorted[1]!;
+    const incoming = sorted[2]!;
+    const applied = catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      applyTransition: {
+        entryId: outgoing.id,
+        type: "phrase_mix",
+        durationMs: 22_069,
+        outgoingPlaybackRate: 1,
+        incomingPlaybackRate: 0.98,
+        outgoingSourceStartMs: 0,
+        outgoingSourceEndMs: 120_000,
+        incomingSourceStartMs: 30_000,
+        incomingSourceEndMs: 199_000,
+        parameters: { barCount: 16, targetBpm: 174 },
+      },
+    });
+    const appliedSorted = [...applied.plan.entries].sort((a, b) => a.order - b.order);
+    expect(appliedSorted[2]!.playbackRate).toBeCloseTo(0.98, 3);
+
+    // The T4 defect: the NEXT rebuild (any later edit anywhere) treated the
+    // supplied incoming rate as untrusted - because the fresh parameters
+    // lacked the pair stamp - and reset it to 1.0 while the kept transition
+    // suppressed chooser re-derivation.
+    const rebuilt = catalog.service.updateSetPlan({
+      setPlanId: created.plan.id,
+      setTrim: {
+        entryId: appliedSorted[appliedSorted.length - 1]!.id,
+        sourceStartMs: 100,
+        sourceEndMs: 99_900,
+      },
+    });
+    const rebuiltSorted = [...rebuilt.plan.entries].sort((a, b) => a.order - b.order);
+    expect(rebuiltSorted[2]!.playbackRate).toBeCloseTo(0.98, 3);
+    // The applied pair stamp survives and identifies the exact pair.
+    const transition = rebuiltSorted[1]!.transitionToNext!;
+    expect(transition.parameters.incomingTrackId).toBe(incoming.trackId);
+    expect(transition.type).toBe("phrase_mix");
+  });
+
   it("drops the resolved-placement flag when a window edit invalidates alignment (S1)", () => {
     const catalog = runtime();
     for (let i = 0; i < 12; i += 1) {
