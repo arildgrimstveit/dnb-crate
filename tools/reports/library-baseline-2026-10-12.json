@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generatedAt": "2026-10-12T12:02:35.682Z",
+    "generatedAt": "2026-10-12T18:37:44.148Z",
     "plans": 3,
     "minutesPerPlan": 15,
     "coldStart": {
@@ -31,13 +31,13 @@
       "crossfadeReasons": {},
       "windowShiftRecoveries": 0,
       "probe": {
-        "pass": 9,
-        "review": 4,
+        "pass": 10,
+        "review": 3,
         "fail": 1,
         "unmeasured": 0,
         "notProbed": 0
       },
-      "residualOver40Ms": 2,
+      "residualOver40Ms": 1,
       "holdout": {
         "tuningJoins": 7,
         "holdoutJoins": 7
@@ -49,15 +49,15 @@
       "distinctArtistsApprox": 17
     },
     "runtime": {
-      "totalPlanMs": 6511,
-      "totalRenderMs": 164130
+      "totalPlanMs": 6558,
+      "totalRenderMs": 147188
     },
     "manualIntervention": {
-      "probeFlagged": 5,
+      "probeFlagged": 4,
       "partialPlans": 0,
       "failedRenders": 0
     },
-    "scratchOutputRoot": "C:\\Users\\arild\\AppData\\Local\\Temp\\dnb-library-corpus-2026-10-12-dbf88a6c\\output"
+    "scratchOutputRoot": "C:\\Users\\arild\\AppData\\Local\\Temp\\dnb-library-corpus-2026-10-12-1fa230b4\\output"
   },
   "plans": [
     {
@@ -68,8 +68,8 @@
       "partialReasons": [],
       "selectedCount": 4,
       "rejectedCount": 50,
-      "planMs": 1800,
-      "renderMs": 35510,
+      "planMs": 1565,
+      "renderMs": 30700,
       "renderStatus": "succeeded",
       "checkOk": false,
       "checkWarnings": 0,
@@ -105,7 +105,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.944,
           "incomingGridConfidence": 0.873,
-          "transitionId": "f1ba94d1-57c0-443a-98f7-d3e0a1df246f",
+          "transitionId": "fe352130-94cb-404f-a238-2ea731748073",
           "outgoingTrackId": "949913b6-ca4d-48d2-91c5-b5796fc9fec8",
           "incomingTrackId": "33866405-ea88-4a1c-9220-cef0af912223"
         },
@@ -139,7 +139,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.873,
           "incomingGridConfidence": 0.899,
-          "transitionId": "a01b351e-a35b-4ab7-9556-7abcc2d27d8e",
+          "transitionId": "063f08b2-4e2e-4df6-9125-4faf5d0d7e4d",
           "outgoingTrackId": "33866405-ea88-4a1c-9220-cef0af912223",
           "incomingTrackId": "ea54b8dc-ac8f-4f61-a236-6e2e6a280a47"
         },
@@ -165,7 +165,7 @@
           "outgoingSourceEndMs": 293520,
           "incomingSourceStartMs": 22103,
           "incomingSourceEndMs": 295173,
-          "downbeatOffsetMs": -298,
+          "downbeatOffsetMs": 47,
           "alignmentPeriodMs": 1379.310344827585,
           "alignmentMode": "bar",
           "onsetLockBeats": null,
@@ -173,7 +173,7 @@
           "incomingGridSource": "reference",
           "outgoingGridConfidence": 0.899,
           "incomingGridConfidence": 0.6,
-          "transitionId": "fba6d6e8-7fd3-4bed-b19a-cb25dcce056b",
+          "transitionId": "d00317c8-a6e0-45d5-8a1d-8b6b3ddd0ad0",
           "outgoingTrackId": "ea54b8dc-ac8f-4f61-a236-6e2e6a280a47",
           "incomingTrackId": "91eba482-08b8-42d1-8071-2b83311fe947"
         }
@@ -187,10 +187,10 @@
       "partialReasons": [],
       "selectedCount": 6,
       "rejectedCount": 50,
-      "planMs": 2242,
-      "renderMs": 83293,
+      "planMs": 2120,
+      "renderMs": 76514,
       "renderStatus": "succeeded",
-      "checkOk": false,
+      "checkOk": true,
       "checkWarnings": 0,
       "listenPath": "renders/corpus-baseline-102.flac",
       "joins": [
@@ -224,7 +224,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.922,
           "incomingGridConfidence": 0.929,
-          "transitionId": "04e0e86d-d7d0-4b3c-84e7-121546748fab",
+          "transitionId": "dc9d0bf0-0663-4c7d-be78-63b404639079",
           "outgoingTrackId": "32f8423f-71dc-4c5e-a59d-38c7af6c1bf7",
           "incomingTrackId": "cd51e05f-eb87-47bf-9a7f-0c322863e61f"
         },
@@ -258,7 +258,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.929,
           "incomingGridConfidence": 0.939,
-          "transitionId": "d2acb288-6013-498d-bb44-180bb25caf82",
+          "transitionId": "b545c589-6f30-40a1-b047-de22a04f89fb",
           "outgoingTrackId": "cd51e05f-eb87-47bf-9a7f-0c322863e61f",
           "incomingTrackId": "c73929f9-a2ae-48d0-a1c8-59bdfc5629b9"
         },
@@ -283,7 +283,7 @@
           "outgoingSourceStartMs": 1371,
           "outgoingSourceEndMs": 273103,
           "incomingSourceStartMs": 161009,
-          "incomingSourceEndMs": 252787,
+          "incomingSourceEndMs": 252731,
           "downbeatOffsetMs": -5,
           "alignmentPeriodMs": 1371.4285714285702,
           "alignmentMode": "bar",
@@ -292,7 +292,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.939,
           "incomingGridConfidence": 0.929,
-          "transitionId": "dc0c8a3b-031e-4c5b-92b6-e9002f9dc7d0",
+          "transitionId": "f9d86489-58f6-4321-b45b-11a9a91ec762",
           "outgoingTrackId": "c73929f9-a2ae-48d0-a1c8-59bdfc5629b9",
           "incomingTrackId": "0db42c21-a296-4960-ba5c-07fc7584d236"
         },
@@ -307,18 +307,18 @@
           "windowShiftBars": null,
           "outgoingRate": 1.0057471264367825,
           "incomingRate": 1.0057471264367825,
-          "joinAtMs": 562854,
-          "storedGridResidualMs": 60,
-          "probeStatus": "review",
-          "probeOffsetMs": 49.714285714282596,
-          "probeLocked": "63/140",
+          "joinAtMs": 562798,
+          "storedGridResidualMs": 0,
+          "probeStatus": "pass",
+          "probeOffsetMs": 4.906471191663513,
+          "probeLocked": "80/140",
           "sourceIdentity": "verified",
           "pairHoldout": "holdout",
           "outgoingSourceStartMs": 161009,
-          "outgoingSourceEndMs": 252787,
+          "outgoingSourceEndMs": 252731,
           "incomingSourceStartMs": 11036,
           "incomingSourceEndMs": 206902,
-          "downbeatOffsetMs": -634,
+          "downbeatOffsetMs": 56,
           "alignmentPeriodMs": 1371.4285714285702,
           "alignmentMode": "bar",
           "onsetLockBeats": null,
@@ -326,7 +326,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.929,
           "incomingGridConfidence": 0.935,
-          "transitionId": "438aa969-4e15-4d2c-8e2e-33592c2d2385",
+          "transitionId": "7a31e8d6-a9dd-4179-9503-79abfa3eca0c",
           "outgoingTrackId": "0db42c21-a296-4960-ba5c-07fc7584d236",
           "incomingTrackId": "4a355c7a-ad82-405a-a126-26056440331f"
         },
@@ -341,7 +341,7 @@
           "windowShiftBars": null,
           "outgoingRate": 1.0057471264367825,
           "incomingRate": 1.0057471264367817,
-          "joinAtMs": 736399,
+          "joinAtMs": 736343,
           "storedGridResidualMs": 0,
           "probeStatus": "pass",
           "probeOffsetMs": 3.637978807091713e-12,
@@ -360,7 +360,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.935,
           "incomingGridConfidence": 0.953,
-          "transitionId": "ff95af68-6e26-4cf8-b859-1dddf642bc53",
+          "transitionId": "b45250ed-5cbc-4270-8eb9-46ddd8542867",
           "outgoingTrackId": "4a355c7a-ad82-405a-a126-26056440331f",
           "incomingTrackId": "733a4af6-4b7f-4c30-b022-6a8a9e78365f"
         }
@@ -374,8 +374,8 @@
       "partialReasons": [],
       "selectedCount": 7,
       "rejectedCount": 50,
-      "planMs": 2469,
-      "renderMs": 45327,
+      "planMs": 2873,
+      "renderMs": 39974,
       "renderStatus": "succeeded",
       "checkOk": true,
       "checkWarnings": 0,
@@ -411,7 +411,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.87,
           "incomingGridConfidence": 0.935,
-          "transitionId": "1d4abb65-f033-4fa9-8e17-b26958990d8d",
+          "transitionId": "06308aa9-190e-4d84-bf4d-6eefc30fe6f7",
           "outgoingTrackId": "f6b7f688-7fac-44bf-a1c2-9f6211d55fb8",
           "incomingTrackId": "a882a4bf-3ae4-4346-8031-12456918aa2d"
         },
@@ -445,7 +445,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.935,
           "incomingGridConfidence": 0.951,
-          "transitionId": "f884cceb-34c0-4c97-8ec8-8563da534d94",
+          "transitionId": "2a3905fd-2d12-420e-8982-c7d06ccaee35",
           "outgoingTrackId": "a882a4bf-3ae4-4346-8031-12456918aa2d",
           "incomingTrackId": "aa9a506d-4620-4d3a-9b67-3f76326a43e7"
         },
@@ -479,7 +479,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.951,
           "incomingGridConfidence": 0.95,
-          "transitionId": "7566dda0-87fc-4a32-8c4e-bb3d28bfb422",
+          "transitionId": "f55c687b-e083-46af-abf3-9fe73df8a5ab",
           "outgoingTrackId": "aa9a506d-4620-4d3a-9b67-3f76326a43e7",
           "incomingTrackId": "e7d5525b-f957-4e96-ae00-2e6530293477"
         },
@@ -513,7 +513,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.95,
           "incomingGridConfidence": 0.922,
-          "transitionId": "a036e8e7-f72c-4d01-b4bd-0b6c6c99799c",
+          "transitionId": "07d15f7c-0644-4802-825a-9d8f5903af4d",
           "outgoingTrackId": "e7d5525b-f957-4e96-ae00-2e6530293477",
           "incomingTrackId": "0be5296c-9226-4c41-8fde-32035b2e2b9c"
         },
@@ -547,7 +547,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.922,
           "incomingGridConfidence": 0.948,
-          "transitionId": "e76db2ea-b31b-4887-b384-976ec1c01a88",
+          "transitionId": "dfaf137a-d64f-427d-8ce7-6f32080475f6",
           "outgoingTrackId": "0be5296c-9226-4c41-8fde-32035b2e2b9c",
           "incomingTrackId": "bcfc17eb-1b56-4892-b59b-dca092d7bb21"
         },
@@ -581,7 +581,7 @@
           "incomingGridSource": "analyzed",
           "outgoingGridConfidence": 0.948,
           "incomingGridConfidence": 0.91,
-          "transitionId": "6639c156-3a4d-4b49-a255-9c7eaf517442",
+          "transitionId": "194dac15-106e-4d95-98b6-cec9296139a9",
           "outgoingTrackId": "bcfc17eb-1b56-4892-b59b-dca092d7bb21",
           "incomingTrackId": "c453c444-00f6-4f5c-9c4e-7561aec2e361"
         }

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-12T18:30:00.000Z",
+  "purpose": "Q05 immutable known-failure diagnostics: the two real-library pilot timing failures frozen BEFORE any policy change, per the 12 October roadmap. Synthetic equivalents live in packages/catalog/test/windows.test.ts and must track this record. Correcting the responsible policy must demonstrably repair these signatures.",
+  "cases": [
+    {
+      "id": "pilot-298",
+      "baseline": "tools/reports/library-baseline-2026-10-12.json plan corpus-baseline-101 join order 2",
+      "pair": {
+        "outgoing": "Girl In The Fire",
+        "incoming": "All Fall Down - Fred V & Grafix Remix"
+      },
+      "template": "phrase_mix",
+      "barCount": 32,
+      "rates": { "outgoing": 1, "incoming": 1 },
+      "storedGridResidualMs": 120,
+      "probeStatus": "fail",
+      "probeOffsetMs": 108.30177503987215,
+      "bakedAlignment": {
+        "downbeatOffsetMs": -298,
+        "alignmentMode": "bar",
+        "alignmentPeriodMs": 1379.310344827585,
+        "onsetLockBeats": null
+      },
+      "gridEvidence": {
+        "outgoing": { "source": "analyzed", "confidence": 0.899 },
+        "incoming": { "source": "reference", "confidence": 0.6 }
+      },
+      "signature": "sub-bar geometric offset baked WITHOUT onset-lock corroboration on a 0.6-confidence reference grid; offset sits ~46.8 ms off a whole-beat multiple (-298 = -1 beat + 46.8 at 174 BPM)"
+    },
+    {
+      "id": "pilot-634",
+      "baseline": "tools/reports/library-baseline-2026-10-12.json plan corpus-baseline-102 join order 3",
+      "pair": { "outgoing": "Witchcraft", "incoming": "Atmosphere" },
+      "template": "phrase_mix",
+      "barCount": 32,
+      "rates": { "outgoing": 1.0057471264367825, "incoming": 1.0057471264367825 },
+      "storedGridResidualMs": 60,
+      "probeStatus": "review",
+      "probeOffsetMs": 49.714285714282596,
+      "bakedAlignment": {
+        "downbeatOffsetMs": -634,
+        "alignmentMode": "bar",
+        "alignmentPeriodMs": 1371.4285714285702,
+        "onsetLockBeats": null
+      },
+      "gridEvidence": {
+        "outgoing": { "source": "analyzed", "confidence": 0.929 },
+        "incoming": { "source": "analyzed", "confidence": 0.935 }
+      },
+      "signature": "sub-bar geometric offset baked WITHOUT onset-lock corroboration; offset sits ~55.7 ms off a whole-beat multiple (-634 = -2 beats + 55.7 at 174 BPM), equal-rate pair"
+    }
+  ],
+  "controlEvidence": {
+    "note": "Passing joins in the same baselines carried uncorroborated offsets that were near-exact whole-BAR multiples (-2759, -2762, +2754 at 1379.31 ms bars - residuals under 1 ms). The distinguishing feature of the failures is the ~47-56 ms residual off the beat grid.",
+    "examples": [
+      {
+        "pair": "Rock It -> Turn Back Time (Wilkinson Remix)",
+        "downbeatOffsetMs": -2759,
+        "probeStatus": "pass",
+        "probeOffsetMs": 0
+      },
+      {
+        "pair": "No Problem -> Sunburst",
+        "downbeatOffsetMs": -2762,
+        "probeStatus": "pass",
+        "probeOffsetMs": -5.83
+      },
+      {
+        "pair": "Atmosphere -> Time With You",
+        "downbeatOffsetMs": 2754,
+        "probeStatus": "pass",
+        "probeOffsetMs": 0
+      }
+    ]
+  },
+  "policyImplication": "Uncorroborated (no onset lock) geometric offsets are trusted only when they are near-exact whole-beat/bar multiples; otherwise the whole-beat component is a grid-labeling choice and only the sub-beat residual is applied.",
+  "outcome": {
+    "fixedAt": "2026-10-12T20:35:00.000Z",
+    "policy": "bakeWindowAlignment reduces uncorroborated offsets via uncorroboratedGeometricOffsetMs (10 ms multiple tolerance). Synthetic equivalents in packages/catalog/test/windows.test.ts.",
+    "pilot-634": "REPAIRED: the join now bakes the sub-beat residual and the real-library baseline probe passes (was review +49.7 ms).",
+    "pilot-298": "PARTIALLY REPAIRED, root cause deeper: the baked offset correctly reduced -298 -> +47, but the probe still measures +108.3 ms IDENTICAL to before - the incoming's 0.6-confidence REFERENCE grid is mislabeled ~108 ms against its own audio, so no window choice can align it. Follow-up: grid-quality handling for low-confidence reference grids (reject/reanalyze or gate the join on grid-vs-audio agreement), per the original pilot investigation note.",
+    "baselineAfter": "tools/reports/library-baseline-2026-10-12.json: 10 pass / 3 review / 1 fail (was 9/4/1)."
+  }
+}

@@ -321,13 +321,48 @@ export function buildAcrossfadeFilter(options: FilterGraphOptions): string {
     return `c${i}`;
   });
 
+  // Q08 (12 October roadmap): parity with the band graph's planned-timeline
+  // anchoring. The acrossfade chain joins each input at the accumulated
+  // file boundary; under rate-regions splicing that boundary can drift
+  // from the plan (the same ~overlap*(rate-1) class the band graph had).
+  // When every deck so far carries a timeline position and the planned
+  // anchor genuinely differs, the join becomes a fade pair + adelay + amix
+  // at the PLAN; a match within 2 ms keeps the boundary acrossfade so
+  // ordinary planner-derived geometry is untouched.
+  const ANCHOR_TOLERANCE_SEC = 0.002;
+  const trimLengthSec = (index: number): number =>
+    outputDurationSec(trims[index]!, {
+      overlapSec: overlapSeconds[index] ?? 0,
+      stretchScope,
+    });
+  const chainOriginSec = trims[0]!.timelineStartSec;
+  let combinedSec = trimLengthSec(0);
   let current = labels[0]!;
   for (let i = 0; i < overlapSeconds.length; i += 1) {
     const overlap = overlapSeconds[i]!;
+    const right = labels[i + 1]!;
     const out = i === overlapSeconds.length - 1 ? "mixed" : `m${i + 1}`;
-    parts.push(
-      `[${current}][${labels[i + 1]}]acrossfade=d=${overlap}:o=1:c1=${CROSSFADE_CURVE}:c2=${CROSSFADE_CURVE}[${out}]`,
-    );
+    const rightSec = trimLengthSec(i + 1);
+    const boundarySec = combinedSec - overlap;
+    const nextTimelineSec = trims[i + 1]!.timelineStartSec;
+    const plannedSec =
+      chainOriginSec != null && nextTimelineSec != null
+        ? Math.max(0, nextTimelineSec - chainOriginSec)
+        : null;
+    if (plannedSec != null && Math.abs(plannedSec - boundarySec) > ANCHOR_TOLERANCE_SEC) {
+      const delayMs = Math.round(plannedSec * 1000);
+      parts.push(
+        `[${current}]afade=t=out:st=${Math.max(0, plannedSec - overlap).toFixed(6)}:d=${overlap.toFixed(6)}:curve=${CROSSFADE_CURVE}[fo${i}]`,
+        `[${right}]afade=t=in:st=0:d=${overlap.toFixed(6)}:curve=${CROSSFADE_CURVE},adelay=${delayMs}|${delayMs}[fi${i}]`,
+        `[fo${i}][fi${i}]amix=inputs=2:normalize=0:dropout_transition=0[${out}]`,
+      );
+      combinedSec = Math.max(combinedSec, plannedSec + rightSec);
+    } else {
+      parts.push(
+        `[${current}][${right}]acrossfade=d=${overlap}:o=1:c1=${CROSSFADE_CURVE}:c2=${CROSSFADE_CURVE}[${out}]`,
+      );
+      combinedSec = combinedSec + rightSec - overlap;
+    }
     current = out;
   }
 

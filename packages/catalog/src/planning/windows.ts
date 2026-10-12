@@ -387,6 +387,25 @@ export function lockBarForMs(
   return Math.max(0, Math.round((positionMs - anchor) / barMs));
 }
 
+/**
+ * Q05 (frozen diagnostics, tools/reports/known-failure-diagnostics-2026-10-12.json):
+ * without onset-lock corroboration, a geometric offset's whole-beat
+ * component is a grid-labeling choice. The frozen pilot failures baked
+ * -298/-634 ms (~47-56 ms off whole-beat multiples) and failed checks;
+ * the passing joins' uncorroborated offsets were near-exact bar multiples
+ * (-2759/-2762/+2754, residuals under ~1 ms). Trust near-multiples;
+ * otherwise apply only the sub-beat residual - the phase correction both
+ * classes agree on.
+ */
+export const UNCORROBORATED_MULTIPLE_TOLERANCE_MS = 10;
+
+export function uncorroboratedGeometricOffsetMs(geometricOffsetMs: number, beatMs: number): number {
+  const residual = wrapDelta(geometricOffsetMs, beatMs > 0 ? beatMs : 344.8276);
+  return Math.abs(residual) <= UNCORROBORATED_MULTIPLE_TOLERANCE_MS
+    ? geometricOffsetMs
+    : Math.round(residual);
+}
+
 export function bakeWindowAlignment(
   outgoing: WindowTrack,
   incoming: WindowTrack,
@@ -453,7 +472,19 @@ export function bakeWindowAlignment(
         mode: "bar" as const,
         onsetLockBeats: locked.beats,
       }
-    : { ...geometric, onsetLockBeats: null as number | null };
+    : {
+        // Q05: uncorroborated geometric offsets are trusted only as
+        // near-exact beat/bar multiples (see uncorroboratedGeometricOffsetMs).
+        offsetMs: Math.round(
+          uncorroboratedGeometricOffsetMs(
+            geometric.offsetMs,
+            beatSourceMs > 0 ? beatSourceMs : beatMs,
+          ),
+        ),
+        periodMs: geometric.periodMs,
+        mode: geometric.mode,
+        onsetLockBeats: null as number | null,
+      };
   const inStart = incoming.analysis?.audioStartMs ?? 0;
   const inEnd = incoming.analysis?.audioEndMs ?? incoming.durationMs;
   const nextMixIn = window.mixInMs + aligned.offsetMs;

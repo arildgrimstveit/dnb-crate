@@ -19,6 +19,43 @@ import {
 } from "../src/index.ts";
 
 describe("filter graph", () => {
+  it("anchors the acrossfade incoming at the planned timeline when the file boundary differs (Q08 parity)", () => {
+    // The band graph honors the planned join anchor since 06371da; the
+    // acrossfade path still chains at the processed file boundary. With
+    // both decks carrying timeline positions and a real delta (the same
+    // ~127 ms class the band graph had under rate-regions splicing), the
+    // incoming must be delayed to the PLAN with an equal-power fade pair
+    // instead of the boundary acrossfade.
+    const filter = buildAcrossfadeFilter({
+      trims: [
+        { startSec: 0, endSec: 32.976, gainDb: 0, timelineStartSec: 0 },
+        { startSec: 0, endSec: 36.625, gainDb: 0, timelineStartSec: 11.034 },
+      ],
+      overlapSeconds: [22.069],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+    });
+    expect(filter).toContain("adelay=11034|11034");
+    expect(filter).toContain("amix=inputs=2");
+    expect(filter).not.toContain("acrossfade=");
+    // The fade pair spans the planned overlap window, not the boundary.
+    expect(filter).toContain("afade=t=out:st=");
+  });
+
+  it("keeps the boundary acrossfade when the planned anchor matches it (Q08 tolerance)", () => {
+    const filter = buildAcrossfadeFilter({
+      trims: [
+        { startSec: 0, endSec: 32.976, gainDb: 0, timelineStartSec: 0 },
+        { startSec: 0, endSec: 36.625, gainDb: 0, timelineStartSec: 10.907 },
+      ],
+      overlapSeconds: [22.069],
+      limiterAmplitude: limiterAmplitudeFromCeilingDb(-1),
+      sampleRateHz: 48_000,
+    });
+    expect(filter).toContain("acrossfade=d=22.069");
+    expect(filter).not.toContain("adelay=");
+  });
+
   it("anchors the incoming at the planned timeline when the CLI-spliced outgoing boundary differs", () => {
     // Rate-regions geometry from the processed-deck corpus's unequal case
     // (174/178 into a 175 target, R3 CLI): the CLI-spliced outgoing runs

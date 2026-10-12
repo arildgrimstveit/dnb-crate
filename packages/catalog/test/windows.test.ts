@@ -50,6 +50,64 @@ function track(id: string, sections: TrackSection[], endBar: number): WindowTrac
 }
 
 describe("phrase windows", () => {
+  it("reduces uncorroborated near-beat geometric offsets to the sub-beat residual (Q05 frozen diagnostics)", () => {
+    // Frozen pilot signatures (tools/reports/known-failure-diagnostics-2026-10-12.json):
+    // -298 ms and -634 ms bar-mode offsets baked WITHOUT onset-lock
+    // corroboration, each ~47-56 ms off a whole-beat multiple, later
+    // measured as failed/review checks. The whole-beat component of an
+    // uncorroborated offset is a grid-labeling choice; only near-exact
+    // beat/bar multiples are trusted (the passing joins' offsets were bar
+    // multiples within ~1 ms).
+    const outgoing = track("out", [section("drop", 16, 80, 0.9)], 80);
+    const incoming = track("in", [section("drop", 16, 64, 0.9)], 64);
+    const beat = 60_000 / BPM;
+    // Shift the incoming's grid by +(1 beat + 46.8 ms): the geometric
+    // offset lands in the frozen failure class (whole beat + ~47 residual,
+    // like the pilots' -298/-634 signatures), and there is no bars series,
+    // so the onset lock abstains.
+    const shift = beat + 46.8;
+    incoming.analysis!.downbeatTimesMs = (incoming.analysis!.downbeatTimesMs ?? []).map(
+      (time) => time + shift,
+    );
+    const base: PhraseWindow = {
+      mixInMs: 0,
+      mixOutMs: Math.round(32 * BAR_MS),
+      mixInBar: 0,
+      mixOutBar: 32,
+      barCount: 16,
+      exitKind: "dropLanding",
+      phraseShape: "landing",
+      incomingDropMs: Math.round(16 * BAR_MS),
+      dropAnchored: true,
+      alignmentOffsetMs: 0,
+      alignmentPeriodMs: null,
+      alignmentMode: null,
+      onsetLockBeats: null,
+    };
+    const baked = bakeWindowAlignment(outgoing, incoming, base, { targetBpm: BPM });
+    // The baked offset is the SUB-BEAT RESIDUAL only (~47 ms): the
+    // whole-beat component (~+392 class pre-fix) is dropped.
+    expect(Math.abs(baked.alignmentOffsetMs)).toBeLessThan(beat / 2);
+    expect(Math.abs(baked.alignmentOffsetMs)).toBeGreaterThan(20);
+    expect(Math.abs(baked.alignmentOffsetMs - 47)).toBeLessThan(2);
+    expect(baked.onsetLockBeats).toBeNull();
+  });
+
+  it("trusts uncorroborated offsets that are near-exact whole-bar multiples (Q05 control)", async () => {
+    // The passing joins in the same baselines carried offsets like -2759
+    // (two bars at 174, residual under ~1 ms). Those keep their full
+    // value - grid labels that agree this closely are trusted without
+    // drum corroboration. Unit-level control on the shared policy
+    // function; the integration path above covers the reduction.
+    const { uncorroboratedGeometricOffsetMs } = await import("../src/planning/windows.ts");
+    const beat = 60_000 / BPM;
+    expect(uncorroboratedGeometricOffsetMs(-2 * BAR_MS - 0.4, beat)).toBeCloseTo(
+      -2 * BAR_MS - 0.4,
+      6,
+    );
+    expect(uncorroboratedGeometricOffsetMs(-634, beat)).toBeCloseTo(-634 + 2 * beat, 0);
+    expect(uncorroboratedGeometricOffsetMs(-298, beat)).toBeCloseTo(-298 + beat, 0);
+  });
   it("skips a long quiet outro and intro while keeping the drop aligned", () => {
     const outgoing = track(
       "out",
