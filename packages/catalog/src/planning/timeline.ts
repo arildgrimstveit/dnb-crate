@@ -770,23 +770,15 @@ export function buildEntries(
     recall?: RecipeRecallLookup | null;
   } = {},
 ): SetPlanEntry[] {
-  // Q04 calibrated outlier guard (owner A/B verdict, 13 October 2026):
-  // whole-track matching stays the DEFAULT; the section-aware body value
-  // substitutes only when it disagrees with integrated by more than
-  // 2 LU - the pathological class (quiet intros/outros dragging the
-  // whole-track average away from the material that actually plays).
-  // The set reference is the median of the SAME guarded values, so the
-  // outlier's gain is measured against played material on both sides.
-  const BODY_GAIN_DISAGREEMENT_LU = 2;
-  const guardedGainLufs = (track: TimelineTrack): number | null => {
-    const integrated = track.analysis?.integratedLufs ?? null;
-    const body = track.analysis?.bodyShortTermLufs ?? null;
-    if (body != null && integrated != null) {
-      return Math.abs(body - integrated) > BODY_GAIN_DISAGREEMENT_LU ? body : integrated;
-    }
-    return body ?? integrated;
-  };
-  const referenceLufs = medianLufs(tracks.map((track) => guardedGainLufs(track)));
+  // Q04 (owner decision, 18 Oct): the section-aware body value is the gain
+  // input WHENEVER a series exists - integrated is only the fallback. The
+  // owner's A/B (13 Oct) showed the change is inaudible on the current
+  // library (sub-1.5 dB gain shifts), and the body value is the more
+  // truthful input when the two disagree; join scoring already prefers
+  // it, so gains now agree with scoring on the same input.
+  const gainInputLufs = (track: TimelineTrack): number | null =>
+    track.analysis?.bodyShortTermLufs ?? track.analysis?.integratedLufs ?? null;
+  const referenceLufs = medianLufs(tracks.map((track) => gainInputLufs(track)));
   const pairWindows: Array<PhraseWindow | null> = [];
   // S3 (11 October review): rates distinguish intentional PINS from derived
   // chain values. A prior rate is authoritative only when it is pinned
@@ -1131,9 +1123,9 @@ export function buildEntries(
               incomingTrackId: tracks[index + 1]!.id,
             },
           };
-    // Q04 guard input: the guarded value (body only for >2 LU outliers).
+    // Q04 guard input: section value whenever stored, integrated fallback.
     const matched = levelMatchGainDb(
-      guardedGainLufs(track),
+      gainInputLufs(track),
       referenceLufs,
       track.analysis?.truePeakDb,
     );

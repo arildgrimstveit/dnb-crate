@@ -691,37 +691,45 @@ describe("planner tempo matching", () => {
     ).toBe(true);
   });
 
-  it("guards gain outliers with the body loudness but keeps whole-track by default (Q04 calibration)", () => {
-    // The owner A/B verdict (13 Oct): whole-track matching stays the
-    // DEFAULT. The stored body series substitutes only when it disagrees
-    // with integrated by more than 2 LU - the pathological class where a
-    // quiet intro/outro drags the whole-track average away from the
-    // material that actually plays. The set reference is the median of
-    // the tracks' loudness values (two tracks -> lower middle).
+  it("uses the body loudness for gains whenever a series exists, integrated only as fallback (Q04 owner decision)", () => {
+    // Owner decision (18 Oct): always prefer the section-aware value -
+    // it is the more truthful input, the A/B showed the change is
+    // inaudible on the current library, and scoring already prefers it.
+    // The set reference is the median of the same inputs.
     const anchor = gridTrack(174);
     anchor.analysis!.integratedLufs = -10;
     anchor.analysis!.bodyShortTermLufs = -10;
 
-    // Disagreement 4 LU -> the body value drives the gain.
+    // Body differs from integrated: BODY drives the gain (always, not
+    // just beyond a threshold).
     const outlier = gridTrack(174);
     outlier.analysis!.integratedLufs = -14;
     outlier.analysis!.bodyShortTermLufs = -10;
     const entriesOutlier = buildEntries([outlier, anchor]);
-    // median reference is min(-14, -10) = -14 pre-guard... but the guard
-    // swaps the outlier's INPUT to body (-10), so its gain = ref - body.
-    // Reference comes from the same (guarded) inputs: median(-10, -10) = -10.
+    // Reference median(-10, -10) = -10; gain = -10 - (-10) = 0, NOT
+    // reference - integrated.
     expect(entriesOutlier[0]!.gainDb).toBe(0);
-    // The anchor keeps whole-track (agreement): gain = -10 - (-10) = 0.
     expect(entriesOutlier[1]!.gainDb).toBe(0);
 
-    // Disagreement 1 LU -> whole-track drives the gain (calibrated default).
-    const ordinary = gridTrack(174);
-    ordinary.analysis!.integratedLufs = -11;
-    ordinary.analysis!.bodyShortTermLufs = -10;
-    const entriesOrdinary = buildEntries([ordinary, anchor]);
-    // Reference median averages even counts: (-11 + -10) / 2 = -10.5.
-    expect(entriesOrdinary[0]!.gainDb).toBe(0.5);
-    expect(entriesOrdinary[1]!.gainDb).toBe(-0.5);
+    // Sub-threshold disagreement: BODY still drives the gain.
+    const near = gridTrack(174);
+    near.analysis!.integratedLufs = -11;
+    near.analysis!.bodyShortTermLufs = -10;
+    const entriesNear = buildEntries([near, anchor]);
+    // Reference median(-10, -10) = -10; gain = 0 for both - the
+    // whole-track value (-11, which would give +0.5) no longer participates.
+    expect(entriesNear[0]!.gainDb).toBe(0);
+    expect(entriesNear[1]!.gainDb).toBe(0);
+
+    // No series stored: integrated remains the input (unknown stays
+    // handled by the existing null path).
+    const legacy = gridTrack(174);
+    legacy.analysis!.integratedLufs = -12;
+    const entriesLegacy = buildEntries([legacy, anchor]);
+    // Reference median of (-12, -10) = -11 (even count averages); gains
+    // +1 / -1 from integrated values alone.
+    expect(entriesLegacy[0]!.gainDb).toBe(1);
+    expect(entriesLegacy[1]!.gainDb).toBe(-1);
   });
 
   it("stamps the resolved-join contract at resolution (Q03)", () => {
