@@ -691,6 +691,39 @@ describe("planner tempo matching", () => {
     ).toBe(true);
   });
 
+  it("guards gain outliers with the body loudness but keeps whole-track by default (Q04 calibration)", () => {
+    // The owner A/B verdict (13 Oct): whole-track matching stays the
+    // DEFAULT. The stored body series substitutes only when it disagrees
+    // with integrated by more than 2 LU - the pathological class where a
+    // quiet intro/outro drags the whole-track average away from the
+    // material that actually plays. The set reference is the median of
+    // the tracks' loudness values (two tracks -> lower middle).
+    const anchor = gridTrack(174);
+    anchor.analysis!.integratedLufs = -10;
+    anchor.analysis!.bodyShortTermLufs = -10;
+
+    // Disagreement 4 LU -> the body value drives the gain.
+    const outlier = gridTrack(174);
+    outlier.analysis!.integratedLufs = -14;
+    outlier.analysis!.bodyShortTermLufs = -10;
+    const entriesOutlier = buildEntries([outlier, anchor]);
+    // median reference is min(-14, -10) = -14 pre-guard... but the guard
+    // swaps the outlier's INPUT to body (-10), so its gain = ref - body.
+    // Reference comes from the same (guarded) inputs: median(-10, -10) = -10.
+    expect(entriesOutlier[0]!.gainDb).toBe(0);
+    // The anchor keeps whole-track (agreement): gain = -10 - (-10) = 0.
+    expect(entriesOutlier[1]!.gainDb).toBe(0);
+
+    // Disagreement 1 LU -> whole-track drives the gain (calibrated default).
+    const ordinary = gridTrack(174);
+    ordinary.analysis!.integratedLufs = -11;
+    ordinary.analysis!.bodyShortTermLufs = -10;
+    const entriesOrdinary = buildEntries([ordinary, anchor]);
+    // Reference median averages even counts: (-11 + -10) / 2 = -10.5.
+    expect(entriesOrdinary[0]!.gainDb).toBe(0.5);
+    expect(entriesOrdinary[1]!.gainDb).toBe(-0.5);
+  });
+
   it("stamps the resolved-join contract at resolution (Q03)", () => {
     const a = { ...gridTrack(174), fileFingerprint: "fp-alpha" };
     const b = { ...gridTrack(174, 5), fileFingerprint: "fp-bravo" };

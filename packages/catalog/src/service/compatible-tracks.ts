@@ -27,6 +27,9 @@ export type CompatibleTracksInput = {
   genres?: CreateSetPlanInput["genres"];
 };
 
+type TimelineAnalysisWithBody =
+  (ReturnType<typeof analysisForTimeline> & { bodyShortTermLufs?: number | null }) | null;
+
 /** Ranked compatible-track search around one source track. The source is
  * resolved (and thrown on) by the caller. */
 export function findCompatibleTracks(
@@ -36,8 +39,16 @@ export function findCompatibleTracks(
   input: CompatibleTracksInput,
 ): { sourceTrackId: string; candidates: CompatibleTrack[] } {
   const limit = Math.min(input.limit ?? 10, COMPATIBLE_TRACKS_LIMIT_MAX);
-  const analysisOf = (trackId: string) =>
-    analysisForTimeline(resolveTrackEvidence(analyses, trackId));
+  const analysisOf = (trackId: string): TimelineAnalysisWithBody => {
+    const row = analysisForTimeline(resolveTrackEvidence(analyses, trackId));
+    // Q04: attach the section-aware body loudness from the stored series
+    // when present (null otherwise - integrated stays the fallback).
+    const loudness = analyses.getLoudness(trackId);
+    if (row && loudness?.medianShortTermLufs != null) {
+      return { ...row, bodyShortTermLufs: loudness.medianShortTermLufs };
+    }
+    return row;
+  };
   const srcA = analysisOf(source.id);
   const sectionMs = (
     analysis: ReturnType<typeof analysisOf>,
@@ -112,8 +123,10 @@ export function findCompatibleTracks(
           sourceKeyConfidence: resolveCanonicalKeyConfidence(source, srcA),
           candidateGridOk: Boolean(candA && !candA.gridRejected),
           sourceGridOk: Boolean(srcA && !srcA.gridRejected),
-          candidateLufs: candA?.integratedLufs ?? null,
-          sourceLufs: srcA?.integratedLufs ?? null,
+          // Q04: prefer the section-aware body loudness for join-level
+          // scoring; integrated is the fallback when no series is stored.
+          candidateLufs: candA?.bodyShortTermLufs ?? candA?.integratedLufs ?? null,
+          sourceLufs: srcA?.bodyShortTermLufs ?? srcA?.integratedLufs ?? null,
           candidateGenres: track.genres,
         }),
       };

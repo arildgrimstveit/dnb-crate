@@ -214,6 +214,14 @@ describe("track analysis and aligned transitions", () => {
     // Q02 identity discipline: the row records the strong content hash of
     // the bytes it measured.
     expect(loudness!.contentHash).toMatch(/^[0-9a-f]{64}$/);
+
+    // Q04 wiring: the timeline analysis carries the section-aware body
+    // loudness from the stored series (median over valid frames).
+    const timeline = catalog.service.toTimeline(
+      catalog.repository.listAll().find((t) => t.id === track.id)!,
+    );
+    expect(timeline?.bodyShortTermLufs).not.toBeNull();
+    expect(timeline!.bodyShortTermLufs!).toBe(loudness!.medianShortTermLufs);
   });
 
   it("the stale scope catches mid-byte edits through stat drift (Q02)", async () => {

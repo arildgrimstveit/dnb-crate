@@ -285,8 +285,10 @@ export function draftSetPlan(
       sourceBpmHint: srcA?.bpmHint ?? null,
       descriptors: candA?.descriptors ?? null,
       sourceDescriptors: srcA?.descriptors ?? null,
-      candidateLufs: candA?.integratedLufs ?? null,
-      sourceLufs: srcA?.integratedLufs ?? null,
+      // Q04: prefer the section-aware body loudness for join-level scoring;
+      // integrated is the fallback when no series is stored.
+      candidateLufs: candA?.bodyShortTermLufs ?? candA?.integratedLufs ?? null,
+      sourceLufs: srcA?.bodyShortTermLufs ?? srcA?.integratedLufs ?? null,
       candidateKeyConfidence: resolveCanonicalKeyConfidence(candidate, {
         musicalKey: candidate.musicalKey,
         keyConfidence: candA?.keyConfidence ?? null,

@@ -1209,6 +1209,13 @@ export class CatalogService {
     );
     if (timeline) {
       timeline.keyConfidence = resolveCanonicalKeyConfidence(track, evidence.key ?? row);
+      // Q04: the section-aware body loudness from the stored series, when
+      // present - join scoring and the gain outlier guard prefer it over
+      // whole-track integrated (null leaves integrated as the fallback).
+      const loudness = this.analyses.getLoudness(track.id);
+      if (loudness?.medianShortTermLufs != null) {
+        timeline.bodyShortTermLufs = loudness.medianShortTermLufs;
+      }
     }
     return timeline;
   }

@@ -67,6 +67,15 @@ export type TimelineAnalysis = {
   /** Q03 evidence passthrough for the resolved-join contract. */
   analyzerVersion?: string | null;
   gridSource?: "analyzed" | "reference" | "manual" | "anchor" | "sidecar" | null;
+  /**
+   * Q04: representative short-term loudness of the track's PLAYED material
+   * (the time-indexed series' median over valid frames). Null when no
+   * series is stored - callers fall back to integrated LUFS. This is the
+   * section-aware value join scoring and the gain outlier guard prefer:
+   * whole-track integrated is dragged by quiet intros/outros that never
+   * play in the mix.
+   */
+  bodyShortTermLufs?: number | null;
   bpm: number | null;
   canonicalBpm: number | null;
   bpmHint: number | null;
@@ -761,7 +770,23 @@ export function buildEntries(
     recall?: RecipeRecallLookup | null;
   } = {},
 ): SetPlanEntry[] {
-  const referenceLufs = medianLufs(tracks.map((track) => track.analysis?.integratedLufs));
+  // Q04 calibrated outlier guard (owner A/B verdict, 13 October 2026):
+  // whole-track matching stays the DEFAULT; the section-aware body value
+  // substitutes only when it disagrees with integrated by more than
+  // 2 LU - the pathological class (quiet intros/outros dragging the
+  // whole-track average away from the material that actually plays).
+  // The set reference is the median of the SAME guarded values, so the
+  // outlier's gain is measured against played material on both sides.
+  const BODY_GAIN_DISAGREEMENT_LU = 2;
+  const guardedGainLufs = (track: TimelineTrack): number | null => {
+    const integrated = track.analysis?.integratedLufs ?? null;
+    const body = track.analysis?.bodyShortTermLufs ?? null;
+    if (body != null && integrated != null) {
+      return Math.abs(body - integrated) > BODY_GAIN_DISAGREEMENT_LU ? body : integrated;
+    }
+    return body ?? integrated;
+  };
+  const referenceLufs = medianLufs(tracks.map((track) => guardedGainLufs(track)));
   const pairWindows: Array<PhraseWindow | null> = [];
   // S3 (11 October review): rates distinguish intentional PINS from derived
   // chain values. A prior rate is authoritative only when it is pinned
@@ -1106,8 +1131,9 @@ export function buildEntries(
               incomingTrackId: tracks[index + 1]!.id,
             },
           };
+    // Q04 guard input: the guarded value (body only for >2 LU outliers).
     const matched = levelMatchGainDb(
-      track.analysis?.integratedLufs,
+      guardedGainLufs(track),
       referenceLufs,
       track.analysis?.truePeakDb,
     );
@@ -1196,6 +1222,9 @@ export function analysisToTimeline(
      * resolved-join contract stamps (null stays null — unknown). */
     analyzerVersion?: string | null;
     gridSource?: "analyzed" | "reference" | "manual" | "anchor" | "sidecar" | null;
+    /** Q04: representative played-material short-term loudness from the
+     * time-indexed series (null when none is stored). */
+    bodyShortTermLufs?: number | null;
     descriptors: {
       suggestedEnergy: number | null;
       integratedLufs?: number | null;
@@ -1272,6 +1301,7 @@ export function analysisToTimeline(
     gridOk: !analysis.gridRejected && (analysis.bpmConfidence ?? 0) >= MIN_ANALYSIS_CONFIDENCE,
     analyzerVersion: analysis.analyzerVersion ?? null,
     gridSource: analysis.gridSource ?? null,
+    bodyShortTermLufs: analysis.bodyShortTermLufs ?? null,
     manualMixInMs:
       cues.find((cue) => cue.source === "manual" && cue.type === "intro_start")?.positionMs ?? null,
     manualMixOutMs:
